@@ -180,6 +180,7 @@ const Select = forwardRef<HTMLButtonElement, SelectProps>(
           type="button"
           role="combobox"
           aria-expanded={open}
+          aria-controls={id ? `${id}-listbox` : undefined}
           aria-haspopup="listbox"
           disabled={disabled}
           onClick={() => {
@@ -214,6 +215,7 @@ const Select = forwardRef<HTMLButtonElement, SelectProps>(
         {open && (
           <div
             ref={listRef}
+            id={id ? `${id}-listbox` : undefined}
             role="listbox"
             aria-activedescendant={
               highlightedIndex >= 0

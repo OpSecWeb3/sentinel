@@ -60,7 +60,7 @@ export function useConfirm() {
         resolve: null,
       });
     },
-    [state.resolve],
+    [state],
   );
 
   return { confirmState: state, confirm, handleClose };

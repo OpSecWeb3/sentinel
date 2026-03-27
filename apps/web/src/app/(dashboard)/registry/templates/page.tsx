@@ -296,7 +296,7 @@ export default function TemplatesPage() {
   const [error, setError] = useState<string | null>(null);
   const [enabledSlugs, setEnabledSlugs] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const { toast, toasts, dismiss } = useToast();
+  const { toasts, dismiss } = useToast();
 
   // Modal state
   const [modalTemplate, setModalTemplate] =

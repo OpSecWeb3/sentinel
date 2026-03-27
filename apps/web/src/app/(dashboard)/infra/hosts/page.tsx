@@ -301,7 +301,6 @@ export default function InfraHostsPage() {
     return sortDir === "asc" ? " ^" : " v";
   }
 
-  const hasActiveFilters = debouncedSearch !== "" || showAll;
 
   function toggleShowAll() {
     setShowAll((v) => !v);

@@ -26,14 +26,6 @@ interface Template {
 
 /* -- helpers ------------------------------------------------------- */
 
-const severityColor: Record<string, string> = {
-  critical: "text-destructive",
-  high: "text-warning",
-  medium: "text-primary",
-  low: "text-muted-foreground",
-  info: "text-muted-foreground",
-};
-
 const severityBadgeVariant: Record<string, "destructive" | "warning" | "default" | "secondary"> = {
   critical: "destructive",
   high: "warning",

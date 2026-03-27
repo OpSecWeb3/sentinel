@@ -1813,7 +1813,7 @@ export default function SettingsPage() {
                             <input
                               type="checkbox"
                               checked={selectedCdnHostIds.has(host.id)}
-                              onChange={() => setSelectedCdnHostIds((prev) => { const next = new Set(prev); next.has(host.id) ? next.delete(host.id) : next.add(host.id); return next; })}
+                              onChange={() => setSelectedCdnHostIds((prev) => { const next = new Set(prev); if (next.has(host.id)) { next.delete(host.id); } else { next.add(host.id); } return next; })}
                               className="accent-primary"
                             />
                             <span className="text-foreground font-mono">{host.hostname}</span>
