@@ -8,6 +8,13 @@
       "when": 1774564371509,
       "tag": "0000_brown_plazm",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1774620000000,
+      "tag": "0004_infra_cdn_tables",
+      "breakpoints": true
     }
   ]
 }
