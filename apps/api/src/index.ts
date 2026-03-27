@@ -67,7 +67,7 @@ const app = new Hono<AppEnv>();
 app.use('*', requestContext(log));
 app.use('*', cors({
   origin: config.ALLOWED_ORIGINS.split(',').map((o) => o.trim()),
-  allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Sentinel-Request'],
   exposeHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
   credentials: true,
