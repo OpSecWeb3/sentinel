@@ -1,3 +1,8 @@
+# ── Production Security Notes ──────────────────────────────────────────────
+# Redis: must be password-protected. Use rediss:// (TLS) in REDIS_URL.
+# Postgres: use ?sslmode=require in DATABASE_URL for encrypted connections.
+# Both services run on the shared-infra network and are NOT defined here.
+
 networks:
   gateway:
     external: true
@@ -50,6 +55,8 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL
     container_name: sentinel-web
     restart: unless-stopped
     env_file: .env

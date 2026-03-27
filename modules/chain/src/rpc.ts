@@ -416,22 +416,159 @@ export async function getTokenBalance(
 }
 
 // ---------------------------------------------------------------------------
-// View function call helper
+// View function call helper (ported from ChainAlert's state-poller/view-call.ts)
 // ---------------------------------------------------------------------------
 
+import {
+  type Abi,
+  type Address,
+  encodeFunctionData,
+  decodeFunctionResult,
+  parseAbi,
+} from 'viem';
+
+// Dynamic argument tokens supported in view-call rule configs
+async function resolveViewCallArgs(
+  args: unknown[],
+  client: RpcClient,
+): Promise<unknown[]> {
+  return Promise.all(
+    args.map(async (arg) => {
+      if (typeof arg !== 'string') return arg;
+      switch (arg) {
+        case '$NOW':
+          return BigInt(Math.floor(Date.now() / 1000));
+        case '$BLOCK_NUMBER':
+          return await client.getBlockNumber();
+        case '$BLOCK_TIMESTAMP': {
+          const blockNum = await client.getBlockNumber();
+          const block = await client.getBlock(blockNum);
+          return BigInt(block.timestamp);
+        }
+        default:
+          return arg;
+      }
+    }),
+  );
+}
+
+// Standard ABI base types recognised by viem's parseAbi.
+// User-defined value types (Solidity UDVTs) must be replaced with uint256.
+const KNOWN_ABI_TYPES = new Set([
+  'address', 'bool', 'string', 'bytes', 'tuple', 'function',
+]);
+
+function isKnownAbiType(t: string): boolean {
+  if (KNOWN_ABI_TYPES.has(t)) return true;
+  if (/^(u?int|bytes)\d+$/.test(t)) return true;
+  if (t.endsWith(']')) return isKnownAbiType(t.replace(/\[.*\]$/, ''));
+  return false;
+}
+
 /**
- * Encode and execute a view function call, returning the raw hex result.
- * The caller is responsible for ABI-decoding the return value.
+ * Replace user-defined value types in a Solidity function signature with
+ * uint256, which is the correct ABI encoding for UDVTs.
+ * e.g. "function foo(Timestamp ts) view returns (uint256)"
+ *   →  "function foo(uint256 ts) view returns (uint256)"
+ */
+export function normaliseViewCallSignature(sig: string): string {
+  return sig.replace(/\(([^)]*)\)/g, (_, inner: string) => {
+    const params = inner.split(',').map((p: string) => {
+      const parts = p.trim().split(/\s+/);
+      if (parts.length === 0) return p;
+      const typeName = parts[0]!;
+      const baseType = typeName.replace(/\[.*\]$/, '');
+      if (!isKnownAbiType(typeName) && baseType !== '' && !isKnownAbiType(baseType)) {
+        const arraySuffix = typeName.slice(baseType.length);
+        parts[0] = `uint256${arraySuffix}`;
+      }
+      return parts.join(' ');
+    });
+    return `(${params.join(', ')})`;
+  });
+}
+
+/**
+ * Robustly parse view-call args from a rule config value.
+ * Handles arrays, JSON strings, and bare $TOKEN references.
+ */
+export function parseViewCallArgs(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw;
+  if (raw === undefined || raw === null || raw === '') return [];
+  const str = String(raw);
+  try {
+    const parsed = JSON.parse(str);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    const fixed = str.replace(/(?<!")(\$[A-Z_]+)(?!")/g, '"$1"');
+    try {
+      const parsed = JSON.parse(fixed);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      log.warn({ raw: str }, 'could not parse view-call args');
+      return [];
+    }
+  }
+}
+
+function normaliseToBigInt(value: unknown, returnType: string): bigint {
+  switch (returnType) {
+    case 'bool':
+      return value ? 1n : 0n;
+    case 'address':
+      return BigInt(value as string);
+    default:
+      return BigInt(value as bigint | number | string);
+  }
+}
+
+/**
+ * Encode, execute, and decode a view function call.
+ * Handles dynamic arg tokens ($NOW, $BLOCK_NUMBER, $BLOCK_TIMESTAMP),
+ * UDVT signature normalisation, and return-value decoding.
+ * Returns the result normalised to bigint.
  */
 export async function callViewFunction(
   client: RpcClient,
   contractAddress: string,
-  functionSelector: string,
-  encodedArgs?: string,
-): Promise<string> {
-  const data = encodedArgs
-    ? functionSelector + encodedArgs.replace('0x', '')
-    : functionSelector;
+  functionSignature: string,
+  args?: unknown[],
+  returnType?: string,
+): Promise<bigint> {
+  if (!contractAddress) {
+    throw new Error(`callViewFunction: contractAddress required`);
+  }
 
-  return client.call({ to: contractAddress, data });
+  const safeSig = normaliseViewCallSignature(functionSignature);
+  const abi = parseAbi([safeSig] as const) as unknown as Abi;
+  const fnEntry = (abi as unknown as { type: string; name: string }[]).find(
+    (item) => item.type === 'function',
+  );
+  if (!fnEntry) {
+    throw new Error(`Could not parse function from signature: ${functionSignature}`);
+  }
+  const functionName = fnEntry.name;
+
+  const parsedArgs = parseViewCallArgs(args);
+  const resolvedArgs = await resolveViewCallArgs(parsedArgs, client);
+
+  const data = encodeFunctionData({
+    abi,
+    functionName,
+    args: resolvedArgs.length > 0 ? resolvedArgs : undefined,
+  });
+
+  const result = await client.call({ to: contractAddress as Address, data });
+
+  if (!result || result === '0x') {
+    throw new Error(`View call returned no data for ${functionName}() on ${contractAddress}`);
+  }
+
+  const decoded = decodeFunctionResult({
+    abi,
+    functionName,
+    data: result as `0x${string}`,
+  });
+
+  return normaliseToBigInt(decoded, returnType ?? 'uint256');
 }

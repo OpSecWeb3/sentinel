@@ -7,6 +7,8 @@ import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
+import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 
@@ -32,11 +34,6 @@ const severityColor: Record<string, string> = {
   info: "text-muted-foreground",
 };
 
-const severityTag: Record<string, string> = {
-  critical: "[!!]",
-  warning: "[!]",
-  info: "[~]",
-};
 
 const PAGE_SIZE = 25;
 
@@ -52,6 +49,21 @@ function formatDateTime(iso: string): string {
   });
 }
 
+const TYPE_OPTIONS = [
+  { value: "all", label: "all types" },
+  { value: "dns", label: "dns" },
+  { value: "whois", label: "whois" },
+  { value: "cert", label: "cert" },
+  { value: "infra", label: "infra" },
+];
+
+const SEVERITY_OPTIONS = [
+  { value: "all", label: "all severities" },
+  { value: "critical", label: "critical" },
+  { value: "warning", label: "warning" },
+  { value: "info", label: "info" },
+];
+
 /* -- page ----------------------------------------------------------- */
 
 export default function InfraChangesPage() {
@@ -62,15 +74,12 @@ export default function InfraChangesPage() {
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const { toast } = useToast();
+  const { toast, toasts, dismiss } = useToast();
 
   // Filters
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [severityFilter, setSeverityFilter] = useState<string>("all");
   const [hostSearch, setHostSearch] = useState("");
-
-  const typeOptions = ["all", "dns", "whois", "cert", "infra"];
-  const severityOptions = ["all", "critical", "warning", "info"];
 
   const fetchChanges = useCallback(
     async (append = false) => {
@@ -144,6 +153,8 @@ export default function InfraChangesPage() {
 
   return (
     <div className="space-y-6">
+      <ToastContainer toasts={toasts} dismiss={dismiss} />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -161,67 +172,73 @@ export default function InfraChangesPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-4">
-        {/* Type filter */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground mr-1">type:</span>
-          {typeOptions.map((opt) => (
-            <button
-              key={opt}
-              onClick={() => setTypeFilter(opt)}
-              className={cn(
-                "px-2 py-0.5 text-xs border transition-colors",
-                typeFilter === opt
-                  ? "border-primary text-primary"
-                  : "border-border text-muted-foreground hover:text-foreground",
-              )}
-            >
-              [{opt}]
-            </button>
-          ))}
-        </div>
-
-        {/* Severity filter */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground mr-1">severity:</span>
-          {severityOptions.map((opt) => (
-            <button
-              key={opt}
-              onClick={() => setSeverityFilter(opt)}
-              className={cn(
-                "px-2 py-0.5 text-xs border transition-colors",
-                severityFilter === opt
-                  ? "border-primary text-primary"
-                  : "border-border text-muted-foreground hover:text-foreground",
-              )}
-            >
-              [{opt}]
-            </button>
-          ))}
-        </div>
-
-        {/* Host search */}
-        <div className="flex items-center gap-2 border border-border px-2 py-1 text-xs focus-within:border-primary transition-colors">
-          <span className="text-muted-foreground">{">"}</span>
-          <input
-            type="text"
-            placeholder="filter by hostname..."
-            value={hostSearch}
-            onChange={(e) => setHostSearch(e.target.value)}
-            className="bg-transparent outline-none text-foreground w-40 font-mono"
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground">type</span>
+          <Select
+            value={typeFilter}
+            onValueChange={setTypeFilter}
+            options={TYPE_OPTIONS}
+            className="w-36"
           />
         </div>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground">severity</span>
+          <Select
+            value={severityFilter}
+            onValueChange={setSeverityFilter}
+            options={SEVERITY_OPTIONS}
+            className="w-40"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground">hostname</span>
+          <div className="flex items-center gap-2 border-b border-border px-1 py-2 text-sm font-mono focus-within:border-primary transition-colors h-10">
+            <span className="text-muted-foreground">{">"}</span>
+            <input
+              type="text"
+              placeholder="filter by hostname..."
+              value={hostSearch}
+              onChange={(e) => setHostSearch(e.target.value)}
+              className="bg-transparent outline-none text-foreground w-40 font-mono text-sm"
+            />
+          </div>
+        </div>
+
+        {(typeFilter !== "all" || severityFilter !== "all" || hostSearch) && (
+          <button
+            onClick={() => {
+              setTypeFilter("all");
+              setSeverityFilter("all");
+              setHostSearch("");
+            }}
+            className="text-xs text-muted-foreground hover:text-destructive transition-colors pb-2"
+          >
+            [clear]
+          </button>
+        )}
       </div>
 
       {/* Content */}
       <div className="min-h-[300px]">
         {showLoading ? (
-          <div className="space-y-2">
+          <div className="border border-border">
+            {/* Skeleton header */}
+            <div className="grid grid-cols-[160px_180px_80px_90px_1fr] gap-0 border-b border-border bg-muted/20 px-3 py-2">
+              {["time", "host", "type", "severity", "details"].map((h) => (
+                <span key={h} className="text-xs text-muted-foreground font-mono uppercase tracking-wide">
+                  {h}
+                </span>
+              ))}
+            </div>
             {[...Array(8)].map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-3 py-2">
-                <div className="h-3 w-24 animate-pulse rounded bg-muted" />
+              <div key={i} className="grid grid-cols-[160px_180px_80px_90px_1fr] gap-0 border-b border-border/50 px-3 py-2.5">
+                <div className="h-3 w-28 animate-pulse rounded bg-muted" />
                 <div className="h-3 w-32 animate-pulse rounded bg-muted" />
-                <div className="h-3 w-20 animate-pulse rounded bg-muted" />
+                <div className="h-3 w-12 animate-pulse rounded bg-muted" />
+                <div className="h-3 w-14 animate-pulse rounded bg-muted" />
                 <div className="h-3 w-48 animate-pulse rounded bg-muted" />
               </div>
             ))}
@@ -254,51 +271,72 @@ export default function InfraChangesPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-1 animate-content-ready">
-            <p className="text-xs text-muted-foreground px-2">
+          <div className="animate-content-ready">
+            <p className="mb-2 text-xs text-muted-foreground">
               {filteredChanges.length} change{filteredChanges.length !== 1 ? "s" : ""}
               {hostSearch && " (filtered)"}
             </p>
 
-            {filteredChanges.map((change) => (
-              <div
-                key={change.id}
-                className="border border-transparent px-3 py-2 text-xs hover:border-border hover:bg-muted/30 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-muted-foreground font-mono shrink-0">
-                    [{formatDateTime(change.detectedAt)}]
+            {/* Table */}
+            <div className="border border-border">
+              {/* Header */}
+              <div className="grid grid-cols-[160px_180px_80px_90px_1fr] gap-0 border-b border-border bg-muted/20 px-3 py-2">
+                <span className="text-xs text-muted-foreground font-mono uppercase tracking-wide">time</span>
+                <span className="text-xs text-muted-foreground font-mono uppercase tracking-wide">host</span>
+                <span className="text-xs text-muted-foreground font-mono uppercase tracking-wide">type</span>
+                <span className="text-xs text-muted-foreground font-mono uppercase tracking-wide">severity</span>
+                <span className="text-xs text-muted-foreground font-mono uppercase tracking-wide">details</span>
+              </div>
+
+              {/* Rows */}
+              {filteredChanges.map((change, idx) => (
+                <div
+                  key={change.id}
+                  className={cn(
+                    "grid grid-cols-[160px_180px_80px_90px_1fr] gap-0 px-3 py-2.5 text-xs font-mono transition-colors hover:bg-muted/20",
+                    idx !== filteredChanges.length - 1 && "border-b border-border/50",
+                  )}
+                >
+                  {/* Time */}
+                  <span className="text-muted-foreground shrink-0 tabular-nums">
+                    {formatDateTime(change.detectedAt)}
                   </span>
+
+                  {/* Host */}
                   <Link
                     href={`/infra/hosts/${change.hostId}`}
-                    className="text-foreground hover:text-primary transition-colors font-medium shrink-0"
+                    className="text-foreground hover:text-primary transition-colors truncate pr-2"
                   >
                     {change.hostname}
                   </Link>
-                  <span className="text-primary font-mono shrink-0">
-                    [{change.type}]
-                  </span>
+
+                  {/* Type */}
+                  <span className="text-primary shrink-0">{change.type}</span>
+
+                  {/* Severity */}
                   <span
                     className={cn(
-                      "font-mono shrink-0",
+                      "shrink-0",
                       severityColor[change.severity] ?? "text-muted-foreground",
                     )}
                   >
-                    {severityTag[change.severity] ?? `[${change.severity}]`} {change.severity}
+                    {change.severity}
+                  </span>
+
+                  {/* Details */}
+                  <span className="min-w-0 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-muted-foreground">{change.field}:</span>
+                    <span className="text-muted-foreground line-through">
+                      {change.oldValue || "(none)"}
+                    </span>
+                    <span className="text-muted-foreground">{"→"}</span>
+                    <span className={change.newValue ? "text-foreground" : "text-muted-foreground"}>
+                      {change.newValue || "(removed)"}
+                    </span>
                   </span>
                 </div>
-                <div className="mt-1 ml-1 flex items-center gap-1">
-                  <span className="text-muted-foreground">{change.field}:</span>
-                  <span className="text-muted-foreground line-through">
-                    {change.oldValue || "(none)"}
-                  </span>
-                  <span className="text-muted-foreground mx-1">{"-->"}</span>
-                  <span className="text-foreground">
-                    {change.newValue || "(removed)"}
-                  </span>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
       </div>

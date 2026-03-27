@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { minimatch } from 'minimatch';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const configSchema = z.object({
   watchBranches: z.array(z.string()).default(['main', 'master', 'release/*', 'production']),
@@ -11,6 +12,10 @@ export const forcePushEvaluator: RuleEvaluator = {
   moduleId: 'github',
   ruleType: 'github.force_push',
   configSchema,
+  uiSchema: [
+    { key: 'watchBranches', label: 'Protected branches', type: 'string-array', required: false, placeholder: 'main\nmaster\nrelease/*\nproduction', help: 'Alert when force-pushed to these branches.' },
+    { key: 'alertOnAllForced', label: 'Alert on any force push', type: 'boolean', required: false, default: false, help: 'When true, alert on force pushes to any branch.' },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

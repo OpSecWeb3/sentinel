@@ -68,7 +68,7 @@ export const TEST_DETECTIONS = {
     config: {},
   },
   dockerDigestChange: {
-    moduleId: 'release-chain',
+    moduleId: 'registry',
     templateId: 'rc-docker-digest-change',
     name: 'Docker image digest changed',
     description: 'Alert when a monitored Docker tag points to a different digest',
@@ -77,7 +77,7 @@ export const TEST_DETECTIONS = {
     config: {},
   },
   npmVersionPublished: {
-    moduleId: 'release-chain',
+    moduleId: 'registry',
     templateId: 'rc-npm-version-published',
     name: 'npm version published',
     description: 'Alert on new npm package versions',
@@ -122,16 +122,16 @@ export const TEST_RULES = {
     status: 'active' as const,
   },
   digestChange: {
-    moduleId: 'release-chain',
-    ruleType: 'release-chain.docker.digest_change',
+    moduleId: 'registry',
+    ruleType: 'registry.docker.digest_change',
     config: { tags: ['latest', 'stable'] },
     action: 'alert' as const,
     priority: 80,
     status: 'active' as const,
   },
   npmNewVersion: {
-    moduleId: 'release-chain',
-    ruleType: 'release-chain.npm.version_published',
+    moduleId: 'registry',
+    ruleType: 'registry.npm.version_published',
     config: {},
     action: 'alert' as const,
     priority: 50,
@@ -1034,8 +1034,8 @@ export const NORMALIZED_EVENTS = {
   },
 
   dockerDigestChange: {
-    moduleId: 'release-chain',
-    eventType: 'release-chain.docker.digest_change',
+    moduleId: 'registry',
+    eventType: 'registry.docker.digest_change',
     externalId: null,
     payload: {
       artifactName: 'sentinel/core-api',
@@ -1048,8 +1048,8 @@ export const NORMALIZED_EVENTS = {
   },
 
   npmVersionPublished: {
-    moduleId: 'release-chain',
-    eventType: 'release-chain.npm.version_published',
+    moduleId: 'registry',
+    eventType: 'registry.npm.version_published',
     externalId: null,
     payload: {
       packageName: '@sentinel/shared',

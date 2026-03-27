@@ -4,7 +4,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: sentinel
-      POSTGRES_PASSWORD: sentinel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
       POSTGRES_DB: sentinel
     ports:
       - "5432:5432"
@@ -22,10 +22,11 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: redis-server --requirepass sentinel-dev
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "sentinel-dev", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5

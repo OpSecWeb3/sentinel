@@ -19,7 +19,7 @@ COPY packages/notifications/package.json ./packages/notifications/
 COPY modules/github/package.json ./modules/github/
 COPY modules/chain/package.json ./modules/chain/
 COPY modules/infra/package.json ./modules/infra/
-COPY modules/release-chain/package.json ./modules/release-chain/
+COPY modules/registry/package.json ./modules/registry/
 
 # Install all dependencies (including devDependencies for the build)
 RUN pnpm install --frozen-lockfile
@@ -44,7 +44,7 @@ COPY packages/notifications/ ./packages/notifications/
 COPY modules/github/ ./modules/github/
 COPY modules/chain/ ./modules/chain/
 COPY modules/infra/ ./modules/infra/
-COPY modules/release-chain/ ./modules/release-chain/
+COPY modules/registry/ ./modules/registry/
 
 # Copy API source
 COPY apps/api/ ./apps/api/
@@ -70,7 +70,7 @@ COPY packages/notifications/package.json ./packages/notifications/
 COPY modules/github/package.json ./modules/github/
 COPY modules/chain/package.json ./modules/chain/
 COPY modules/infra/package.json ./modules/infra/
-COPY modules/release-chain/package.json ./modules/release-chain/
+COPY modules/registry/package.json ./modules/registry/
 
 RUN pnpm install --frozen-lockfile --prod
 
@@ -107,7 +107,7 @@ COPY --from=builder --chown=sentinel:sentinel /app/packages/notifications/ ./pac
 COPY --from=builder --chown=sentinel:sentinel /app/modules/github/ ./modules/github/
 COPY --from=builder --chown=sentinel:sentinel /app/modules/chain/ ./modules/chain/
 COPY --from=builder --chown=sentinel:sentinel /app/modules/infra/ ./modules/infra/
-COPY --from=builder --chown=sentinel:sentinel /app/modules/release-chain/ ./modules/release-chain/
+COPY --from=builder --chown=sentinel:sentinel /app/modules/registry/ ./modules/registry/
 
 # Install tsx globally for running TS workspace packages at runtime
 RUN npm install -g tsx

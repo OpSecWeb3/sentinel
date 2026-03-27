@@ -7,7 +7,22 @@ export interface RetentionPolicy {
   table: string;
   timestampColumn: string;
   retentionDays: number;
+  /** Optional SQL fragment appended as an extra AND condition (e.g. "module_id = 'aws'") */
+  filter?: string;
 }
+
+/**
+ * Allowlist of permitted filter expressions for retention policies.
+ * Any filter not in this set will be rejected to prevent SQL injection
+ * via crafted job payloads (e.g. if Redis is compromised).
+ */
+const ALLOWED_FILTERS: ReadonlySet<string> = new Set([
+  "module_id = 'aws'",
+  "module_id = 'github'",
+  "module_id = 'registry'",
+  "module_id = 'chain'",
+  "module_id = 'infra'",
+]);
 
 export const DEFAULT_RETENTION_POLICIES: RetentionPolicy[] = [
   { table: 'events', timestampColumn: 'received_at', retentionDays: 90 },
@@ -26,20 +41,41 @@ export const dataRetentionHandler: JobHandler = {
     const db = getDb();
 
     for (const policy of policies) {
+      // Validate filter against allowlist to prevent SQL injection via crafted job payloads
+      if (policy.filter && !ALLOWED_FILTERS.has(policy.filter)) {
+        _log.warn(
+          { table: policy.table, filter: policy.filter },
+          'Skipping retention policy with unrecognised filter expression',
+        );
+        continue;
+      }
+
       const cutoff = new Date(Date.now() - policy.retentionDays * 86_400_000);
       let totalDeleted = 0;
       let batchDeleted: number;
 
       do {
-        const result = await db.execute(sql`
-          DELETE FROM ${sql.identifier(policy.table)}
-          WHERE id IN (
-            SELECT id FROM ${sql.identifier(policy.table)}
-            WHERE ${sql.identifier(policy.timestampColumn)} < ${cutoff}
-            LIMIT 1000
-          )
-        `);
-        batchDeleted = Number(result?.rowCount ?? 0);
+        const result = await db.execute(
+          policy.filter
+            ? sql`
+              DELETE FROM ${sql.identifier(policy.table)}
+              WHERE id IN (
+                SELECT id FROM ${sql.identifier(policy.table)}
+                WHERE ${sql.identifier(policy.timestampColumn)} < ${cutoff}
+                AND ${sql.raw(policy.filter)}
+                LIMIT 1000
+              )
+            `
+            : sql`
+              DELETE FROM ${sql.identifier(policy.table)}
+              WHERE id IN (
+                SELECT id FROM ${sql.identifier(policy.table)}
+                WHERE ${sql.identifier(policy.timestampColumn)} < ${cutoff}
+                LIMIT 1000
+              )
+            `
+        );
+        batchDeleted = Number((result as unknown as { rowCount?: number })?.rowCount ?? 0);
         totalDeleted += batchDeleted;
       } while (batchDeleted >= 1000);
 

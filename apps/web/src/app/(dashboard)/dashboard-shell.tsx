@@ -25,10 +25,6 @@ interface ModuleNavItem {
 const mainNav: NavItem[] = [
   { title: "dashboard", href: "/dashboard", icon: "~" },
   { title: "detections", href: "/detections", icon: "!" },
-  { title: "alerts", href: "/alerts", icon: "*" },
-  { title: "events", href: "/events", icon: ">" },
-  { title: "channels", href: "/channels", icon: "#" },
-  { title: "templates", href: "/templates", icon: "T" },
 ];
 
 const moduleNav: ModuleNavItem[] = [
@@ -42,12 +38,12 @@ const moduleNav: ModuleNavItem[] = [
     ],
   },
   {
-    title: "release-chain",
-    href: "/release-chain",
+    title: "registry",
+    href: "/registry",
     icon: "%",
     children: [
-      { title: "docker images", href: "/release-chain/images" },
-      { title: "npm packages", href: "/release-chain/packages" },
+      { title: "docker images", href: "/registry/images" },
+      { title: "npm packages", href: "/registry/packages" },
     ],
   },
   {
@@ -55,9 +51,7 @@ const moduleNav: ModuleNavItem[] = [
     href: "/chain",
     icon: "&",
     children: [
-      { title: "networks", href: "/chain/networks" },
       { title: "contracts", href: "/chain/contracts" },
-      { title: "rpc config", href: "/chain/rpc" },
     ],
   },
   {
@@ -66,9 +60,16 @@ const moduleNav: ModuleNavItem[] = [
     icon: "^",
     children: [
       { title: "hosts", href: "/infra/hosts" },
-      { title: "cdn-providers", href: "/infra/cdn-providers" },
       { title: "changes", href: "/infra/changes" },
-      { title: "worldview", href: "/infra/worldview" },
+    ],
+  },
+  {
+    title: "aws",
+    href: "/aws",
+    icon: "$",
+    children: [
+      { title: "integrations", href: "/aws/integrations" },
+      { title: "events", href: "/aws/events" },
     ],
   },
 ];
@@ -201,7 +202,6 @@ export function DashboardShell({
     const prefix = isLastModule
       ? "\u2514\u2500\u2500"
       : "\u251C\u2500\u2500";
-    const childIndentPrefix = isLastModule ? "    " : "\u2502   ";
 
     return (
       <div key={mod.href}>
@@ -238,16 +238,13 @@ export function DashboardShell({
                   href={child.href}
                   onClick={() => setSidebarOpen(false)}
                   className={cn(
-                    "flex items-center gap-2 px-2 py-1 text-sm transition-colors",
+                    "flex items-center gap-2 pl-7 pr-2 py-1 text-sm transition-colors",
                     childActive
                       ? "text-primary text-glow"
                       : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  <span className="text-muted-foreground">
-                    {childIndentPrefix}
-                    {childPrefix}
-                  </span>
+                  <span className="text-muted-foreground shrink-0">{childPrefix}</span>
                   <span>{child.title}</span>
                   {childActive && (
                     <span className="text-primary">{"<"}</span>

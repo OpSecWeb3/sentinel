@@ -8,6 +8,28 @@ export const templates: DetectionTemplate[] = [
     description: 'Alert when a repository is made public. Critical for preventing accidental exposure of private code.',
     category: 'access-control',
     severity: 'critical',
+    inputs: [
+      {
+        key: 'alertOn',
+        label: 'Alert when',
+        type: 'select',
+        required: true,
+        default: 'publicized',
+        options: [
+          { value: 'publicized', label: 'Repository is made public' },
+          { value: 'privatized', label: 'Repository is made private' },
+          { value: 'any', label: 'Any visibility change' },
+        ],
+      },
+      {
+        key: 'excludeRepos',
+        label: 'Exclude repositories',
+        type: 'string-array',
+        required: false,
+        placeholder: 'org/repo-name',
+        help: 'Glob patterns, one per line (e.g. org/archived-*). Matching repos will be ignored.',
+      },
+    ],
     rules: [
       {
         ruleType: 'github.repo_visibility',
@@ -22,6 +44,16 @@ export const templates: DetectionTemplate[] = [
     description: 'Alert on member additions and removals. Track who has access to your repositories and organization.',
     category: 'access-control',
     severity: 'high',
+    inputs: [
+      {
+        key: 'watchRoles',
+        label: 'Watch roles',
+        type: 'string-array',
+        required: false,
+        placeholder: 'owner, member',
+        help: 'Leave empty to watch all role changes. One role per line.',
+      },
+    ],
     rules: [
       {
         ruleType: 'github.member_change',
@@ -36,6 +68,16 @@ export const templates: DetectionTemplate[] = [
     description: 'Alert when deploy keys are added to repositories. Write-access keys are a common attack vector for supply chain compromises.',
     category: 'access-control',
     severity: 'high',
+    inputs: [
+      {
+        key: 'alertOnWriteKeys',
+        label: 'Alert only on write-access keys',
+        type: 'boolean',
+        required: false,
+        default: true,
+        help: 'Write-access deploy keys are more dangerous — they can push code. Disable to alert on all keys.',
+      },
+    ],
     rules: [
       {
         ruleType: 'github.deploy_key',
@@ -52,6 +94,16 @@ export const templates: DetectionTemplate[] = [
     description: 'Alert when branch protection rules are modified or removed. Detects weakening of code review requirements.',
     category: 'code-protection',
     severity: 'high',
+    inputs: [
+      {
+        key: 'watchBranches',
+        label: 'Watch branches',
+        type: 'string-array',
+        required: false,
+        placeholder: 'main\nrelease/*',
+        help: 'Glob patterns, one per line. Leave empty to watch all branches.',
+      },
+    ],
     rules: [
       {
         ruleType: 'github.branch_protection',
@@ -66,6 +118,17 @@ export const templates: DetectionTemplate[] = [
     description: 'Alert on force pushes to critical branches. Force pushes can rewrite history and bypass code review.',
     category: 'code-protection',
     severity: 'critical',
+    inputs: [
+      {
+        key: 'watchBranches',
+        label: 'Watch branches',
+        type: 'string-array',
+        required: false,
+        default: ['main', 'master', 'release/*', 'production'],
+        placeholder: 'main\nmaster\nrelease/*',
+        help: 'Glob patterns, one per line. Defaults to main, master, release/*, production.',
+      },
+    ],
     rules: [
       {
         ruleType: 'github.force_push',
@@ -117,6 +180,25 @@ export const templates: DetectionTemplate[] = [
     description: 'Enable all GitHub security monitors in one detection. Covers visibility, access, branch protection, force pushes, secrets, and org changes.',
     category: 'comprehensive',
     severity: 'critical',
+    inputs: [
+      {
+        key: 'watchBranches',
+        label: 'Watch branches (force push & branch protection)',
+        type: 'string-array',
+        required: false,
+        default: ['main', 'master', 'release/*', 'production'],
+        placeholder: 'main\nmaster\nrelease/*',
+        help: 'Glob patterns applied to force push and branch protection rules.',
+      },
+      {
+        key: 'excludeRepos',
+        label: 'Exclude repositories',
+        type: 'string-array',
+        required: false,
+        placeholder: 'org/archived-repo',
+        help: 'Repos to exclude from visibility monitoring. Glob patterns, one per line.',
+      },
+    ],
     rules: [
       {
         ruleType: 'github.repo_visibility',

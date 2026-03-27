@@ -42,7 +42,7 @@ interface RateLimitOptions {
 
 function createLimiter(opts: RateLimitOptions) {
   return async (c: AuthContext, next: Next) => {
-    if (process.env.NODE_ENV === 'test') return next();
+    if (process.env.DISABLE_RATE_LIMIT === 'true') return next();
 
     const redis = getRedis();
     const key = `sentinel:rl:${opts.prefix}:${getKey(c)}`;

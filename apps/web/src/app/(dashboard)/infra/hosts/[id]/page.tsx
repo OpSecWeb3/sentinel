@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -9,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 
@@ -105,6 +107,17 @@ interface ScoreHistoryPoint {
   grade: string;
 }
 
+interface DnsHealthInfo {
+  dnssecEnabled: boolean;
+  dmarcRecord: string | null;
+  dmarcPolicy: string | null;
+  spfRecord: string | null;
+  spfValid: boolean;
+  caaRecords: string[];
+  danglingCnames: string[];
+  checkedAt: string;
+}
+
 interface ScanSchedule {
   enabled: boolean;
   scanIntervalHours: number;
@@ -112,9 +125,22 @@ interface ScanSchedule {
   probeIntervalMinutes: number;
 }
 
+interface ChildHost {
+  id: string;
+  hostname: string;
+  score: number | null;
+  grade: string | null;
+  lastScanAt: string | null;
+  certExpiry: string | null;
+  status: string;
+  source: string | null;
+  createdAt: string;
+}
+
 interface HostDetail {
   id: string;
   hostname: string;
+  isRoot?: boolean;
   score: number | null;
   grade: string | null;
   lastScanAt: string | null;
@@ -127,6 +153,7 @@ interface HostDetail {
   infra: InfraInfo | null;
   whois: WhoisInfo | null;
   scoreDeductions: ScoreDeduction[];
+  dnsHealth: DnsHealthInfo | null;
   scoreHistory: ScoreHistoryPoint[];
   recentScans: ScanResult[];
   schedule: ScanSchedule | null;
@@ -134,6 +161,11 @@ interface HostDetail {
 }
 
 /* -- helpers -------------------------------------------------------- */
+
+const categoryLabel: Record<string, string> = {
+  Infrastructure: "Infra",
+  "HTTP Headers": "HTTP",
+};
 
 const gradeColor: Record<string, string> = {
   A: "text-primary",
@@ -181,6 +213,18 @@ function formatDaysUntil(iso: string | null): string {
   return `${diffDays}d remaining`;
 }
 
+function formatCertExpiry(iso: string | null): { text: string; color: string } {
+  if (!iso) return { text: "no cert", color: "text-muted-foreground" };
+  const d = new Date(iso);
+  const now = new Date();
+  const diffDays = Math.floor((d.getTime() - now.getTime()) / 86_400_000);
+  if (diffDays < 0) return { text: `expired ${Math.abs(diffDays)}d ago`, color: "text-destructive" };
+  if (diffDays === 0) return { text: "expires today", color: "text-destructive" };
+  if (diffDays <= 7) return { text: `${diffDays}d left`, color: "text-destructive" };
+  if (diffDays <= 30) return { text: `${diffDays}d left`, color: "text-warning" };
+  return { text: `${diffDays}d left`, color: "text-primary" };
+}
+
 /* -- page ----------------------------------------------------------- */
 
 export default function HostDetailPage() {
@@ -196,14 +240,17 @@ export default function HostDetailPage() {
   const [suppressLoading, setSuppressLoading] = useState<Record<string, boolean>>({});
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [discoverLoading, setDiscoverLoading] = useState(false);
-  const [editSchedule, setEditSchedule] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [scanEnabled, setScanEnabled] = useState(true);
   const [scanInterval, setScanInterval] = useState(24);
   const [probeEnabled, setProbeEnabled] = useState(true);
   const [probeInterval, setProbeInterval] = useState(5);
   const [cdnOrigins, setCdnOrigins] = useState<Array<{ provider: string; recordType: string; recordValue: string; observedAt: string }>>([]);
   const [cdnOriginsLoaded, setCdnOriginsLoaded] = useState(false);
-  const { toast } = useToast();
+  const [subdomains, setSubdomains] = useState<ChildHost[]>([]);
+  const [subdomainsLoaded, setSubdomainsLoaded] = useState(false);
+  const [subdomainActionLoading, setSubdomainActionLoading] = useState<Record<string, boolean>>({});
+  const { toast, toasts, dismiss } = useToast();
 
   // Confirm dialog
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -229,7 +276,7 @@ export default function HostDetailPage() {
 
   // Active section (accordion-like)
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
-    new Set(["score", "certificate", "tls", "headers"]),
+    new Set(["score", "dns-health", "certificate", "tls", "headers", "subdomains"]),
   );
 
   function toggleSection(section: string) {
@@ -274,11 +321,11 @@ export default function HostDetailPage() {
         method: "POST",
         credentials: "include",
       });
-      toast("Scan queued. Results will appear shortly.");
+      toast("Scan queued. Results will appear shortly.", "success");
       // Refresh after a delay
       setTimeout(fetchHost, 3000);
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Failed to trigger scan");
+      toast(err instanceof Error ? err.message : "Failed to trigger scan", "error");
     } finally {
       setScanLoading(false);
     }
@@ -301,13 +348,26 @@ export default function HostDetailPage() {
       });
       setHost((prev) => {
         if (!prev) return prev;
+        const updatedDeductions = prev.scoreDeductions.map((d) =>
+          d.category === deduction.category && d.item === deduction.item
+            ? { ...d, suppressed: !d.suppressed }
+            : d,
+        );
+        const activePoints = updatedDeductions
+          .filter((d) => !d.suppressed)
+          .reduce((sum, d) => sum + d.points, 0);
+        const newScore = Math.max(0, Math.min(100, 100 - activePoints));
+        const newGrade =
+          newScore >= 90 ? "A"
+          : newScore >= 80 ? "B"
+          : newScore >= 70 ? "C"
+          : newScore >= 60 ? "D"
+          : "F";
         return {
           ...prev,
-          scoreDeductions: prev.scoreDeductions.map((d) =>
-            d.category === deduction.category && d.item === deduction.item
-              ? { ...d, suppressed: !d.suppressed }
-              : d,
-          ),
+          scoreDeductions: updatedDeductions,
+          score: newScore,
+          grade: newGrade,
         };
       });
       toast(`Finding ${action}ed.`);
@@ -332,8 +392,8 @@ export default function HostDetailPage() {
           probeIntervalMinutes: probeInterval,
         }),
       });
-      toast("Schedule updated.");
-      setEditSchedule(false);
+      toast("Schedule updated.", "success");
+      setScheduleModalOpen(false);
     } catch {
       toast("Failed to update schedule.");
     } finally {
@@ -369,6 +429,10 @@ export default function HostDetailPage() {
       toast(
         `Discovered ${res.data.discovered} subdomains (${res.data.newHosts} new)`,
       );
+      if (res.data.newHosts > 0) {
+        setSubdomainsLoaded(false);
+        fetchSubdomains();
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to discover subdomains");
     } finally {
@@ -388,6 +452,59 @@ export default function HostDetailPage() {
       // silently fail - section will show empty
     } finally {
       setCdnOriginsLoaded(true);
+    }
+  }
+
+  async function fetchSubdomains() {
+    try {
+      const res = await apiFetch<{ data: ChildHost[] }>(
+        `/modules/infra/hosts/${hostId}/subdomains`,
+        { credentials: "include" },
+      );
+      setSubdomains(res.data);
+    } catch {
+      // silently fail
+    } finally {
+      setSubdomainsLoaded(true);
+    }
+  }
+
+  async function scanSubdomain(child: ChildHost) {
+    setSubdomainActionLoading((prev) => ({ ...prev, [`scan-${child.id}`]: true }));
+    try {
+      await apiFetch(`/modules/infra/hosts/${child.id}/scan`, {
+        method: "POST",
+        credentials: "include",
+      });
+      setSubdomains((prev) =>
+        prev.map((h) => h.id === child.id ? { ...h, status: "scanning" } : h),
+      );
+      toast(`Scan queued for "${child.hostname}".`);
+    } catch (err) {
+      toast(err instanceof Error ? `Scan failed: ${err.message}` : "Failed to trigger scan");
+    } finally {
+      setSubdomainActionLoading((prev) => ({ ...prev, [`scan-${child.id}`]: false }));
+    }
+  }
+
+  async function removeSubdomain(child: ChildHost) {
+    const confirmed = await confirm(
+      "Remove Subdomain",
+      `Remove "${child.hostname}"? All scan data will be permanently deleted.`,
+    );
+    if (!confirmed) return;
+    setSubdomainActionLoading((prev) => ({ ...prev, [`remove-${child.id}`]: true }));
+    try {
+      await apiFetch(`/modules/infra/hosts/${child.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      setSubdomains((prev) => prev.filter((h) => h.id !== child.id));
+      toast(`Subdomain "${child.hostname}" removed.`);
+    } catch {
+      toast("Failed to remove subdomain.");
+    } finally {
+      setSubdomainActionLoading((prev) => ({ ...prev, [`remove-${child.id}`]: false }));
     }
   }
 
@@ -477,6 +594,91 @@ export default function HostDetailPage() {
 
   return (
     <div className="space-y-6 animate-content-ready">
+      <ToastContainer toasts={toasts} dismiss={dismiss} />
+
+      {/* Schedule modal */}
+      {scheduleModalOpen && createPortal(
+        <div className="fixed inset-0 z-[150] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-background/80 backdrop-blur-sm"
+            onClick={() => setScheduleModalOpen(false)}
+          />
+          <div className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg shadow-black/20 font-mono">
+            <h2 className="text-sm font-bold text-primary mb-4">$ scan schedule</h2>
+
+            <div className="space-y-4">
+              {/* Master scan toggle */}
+              <div className="flex items-center justify-between border border-border px-3 py-2">
+                <span className="text-xs text-muted-foreground">--scanning</span>
+                <button
+                  onClick={() => setScanEnabled((v) => !v)}
+                  className={cn("text-xs font-mono transition-colors", scanEnabled ? "text-primary" : "text-muted-foreground")}
+                >
+                  [{scanEnabled ? "enabled" : "disabled"}]
+                </button>
+              </div>
+
+              <div className={cn("grid grid-cols-2 gap-3", !scanEnabled && "opacity-40 pointer-events-none")}>
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">--scan-interval (hours)</label>
+                  <div className="flex items-center gap-2 border border-border bg-background px-3 py-2 text-sm focus-within:border-primary transition-colors">
+                    <span className="text-muted-foreground shrink-0">{">"}</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={168}
+                      value={scanInterval}
+                      onChange={(e) => setScanInterval(parseInt(e.target.value) || 1)}
+                      className="w-full bg-transparent outline-none font-mono"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">--probe-interval (min)</label>
+                  <div className="flex items-center gap-2 border border-border bg-background px-3 py-2 text-sm focus-within:border-primary transition-colors">
+                    <span className="text-muted-foreground shrink-0">{">"}</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={probeInterval}
+                      onChange={(e) => setProbeInterval(parseInt(e.target.value) || 1)}
+                      className="w-full bg-transparent outline-none font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className={cn("flex items-center justify-between border border-border px-3 py-2", !scanEnabled && "opacity-40 pointer-events-none")}>
+                <span className="text-xs text-muted-foreground">--uptime-probe</span>
+                <button
+                  onClick={() => setProbeEnabled((v) => !v)}
+                  className={cn("text-xs font-mono transition-colors", probeEnabled ? "text-primary" : "text-muted-foreground")}
+                >
+                  [{probeEnabled ? "enabled" : "disabled"}]
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => {
+                setScheduleModalOpen(false);
+                setScanEnabled(host?.schedule?.enabled ?? true);
+                setScanInterval(host?.schedule?.scanIntervalHours ?? 24);
+                setProbeEnabled(host?.schedule?.probeEnabled ?? true);
+                setProbeInterval(host?.schedule?.probeIntervalMinutes ?? 5);
+              }}>
+                [cancel]
+              </Button>
+              <Button size="sm" disabled={scheduleLoading} onClick={saveSchedule}>
+                {scheduleLoading ? "> saving..." : "$ save"}
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
       <ConfirmDialog
         open={confirmOpen}
         title={confirmTitle}
@@ -532,9 +734,9 @@ export default function HostDetailPage() {
       </div>
 
       {/* Score card + quick stats */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {/* Grade card */}
-        <Card className={cn("col-span-1", gradeBg[host.grade ?? ""])}>
+        <Card className={cn(gradeBg[host.grade ?? ""])}>
           <CardContent className="p-4 flex items-center gap-4">
             <div
               className={cn(
@@ -589,6 +791,35 @@ export default function HostDetailPage() {
           </CardContent>
         </Card>
 
+        {/* Scan schedule */}
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between">
+              <p className="text-xs text-muted-foreground">SCAN SCHEDULE</p>
+              <button
+                onClick={() => setScheduleModalOpen(true)}
+                className="text-xs text-muted-foreground hover:text-primary transition-colors"
+              >
+                [edit]
+              </button>
+            </div>
+            <div className="mt-1 space-y-1 text-xs font-mono">
+              <p>
+                <span className="text-muted-foreground">scan: </span>
+                <span className={host.schedule?.enabled === false ? "text-muted-foreground" : "text-primary"}>
+                  {host.schedule?.enabled === false ? "off" : `every ${host.schedule?.scanIntervalHours ?? 24}h`}
+                </span>
+              </p>
+              <p>
+                <span className="text-muted-foreground">probe: </span>
+                <span className={host.schedule?.probeEnabled === false ? "text-muted-foreground" : "text-foreground"}>
+                  {host.schedule?.probeEnabled === false ? "off" : `every ${host.schedule?.probeIntervalMinutes ?? 5}m`}
+                </span>
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Infra quick */}
         <Card>
           <CardContent className="p-4">
@@ -625,57 +856,6 @@ export default function HostDetailPage() {
         </CardHeader>
         {expandedSections.has("score") && (
           <CardContent className="pt-3">
-            {/* Score history sparkline */}
-            {(host.scoreHistory ?? []).length > 1 && (
-              <div className="mb-4">
-                <p className="text-xs text-muted-foreground mb-2">
-                  score history
-                </p>
-                <div className="flex items-end gap-1 h-16">
-                  {(host.scoreHistory ?? []).map((point, i) => {
-                    const height = Math.max(4, (point.score / 100) * 64);
-                    return (
-                      <div
-                        key={i}
-                        className="flex-1 flex flex-col items-center gap-0.5"
-                        title={`${point.date}: ${point.score} (${point.grade})`}
-                      >
-                        <div
-                          className={cn(
-                            "w-full min-w-[4px] max-w-[12px]",
-                            gradeColor[point.grade]
-                              ? point.grade === "A"
-                                ? "bg-primary"
-                                : point.grade === "B"
-                                  ? "bg-primary/70"
-                                  : point.grade === "C"
-                                    ? "bg-warning"
-                                    : point.grade === "D"
-                                      ? "bg-warning/70"
-                                      : "bg-destructive"
-                              : "bg-muted-foreground",
-                          )}
-                          style={{ height: `${height}px` }}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                  <span>
-                    {new Date(
-                      (host.scoreHistory ?? [])[0].date,
-                    ).toLocaleDateString()}
-                  </span>
-                  <span>
-                    {new Date(
-                      (host.scoreHistory ?? [])[(host.scoreHistory ?? []).length - 1].date,
-                    ).toLocaleDateString()}
-                  </span>
-                </div>
-              </div>
-            )}
-
             {/* Deductions table */}
             {(host.scoreDeductions ?? []).length === 0 ? (
               <p className="text-xs text-muted-foreground">
@@ -701,7 +881,7 @@ export default function HostDetailPage() {
                         d.suppressed && "opacity-50",
                       )}
                     >
-                      <span className="text-primary">[{d.category}]</span>
+                      <span className="text-primary">[{categoryLabel[d.category] ?? d.category}]</span>
                       <span className="text-foreground truncate">{d.item}</span>
                       <span className="text-destructive font-mono">
                         -{d.points}
@@ -725,6 +905,114 @@ export default function HostDetailPage() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* ============================================================= */}
+      {/* DNS & Email Security */}
+      {/* ============================================================= */}
+      <Card>
+        <CardHeader className="pb-0">
+          <SectionHeader
+            id="dns-health"
+            title="Email & DNS Security"
+            command="$ dig TXT _dmarc SPF DNSKEY"
+          />
+        </CardHeader>
+        {expandedSections.has("dns-health") && (
+          <CardContent className="pt-3">
+            {!host.dnsHealth ? (
+              <p className="text-xs text-muted-foreground">
+                {">"} no dns health data — run a full scan
+              </p>
+            ) : (
+              <div className="space-y-3 text-xs font-mono">
+                {/* DNSSEC */}
+                <div className="flex items-start gap-3 border-b border-border/50 pb-3">
+                  <span className="w-20 shrink-0 text-muted-foreground">DNSSEC</span>
+                  <span className={host.dnsHealth.dnssecEnabled ? "text-primary" : "text-destructive"}>
+                    {host.dnsHealth.dnssecEnabled ? "[OK] enabled" : "[!!] not enabled"}
+                  </span>
+                </div>
+
+                {/* DMARC */}
+                <div className="flex items-start gap-3 border-b border-border/50 pb-3">
+                  <span className="w-20 shrink-0 text-muted-foreground">DMARC</span>
+                  <div className="min-w-0">
+                    {!host.dnsHealth.dmarcRecord ? (
+                      <span className="text-destructive">[!!] no DMARC record</span>
+                    ) : (
+                      <>
+                        <span className={host.dnsHealth.dmarcPolicy === "none" ? "text-warning" : "text-primary"}>
+                          {host.dnsHealth.dmarcPolicy === "none"
+                            ? "[!] p=none (monitoring only)"
+                            : host.dnsHealth.dmarcPolicy === "quarantine"
+                              ? "[~] p=quarantine"
+                              : "[OK] p=reject"}
+                        </span>
+                        <p className="text-muted-foreground mt-1 break-all">{host.dnsHealth.dmarcRecord}</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* SPF */}
+                <div className="flex items-start gap-3 border-b border-border/50 pb-3">
+                  <span className="w-20 shrink-0 text-muted-foreground">SPF</span>
+                  <div className="min-w-0">
+                    {!host.dnsHealth.spfRecord ? (
+                      <span className="text-destructive">[!!] no SPF record</span>
+                    ) : (
+                      <>
+                        <span className={host.dnsHealth.spfValid ? "text-primary" : "text-warning"}>
+                          {host.dnsHealth.spfValid ? "[OK] valid" : "[!] issues detected"}
+                        </span>
+                        <p className="text-muted-foreground mt-1 break-all">{host.dnsHealth.spfRecord}</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* CAA */}
+                <div className="flex items-start gap-3 border-b border-border/50 pb-3">
+                  <span className="w-20 shrink-0 text-muted-foreground">CAA</span>
+                  <div className="min-w-0">
+                    {host.dnsHealth.caaRecords.length === 0 ? (
+                      <span className="text-warning">[!] no CAA records — any CA can issue certs</span>
+                    ) : (
+                      <>
+                        <span className="text-primary">[OK] {host.dnsHealth.caaRecords.length} record{host.dnsHealth.caaRecords.length !== 1 ? "s" : ""}</span>
+                        <div className="mt-1 space-y-0.5">
+                          {host.dnsHealth.caaRecords.map((r, i) => (
+                            <p key={i} className="text-muted-foreground break-all">{r}</p>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Dangling CNAMEs */}
+                <div className="flex items-start gap-3">
+                  <span className="w-20 shrink-0 text-muted-foreground">Dangling</span>
+                  <div className="min-w-0">
+                    {host.dnsHealth.danglingCnames.length === 0 ? (
+                      <span className="text-primary">[OK] no dangling CNAMEs</span>
+                    ) : (
+                      <>
+                        <span className="text-destructive">[!!] {host.dnsHealth.danglingCnames.length} dangling CNAME{host.dnsHealth.danglingCnames.length !== 1 ? "s" : ""} (takeover risk)</span>
+                        <div className="mt-1 space-y-0.5">
+                          {host.dnsHealth.danglingCnames.map((c, i) => (
+                            <p key={i} className="text-destructive/80 break-all">{c}</p>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </CardContent>
@@ -989,36 +1277,37 @@ export default function HostDetailPage() {
         {expandedSections.has("dns-changes") && (
           <CardContent className="pt-3">
             {(host.dnsChanges ?? []).length > 0 ? (
-              <div className="space-y-2">
+              <div>
+                <div className="grid grid-cols-[70px_60px_minmax(100px,1fr)_minmax(100px,1fr)_120px] gap-x-3 border-b border-border px-2 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <span>Severity</span>
+                  <span>Type</span>
+                  <span>Old Value</span>
+                  <span>New Value</span>
+                  <span>Detected</span>
+                </div>
                 {(host.dnsChanges ?? []).map((change) => (
                   <div
                     key={change.id}
-                    className="flex items-start gap-3 px-2 py-2 text-xs border border-transparent hover:border-border hover:bg-muted/30 transition-colors"
+                    className="grid grid-cols-[70px_60px_minmax(100px,1fr)_minmax(100px,1fr)_120px] items-center gap-x-3 border border-transparent px-2 py-1.5 text-xs transition-colors hover:border-border hover:bg-muted/30"
                   >
                     <span
                       className={cn(
-                        "shrink-0 font-mono uppercase",
-                        severityColor[change.severity] ??
-                          "text-muted-foreground",
+                        "font-mono",
+                        severityColor[change.severity] ?? "text-muted-foreground",
                       )}
                     >
                       [{change.severity}]
                     </span>
-                    <span className="text-primary shrink-0">
+                    <span className="text-primary font-mono">
                       {change.recordType}
                     </span>
-                    <div className="min-w-0 flex-1">
-                      <span className="text-muted-foreground line-through">
-                        {change.oldValue || "(none)"}
-                      </span>
-                      <span className="text-muted-foreground mx-1">
-                        {"->"}
-                      </span>
-                      <span className="text-foreground">
-                        {change.newValue || "(removed)"}
-                      </span>
-                    </div>
-                    <span className="shrink-0 text-muted-foreground">
+                    <span className="text-muted-foreground font-mono truncate line-through">
+                      {change.oldValue || "(none)"}
+                    </span>
+                    <span className="text-foreground font-mono truncate">
+                      {change.newValue || "(removed)"}
+                    </span>
+                    <span className="text-muted-foreground">
                       {formatDate(change.detectedAt)}
                     </span>
                   </div>
@@ -1415,134 +1704,136 @@ export default function HostDetailPage() {
       </Card>
 
       {/* ============================================================= */}
-      {/* Scan Schedule */}
+      {/* Subdomains */}
       {/* ============================================================= */}
       <Card>
         <CardHeader className="pb-0">
           <SectionHeader
-            id="schedule"
-            title="Scan Schedule"
-            command="$ crontab -l"
+            id="subdomains"
+            title="Subdomains"
+            command="$ infra subdomains --list"
           />
         </CardHeader>
-        {expandedSections.has("schedule") && (
+        {expandedSections.has("subdomains") && (
           <CardContent className="pt-3">
-            {editSchedule ? (
-              <div className="space-y-4">
-                {/* Master scan toggle */}
-                <div className="flex items-center justify-between rounded border border-border px-3 py-2">
-                  <span className="text-xs text-muted-foreground">--scanning</span>
-                  <button
-                    onClick={() => setScanEnabled((v) => !v)}
-                    className={cn(
-                      "text-xs font-mono transition-colors",
-                      scanEnabled ? "text-primary" : "text-muted-foreground",
-                    )}
-                  >
-                    [{scanEnabled ? "enabled" : "disabled"}]
-                  </button>
-                </div>
-
-                {/* Intervals (only editable when scanning is on) */}
-                <div className={cn("grid grid-cols-2 gap-4", !scanEnabled && "opacity-40 pointer-events-none")}>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">
-                      --scan-interval (hours)
-                    </label>
-                    <div className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm transition-colors focus-within:border-primary">
-                      <span className="text-muted-foreground shrink-0">{">"}</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={168}
-                        value={scanInterval}
-                        onChange={(e) => setScanInterval(parseInt(e.target.value) || 1)}
-                        className="w-full bg-transparent outline-none font-mono"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">
-                      --probe-interval (minutes)
-                    </label>
-                    <div className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm transition-colors focus-within:border-primary">
-                      <span className="text-muted-foreground shrink-0">{">"}</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={60}
-                        value={probeInterval}
-                        onChange={(e) => setProbeInterval(parseInt(e.target.value) || 1)}
-                        className="w-full bg-transparent outline-none font-mono"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Uptime probe toggle */}
-                <div className={cn("flex items-center justify-between rounded border border-border px-3 py-2", !scanEnabled && "opacity-40 pointer-events-none")}>
-                  <span className="text-xs text-muted-foreground">--uptime-probe</span>
-                  <button
-                    onClick={() => setProbeEnabled((v) => !v)}
-                    className={cn(
-                      "text-xs font-mono transition-colors",
-                      probeEnabled ? "text-primary" : "text-muted-foreground",
-                    )}
-                  >
-                    [{probeEnabled ? "enabled" : "disabled"}]
-                  </button>
-                </div>
-
-                <div className="flex gap-2">
-                  <Button size="sm" disabled={scheduleLoading} onClick={saveSchedule}>
-                    {scheduleLoading ? "> saving..." : "$ save"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setEditSchedule(false);
-                      setScanEnabled(host.schedule?.enabled ?? true);
-                      setScanInterval(host.schedule?.scanIntervalHours ?? 24);
-                      setProbeEnabled(host.schedule?.probeEnabled ?? true);
-                      setProbeInterval(host.schedule?.probeIntervalMinutes ?? 5);
-                    }}
-                  >
-                    [cancel]
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between">
-                <div className="text-xs space-y-1 font-mono">
-                  <p>
-                    <span className="text-muted-foreground">scanning:    </span>
-                    <span className={host.schedule?.enabled === false ? "text-muted-foreground" : "text-primary"}>
-                      {host.schedule?.enabled === false ? "disabled" : "enabled"}
-                    </span>
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">full scan:   </span>
-                    <span className="text-foreground">every {host.schedule?.scanIntervalHours ?? 24}h</span>
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">uptime probe:</span>
-                    <span className={cn("ml-1", host.schedule?.probeEnabled === false ? "text-muted-foreground" : "text-foreground")}>
-                      {host.schedule?.probeEnabled === false ? "disabled" : `every ${host.schedule?.probeIntervalMinutes ?? 5}m`}
-                    </span>
-                  </p>
-                </div>
+            {!subdomainsLoaded ? (
+              <div>
                 <button
-                  onClick={() => setEditSchedule(true)}
-                  className="text-xs text-muted-foreground hover:text-primary transition-colors"
+                  onClick={fetchSubdomains}
+                  className="text-xs text-primary hover:underline"
                 >
-                  [edit]
+                  $ load subdomains
                 </button>
+              </div>
+            ) : subdomains.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {">"} no subdomains discovered yet — use{" "}
+                <button
+                  onClick={discoverSubdomains}
+                  disabled={discoverLoading}
+                  className="text-primary hover:underline disabled:opacity-50"
+                >
+                  $ discover subdomains
+                </button>
+              </p>
+            ) : (
+              <div className="space-y-0">
+                <div className="grid grid-cols-[minmax(160px,2fr)_50px_60px_90px_90px_1fr] gap-x-3 border-b border-border px-2 py-1.5 text-xs text-muted-foreground uppercase tracking-wider">
+                  <span>Hostname</span>
+                  <span>Grade</span>
+                  <span>Status</span>
+                  <span>Last Scan</span>
+                  <span>Cert</span>
+                  <span className="text-right">Actions</span>
+                </div>
+                <p className="px-2 pt-1.5 text-xs text-muted-foreground">
+                  {subdomains.length} subdomain{subdomains.length !== 1 ? "s" : ""}
+                </p>
+                {subdomains.map((child) => {
+                  const cert = formatCertExpiry(child.certExpiry);
+                  const scanBusy = subdomainActionLoading[`scan-${child.id}`] ?? false;
+                  const removeBusy = subdomainActionLoading[`remove-${child.id}`] ?? false;
+                  return (
+                    <div
+                      key={child.id}
+                      className="group grid grid-cols-[minmax(160px,2fr)_50px_60px_90px_90px_1fr] items-center gap-x-3 border border-transparent px-2 py-1.5 text-xs transition-colors hover:border-border hover:bg-muted/30"
+                    >
+                      <Link
+                        href={`/infra/hosts/${child.id}`}
+                        className="truncate text-foreground group-hover:text-primary font-mono transition-colors"
+                      >
+                        └ {child.hostname}
+                      </Link>
+                      <span>
+                        {child.grade ? (
+                          <span
+                            className={cn(
+                              "inline-flex items-center justify-center w-6 h-6 text-xs font-bold border",
+                              child.grade === "A" ? "bg-primary/10 border-primary/30 text-primary" :
+                              child.grade === "B" ? "bg-primary/5 border-primary/20 text-primary/80" :
+                              child.grade === "C" ? "bg-warning/10 border-warning/30 text-warning" :
+                              child.grade === "D" ? "bg-warning/5 border-warning/20 text-warning/80" :
+                              "bg-destructive/10 border-destructive/30 text-destructive",
+                            )}
+                          >
+                            {child.grade}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">--</span>
+                        )}
+                      </span>
+                      <span className={cn(
+                        "font-mono",
+                        child.status === "active" ? "text-primary" :
+                        child.status === "scanning" ? "text-warning" :
+                        child.status === "error" ? "text-destructive" : "text-muted-foreground",
+                      )}>
+                        [{child.status}]
+                      </span>
+                      <span className="text-muted-foreground">
+                        {child.lastScanAt
+                          ? (() => {
+                              const diffMins = Math.floor((Date.now() - new Date(child.lastScanAt).getTime()) / 60_000);
+                              if (diffMins < 1) return "just now";
+                              if (diffMins < 60) return `${diffMins}m ago`;
+                              const h = Math.floor(diffMins / 60);
+                              if (h < 24) return `${h}h ago`;
+                              return `${Math.floor(h / 24)}d ago`;
+                            })()
+                          : "never"}
+                      </span>
+                      <span className={cn("", cert.color)}>{cert.text}</span>
+                      <span className="flex items-center justify-end gap-2">
+                        <button
+                          disabled={scanBusy || child.status === "scanning"}
+                          onClick={() => scanSubdomain(child)}
+                          className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                        >
+                          {scanBusy ? "..." : "[scan]"}
+                        </button>
+                        <Link
+                          href={`/infra/hosts/${child.id}`}
+                          className="text-muted-foreground hover:text-primary transition-colors"
+                        >
+                          [view]
+                        </Link>
+                        <button
+                          disabled={removeBusy}
+                          onClick={() => removeSubdomain(child)}
+                          className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+                        >
+                          {removeBusy ? "..." : "[remove]"}
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </CardContent>
         )}
       </Card>
+
     </div>
   );
 }

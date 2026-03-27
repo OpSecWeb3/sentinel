@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 
@@ -37,7 +38,7 @@ export default function ChannelsPage() {
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>(
     {},
   );
-  const { toast } = useToast();
+  const { toast, toasts, dismiss } = useToast();
 
   // Create form
   const [showCreate, setShowCreate] = useState(false);
@@ -209,6 +210,7 @@ export default function ChannelsPage() {
 
   return (
     <div className="space-y-6">
+      <ToastContainer toasts={toasts} dismiss={dismiss} />
       <ConfirmDialog
         open={confirmOpen}
         title={confirmTitle}

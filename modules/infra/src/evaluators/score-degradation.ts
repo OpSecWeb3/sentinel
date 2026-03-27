@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const configSchema = z.object({
   /** Alert when score drops below this absolute threshold */
@@ -14,6 +15,11 @@ export const scoreDegradationEvaluator: RuleEvaluator = {
   moduleId: 'infra',
   ruleType: 'infra.score_degradation',
   configSchema,
+  uiSchema: [
+    { key: 'mode', label: 'Alert mode', type: 'select', required: false, options: [{ value: 'below', label: 'Score drops below minimum' }, { value: 'drop', label: 'Score drops by N points' }, { value: 'both', label: 'Either condition' }] },
+    { key: 'minScore', label: 'Minimum acceptable score', type: 'number', required: false, default: 70, min: 0, max: 100 },
+    { key: 'minDrop', label: 'Score drop to alert on', type: 'number', required: false, default: 10, min: 1 },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

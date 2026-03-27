@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const ISSUE_TYPES = [
   'chain_error',
@@ -26,6 +27,9 @@ export const certIssuesEvaluator: RuleEvaluator = {
   moduleId: 'infra',
   ruleType: 'infra.cert_issues',
   configSchema,
+  uiSchema: [
+    { key: 'issueTypes', label: 'Issue types to alert on', type: 'string-array', required: false, placeholder: 'chain_error\nself_signed\nweak_key\nrevoked', help: 'Leave empty to alert on all issue types. Values: chain_error, self_signed, weak_key, sha1_signature, revoked.' },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

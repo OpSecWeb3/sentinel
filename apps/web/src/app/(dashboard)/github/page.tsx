@@ -69,6 +69,9 @@ export default function GitHubOverviewPage() {
     setInstalling(true);
     try {
       const res = await apiGet<InstallUrlResponse>("/modules/github/app/install");
+      if (!/^https?:\/\//i.test(res.url)) {
+        throw new Error("Invalid redirect URL received from server");
+      }
       window.location.href = res.url;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to get installation URL");

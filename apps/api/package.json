@@ -14,10 +14,11 @@
   "dependencies": {
     "@hono/node-server": "^1.14.0",
     "@sentinel/db": "workspace:*",
+    "@sentinel/module-aws": "workspace:*",
     "@sentinel/module-chain": "workspace:*",
     "@sentinel/module-github": "workspace:*",
     "@sentinel/module-infra": "workspace:*",
-    "@sentinel/module-release-chain": "workspace:*",
+    "@sentinel/module-registry": "workspace:*",
     "@sentinel/notifications": "workspace:*",
     "@sentinel/shared": "workspace:*",
     "bcrypt": "^5.1.0",

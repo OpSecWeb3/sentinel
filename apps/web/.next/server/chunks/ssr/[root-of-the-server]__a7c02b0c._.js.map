@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":[],"names":[],"mappings":"","debugId":null}},
-    {"offset": {"line": 11, "column": 0}, "map": {"version":3,"sources":["file:///Users/randyquaye/Documents/Non-Work/sentinel/apps/web/src/app/page.tsx"],"sourcesContent":["export default function HomePage() {\n  return (\n    <div className=\"flex min-h-screen items-center justify-center\">\n      <div className=\"text-center font-mono\">\n        <p className=\"text-primary text-glow text-lg\">$ sentinel</p>\n        <h1 className=\"mt-2 text-2xl font-bold tracking-wider text-foreground\">\n          SENTINEL_\n        </h1>\n        <p className=\"mt-3 text-sm text-muted-foreground\">\n          Smart contract governance & upgrade management\n        </p>\n        <div className=\"mt-6\">\n          <span className=\"text-muted-foreground\">{\">\"} </span>\n          <span className=\"text-foreground typing-cursor\">\n            initializing...\n          </span>\n        </div>\n      </div>\n    </div>\n  );\n}\n"],"names":[],"mappings":";;;;;;AAAe,SAAS;IACtB,qBACE,sZAAC;QAAI,WAAU;kBACb,cAAA,sZAAC;YAAI,WAAU;;8BACb,sZAAC;oBAAE,WAAU;8BAAiC;;;;;;8BAC9C,sZAAC;oBAAG,WAAU;8BAAyD;;;;;;8BAGvE,sZAAC;oBAAE,WAAU;8BAAqC;;;;;;8BAGlD,sZAAC;oBAAI,WAAU;;sCACb,sZAAC;4BAAK,WAAU;;gCAAyB;gCAAI;;;;;;;sCAC7C,sZAAC;4BAAK,WAAU;sCAAgC;;;;;;;;;;;;;;;;;;;;;;;AAO1D","debugId":null}}]
-}

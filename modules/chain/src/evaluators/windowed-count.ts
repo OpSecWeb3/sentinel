@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import { NETWORK_UI_FIELD, CONTRACT_UI_FIELD, EVENT_SIG_UI_FIELD, GROUP_BY_UI_FIELD } from './_ui-shared.js';
 
 // ---------------------------------------------------------------------------
 // Config schema — ported from ChainAlert's windowed-count rule config
@@ -107,6 +108,14 @@ export const windowedCountEvaluator: RuleEvaluator = {
   moduleId: 'chain',
   ruleType: 'chain.windowed_count',
   configSchema,
+  uiSchema: [
+    NETWORK_UI_FIELD,
+    CONTRACT_UI_FIELD,
+    EVENT_SIG_UI_FIELD,
+    { key: 'windowMinutes', label: 'Time window (minutes)', type: 'number', required: true, default: 60, min: 1, help: 'Count events within this rolling window.' },
+    { key: 'threshold', label: 'Alert threshold (count)', type: 'number', required: true, default: 5, min: 1, help: 'Alert when event count reaches this value.' },
+    GROUP_BY_UI_FIELD,
+  ],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule, redis } = ctx;

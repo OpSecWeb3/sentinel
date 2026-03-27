@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const configSchema = z.object({
   /** Maximum days until domain expiry before alerting */
@@ -16,6 +17,9 @@ export const whoisExpiryEvaluator: RuleEvaluator = {
   moduleId: 'infra',
   ruleType: 'infra.whois_expiry',
   configSchema,
+  uiSchema: [
+    { key: 'thresholdDays', label: 'Days before expiry to alert', type: 'number', required: false, default: 30, min: 1, help: 'Alert when domain registration expires within this many days.' },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

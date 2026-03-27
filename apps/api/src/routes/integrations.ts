@@ -83,7 +83,7 @@ integrations.get('/slack/callback', async (c) => {
     return c.redirect(`${webUrl}/settings?slack=error&reason=not_configured`);
   }
 
-  const redirectUri = `${c.req.url.split('/slack/callback')[0]}/slack/callback`;
+  const redirectUri = `${env().API_BASE_URL}/integrations/slack/callback`;
 
   const tokenRes = await fetch('https://slack.com/api/oauth.v2.access', {
     method: 'POST',
@@ -175,9 +175,8 @@ authed.get('/slack/install', async (c) => {
   const stateSig = signState(statePayload);
   const state = `${stateB64}.${stateSig}`;
 
-  // Build the callback URL from the current request
-  const baseUrl = c.req.url.split('/slack/install')[0];
-  const redirectUri = `${baseUrl}/slack/callback`;
+  // Build the callback URL from the configured API base URL (not from request headers)
+  const redirectUri = `${env().API_BASE_URL}/integrations/slack/callback`;
 
   const params = new URLSearchParams({
     client_id: slackClientId,
@@ -241,7 +240,8 @@ authed.get('/slack/channels', async (c) => {
     };
 
     if (!data.ok) {
-      return c.json({ error: `Slack API error: ${data.error ?? 'unknown'}` }, 502);
+      console.error('[slack] conversations.list failed:', data.error ?? 'unknown');
+      return c.json({ error: 'Failed to fetch channels from Slack' }, 502);
     }
 
     for (const ch of data.channels ?? []) {
@@ -280,7 +280,8 @@ authed.get('/slack/channels/:channelId', async (c) => {
   };
 
   if (!data.ok || !data.channel) {
-    return c.json({ error: `Could not resolve channel: ${data.error ?? 'unknown'}` }, 404);
+    console.error('[slack] conversations.info failed:', data.error ?? 'unknown');
+    return c.json({ error: 'Could not resolve the specified Slack channel' }, 404);
   }
 
   return c.json({

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const configSchema = z.object({
   alertOnActions: z.array(z.enum(['created', 'resolved', 'reopened'])).default(['created']),
@@ -10,6 +11,10 @@ export const secretScanningEvaluator: RuleEvaluator = {
   moduleId: 'github',
   ruleType: 'github.secret_scanning',
   configSchema,
+  uiSchema: [
+    { key: 'alertOnActions', label: 'Alert on actions', type: 'string-array', required: false, placeholder: 'created\nresolved\nreopened', help: 'Leave empty for all actions.' },
+    { key: 'secretTypes', label: 'Secret types to watch', type: 'string-array', required: false, placeholder: 'github_personal_access_token\naws_access_key_id', help: 'Leave empty to alert on all secret types.' },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

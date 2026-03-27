@@ -115,7 +115,12 @@ export class RuleEngine {
       const parsed = evaluator.configSchema.safeParse(rule.config);
       if (!parsed.success) continue;
 
-      // Resource filter (Phase 1.3 hook — checks rule.config.resourceFilter)
+      // Detection-level host scope (comma-separated hostnames / glob patterns)
+      if (resourceId != null && !this.passesHostScope(detection.config as Record<string, unknown>, resourceId)) {
+        continue;
+      }
+
+      // Rule-level resource filter (glob patterns on rule.config.resourceFilter)
       if (resourceId != null && !this.passesResourceFilter(rule.config, resourceId)) {
         continue;
       }
@@ -145,6 +150,9 @@ export class RuleEngine {
         });
 
         if (!candidate) continue;
+
+        // Use the detection's configured severity rather than the evaluator's default
+        candidate.severity = detection.severity;
 
         switch (rule.action) {
           case 'alert':
@@ -205,6 +213,10 @@ export class RuleEngine {
       const parsed = evaluator.configSchema.safeParse(rule.config);
       if (!parsed.success) continue;
 
+      if (resourceId != null && !this.passesHostScope(detection.config as Record<string, unknown>, resourceId)) {
+        continue;
+      }
+
       if (resourceId != null && !this.passesResourceFilter(rule.config, resourceId)) {
         continue;
       }
@@ -240,6 +252,17 @@ export class RuleEngine {
 
     const alertedDetectionIds = new Set(candidates.map((c) => c.detectionId));
     return { candidates, suppressed, acquiredCooldownLocks: new Set(), alertedDetectionIds };
+  }
+
+  /**
+   * Check detection-level host scope. Returns true if the event's resourceId matches
+   * at least one of the patterns in detection.config.hostScope (glob via minimatch).
+   * If hostScope is absent or empty, all resources pass.
+   */
+  protected passesHostScope(config: Record<string, unknown>, resourceId: string): boolean {
+    const hostScope = config?.hostScope;
+    if (!Array.isArray(hostScope) || hostScope.length === 0) return true;
+    return (hostScope as string[]).some((p) => minimatch(resourceId, p));
   }
 
   /**

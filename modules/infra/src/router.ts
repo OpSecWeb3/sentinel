@@ -12,6 +12,7 @@ import {
   infraCertificates,
   infraDnsRecords,
   infraDnsChanges,
+  infraDnsHealthChecks,
   infraScanSchedules,
   infraCtLogEntries,
   infraWhoisChanges,
@@ -23,7 +24,7 @@ import {
   infraCdnProviderConfigs,
   infraCdnOriginRecords,
 } from '@sentinel/db/schema/infra';
-import { eq, and, desc, asc, lte, gte, sql } from '@sentinel/db';
+import { eq, and, desc, asc, lte, gte, sql, inArray } from '@sentinel/db';
 import { alerts, detections } from '@sentinel/db/schema/core';
 import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
 import type { AppEnv } from '@sentinel/shared/hono-types';
@@ -68,6 +69,7 @@ infraRouter.get('/hosts', async (c) => {
   const sortField = c.req.query('sort') ?? 'hostname';
   const sortDir = c.req.query('dir') ?? 'asc';
   const q = c.req.query('q')?.toLowerCase() ?? '';
+  const showAll = c.req.query('all') === 'true';
 
   const db = getDb();
 
@@ -78,10 +80,16 @@ infraRouter.get('/hosts', async (c) => {
       currentScore: infraHosts.currentScore,
       lastScannedAt: infraHosts.lastScannedAt,
       isActive: infraHosts.isActive,
+      isRoot: infraHosts.isRoot,
+      parentId: infraHosts.parentId,
       createdAt: infraHosts.createdAt,
     })
     .from(infraHosts)
-    .where(and(eq(infraHosts.orgId, orgId), eq(infraHosts.isRoot, true), eq(infraHosts.isActive, true)));
+    .where(
+      showAll
+        ? and(eq(infraHosts.orgId, orgId), eq(infraHosts.isActive, true))
+        : and(eq(infraHosts.orgId, orgId), eq(infraHosts.isRoot, true), eq(infraHosts.isActive, true))
+    );
 
   // Get latest cert per host
   const certRows = await db
@@ -106,9 +114,17 @@ infraRouter.get('/hosts', async (c) => {
     return 'active';
   }
 
-  let hosts = allHosts.map((h) => ({
+  type HostRow = {
+    id: string; hostname: string; isRoot: boolean; parentId: string | null;
+    score: number | null; grade: string | null; lastScanAt: string | null;
+    certExpiry: string | null; status: string; createdAt: string;
+  };
+
+  let mapped: HostRow[] = allHosts.map((h) => ({
     id: h.id,
     hostname: h.hostname,
+    isRoot: h.isRoot,
+    parentId: h.parentId ?? null,
     score: h.currentScore ?? null,
     grade: scoreToGrade(h.currentScore),
     lastScanAt: h.lastScannedAt?.toISOString() ?? null,
@@ -117,11 +133,9 @@ infraRouter.get('/hosts', async (c) => {
     createdAt: h.createdAt.toISOString(),
   }));
 
-  if (q) hosts = hosts.filter((h) => h.hostname.toLowerCase().includes(q));
+  if (q) mapped = mapped.filter((h) => h.hostname.toLowerCase().includes(q));
 
-  const total = hosts.length;
-
-  hosts.sort((a, b) => {
+  function sortCmp(a: HostRow, b: HostRow): number {
     let av: string | number | null, bv: string | number | null;
     if (sortField === 'score') { av = a.score; bv = b.score; }
     else if (sortField === 'lastScanAt') { av = a.lastScanAt; bv = b.lastScanAt; }
@@ -131,7 +145,40 @@ infraRouter.get('/hosts', async (c) => {
     if (bv === null) return -1;
     const cmp = av < bv ? -1 : av > bv ? 1 : 0;
     return sortDir === 'desc' ? -cmp : cmp;
-  });
+  }
+
+  let hosts: HostRow[];
+
+  if (showAll) {
+    // Group: sort roots, then interleave children after their parent
+    const roots = mapped.filter((h) => h.isRoot).sort(sortCmp);
+    const childrenByParent = new Map<string, HostRow[]>();
+    for (const h of mapped) {
+      if (!h.isRoot && h.parentId) {
+        const arr = childrenByParent.get(h.parentId) ?? [];
+        arr.push(h);
+        childrenByParent.set(h.parentId, arr);
+      }
+    }
+    // Sort children by hostname within each parent
+    for (const arr of childrenByParent.values()) arr.sort((a, b) => a.hostname.localeCompare(b.hostname));
+    hosts = [];
+    for (const root of roots) {
+      hosts.push(root);
+      const children = childrenByParent.get(root.id) ?? [];
+      hosts.push(...children);
+    }
+    // Orphaned children (parent not in result set due to search filter) appended at end
+    for (const h of mapped) {
+      if (!h.isRoot && (!h.parentId || !mapped.find((r) => r.id === h.parentId))) {
+        hosts.push(h);
+      }
+    }
+  } else {
+    hosts = mapped.sort(sortCmp);
+  }
+
+  const total = hosts.length;
 
   return c.json({
     data: hosts.slice(offset, offset + limit),
@@ -229,7 +276,7 @@ infraRouter.get('/hosts/:id', async (c) => {
   if (!host) return c.json({ error: 'Host not found' }, 404);
 
   const [
-    latestCert, latestTls, latestHeaders, latestInfra, latestWhois,
+    latestCert, latestTls, latestHeaders, latestInfra, latestWhois, latestDnsHealth,
     dnsRecords, dnsChanges, latestScore, scoreHistory, recentScans, schedule, suppressions,
   ] = await Promise.all([
     db.select().from(infraCertificates).where(eq(infraCertificates.hostId, hostId))
@@ -242,6 +289,8 @@ infraRouter.get('/hosts/:id', async (c) => {
       .orderBy(desc(infraSnapshots.scannedAt)).limit(1).then((r) => r[0] ?? null),
     db.select().from(infraWhoisRecords).where(eq(infraWhoisRecords.hostId, hostId))
       .orderBy(desc(infraWhoisRecords.checkedAt)).limit(1).then((r) => r[0] ?? null),
+    db.select().from(infraDnsHealthChecks).where(eq(infraDnsHealthChecks.hostId, hostId))
+      .orderBy(desc(infraDnsHealthChecks.checkedAt)).limit(1).then((r) => r[0] ?? null),
     db.select().from(infraDnsRecords).where(eq(infraDnsRecords.hostId, hostId))
       .orderBy(infraDnsRecords.recordType),
     db.select().from(infraDnsChanges).where(eq(infraDnsChanges.hostId, hostId))
@@ -328,6 +377,16 @@ infraRouter.get('/hosts/:id', async (c) => {
         nameServers: latestWhois.nameServers as string[], registrant: null,
       } : null,
       scoreDeductions,
+      dnsHealth: latestDnsHealth ? {
+        dnssecEnabled: latestDnsHealth.dnssecEnabled,
+        dmarcRecord: latestDnsHealth.dmarcRecord,
+        dmarcPolicy: latestDnsHealth.dmarcPolicy,
+        spfRecord: latestDnsHealth.spfRecord,
+        spfValid: latestDnsHealth.spfValid,
+        caaRecords: latestDnsHealth.caaRecords as string[],
+        danglingCnames: latestDnsHealth.danglingCnames as string[],
+        checkedAt: latestDnsHealth.checkedAt.toISOString(),
+      } : null,
       scoreHistory: scoreHistory.map((s) => ({ date: s.recordedAt.toISOString(), score: s.score, grade: s.grade ?? scoreToGrade(s.score) })),
       recentScans: recentScans.map((s) => ({ id: s.id, status: s.status, startedAt: s.startedAt.toISOString(), completedAt: s.completedAt?.toISOString() ?? null, steps: [] })),
       schedule: schedule ? { enabled: schedule.enabled, scanIntervalHours: Math.round(schedule.intervalMinutes / 60), probeEnabled: schedule.probeEnabled, probeIntervalMinutes: schedule.probeIntervalMinutes } : null,
@@ -341,8 +400,10 @@ infraRouter.get('/hosts/:id', async (c) => {
 
 infraRouter.post('/hosts/:id/scan', async (c) => {
   const orgId = c.get('orgId');
+  const role = c.get('role');
   const hostId = c.req.param('id');
   if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+  if (role !== 'admin' && role !== 'editor') return c.json({ error: 'Insufficient permissions' }, 403);
 
   const db = getDb();
   const [host] = await db
@@ -511,8 +572,10 @@ infraRouter.get('/hosts/:id/dns', async (c) => {
 
 infraRouter.post('/hosts/:id/suppressions', async (c) => {
   const orgId = c.get('orgId');
+  const role = c.get('role');
   const hostId = c.req.param('id');
   if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+  if (role !== 'admin' && role !== 'editor') return c.json({ error: 'Insufficient permissions' }, 403);
 
   const body = z.object({
     category: z.string().min(1),
@@ -546,8 +609,10 @@ infraRouter.post('/hosts/:id/suppressions', async (c) => {
 
 infraRouter.put('/hosts/:id/schedule', async (c) => {
   const orgId = c.get('orgId');
+  const role = c.get('role');
   const hostId = c.req.param('id');
   if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+  if (role !== 'admin' && role !== 'editor') return c.json({ error: 'Insufficient permissions' }, 403);
 
   const body = z.object({
     enabled: z.boolean().optional().default(true),
@@ -638,6 +703,69 @@ infraRouter.post('/hosts/:id/discover', async (c) => {
     }
   }
   return c.json({ data: { discovered: discovered.length, newHosts: newCount } });
+});
+
+// ---------------------------------------------------------------------------
+// GET /modules/infra/hosts/:id/subdomains — list child hosts of a root host
+// ---------------------------------------------------------------------------
+
+infraRouter.get('/hosts/:id/subdomains', async (c) => {
+  const orgId = c.get('orgId');
+  const hostId = c.req.param('id');
+  if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+
+  const db = getDb();
+  const [host] = await db.select({ id: infraHosts.id }).from(infraHosts)
+    .where(and(eq(infraHosts.id, hostId), eq(infraHosts.orgId, orgId))).limit(1);
+  if (!host) return c.json({ error: 'Host not found' }, 404);
+
+  const children = await db.select({
+    id: infraHosts.id,
+    hostname: infraHosts.hostname,
+    currentScore: infraHosts.currentScore,
+    lastScannedAt: infraHosts.lastScannedAt,
+    isActive: infraHosts.isActive,
+    source: infraHosts.source,
+    createdAt: infraHosts.createdAt,
+  })
+  .from(infraHosts)
+  .where(and(eq(infraHosts.parentId, hostId), eq(infraHosts.isActive, true)))
+  .orderBy(asc(infraHosts.hostname));
+
+  const childIds = children.map((ch) => ch.id);
+  const certRows = childIds.length > 0
+    ? await db.select({ hostId: infraCertificates.hostId, notAfter: infraCertificates.notAfter })
+        .from(infraCertificates)
+        .where(inArray(infraCertificates.hostId, childIds))
+    : [];
+
+  const certMap = new Map<string, Date>();
+  for (const row of certRows) {
+    const existing = certMap.get(row.hostId);
+    if (!existing || (row.notAfter && row.notAfter > existing)) {
+      if (row.notAfter) certMap.set(row.hostId, row.notAfter);
+    }
+  }
+
+  function computeChildStatus(h: { isActive: boolean; lastScannedAt: Date | null }): string {
+    if (!h.isActive) return 'removed';
+    if (!h.lastScannedAt) return 'pending';
+    return (Date.now() - h.lastScannedAt.getTime()) / 3_600_000 > 48 ? 'error' : 'active';
+  }
+
+  return c.json({
+    data: children.map((ch) => ({
+      id: ch.id,
+      hostname: ch.hostname,
+      score: ch.currentScore ?? null,
+      grade: scoreToGrade(ch.currentScore),
+      lastScanAt: ch.lastScannedAt?.toISOString() ?? null,
+      certExpiry: certMap.get(ch.id)?.toISOString() ?? null,
+      status: computeChildStatus(ch),
+      source: ch.source,
+      createdAt: ch.createdAt.toISOString(),
+    })),
+  });
 });
 
 // ---------------------------------------------------------------------------

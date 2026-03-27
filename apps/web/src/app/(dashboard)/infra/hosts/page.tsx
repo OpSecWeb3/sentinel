@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchInput } from "@/components/ui/search-input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 
@@ -18,6 +19,8 @@ import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 interface Host {
   id: string;
   hostname: string;
+  isRoot: boolean;
+  parentId: string | null;
   score: number | null;
   grade: string | null;
   lastScanAt: string | null;
@@ -112,8 +115,9 @@ export default function InfraHostsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sortField, setSortField] = useState<SortField>("score");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [showAll, setShowAll] = useState(false);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
-  const { toast } = useToast();
+  const { toast, toasts, dismiss } = useToast();
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Add host form
@@ -163,6 +167,7 @@ export default function InfraHostsPage() {
       params.set("sort", sortField);
       params.set("dir", sortDir);
       if (debouncedSearch) params.set("q", encodeURIComponent(debouncedSearch));
+      if (showAll) params.set("all", "true");
 
       const res = await apiFetch<HostsResponse>(
         `/modules/infra/hosts?${params.toString()}`,
@@ -175,7 +180,7 @@ export default function InfraHostsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, debouncedSearch, sortField, sortDir]);
+  }, [page, debouncedSearch, sortField, sortDir, showAll]);
 
   useEffect(() => {
     fetchHosts();
@@ -296,12 +301,18 @@ export default function InfraHostsPage() {
     return sortDir === "asc" ? " ^" : " v";
   }
 
-  const hasActiveFilters = debouncedSearch !== "";
+  const hasActiveFilters = debouncedSearch !== "" || showAll;
+
+  function toggleShowAll() {
+    setShowAll((v) => !v);
+    setPage(1);
+  }
 
   /* -- render ------------------------------------------------------- */
 
   return (
     <div className="space-y-6">
+      <ToastContainer toasts={toasts} dismiss={dismiss} />
       <ConfirmDialog
         open={confirmOpen}
         title={confirmTitle}
@@ -314,18 +325,32 @@ export default function InfraHostsPage() {
         <div>
           <h1 className="text-lg text-primary text-glow">
             $ infra hosts ls
-            {hasActiveFilters && (
+            {showAll && (
+              <span className="text-muted-foreground"> --all</span>
+            )}
+            {debouncedSearch && (
               <span className="text-muted-foreground"> --filter</span>
             )}
             <span className="ml-1 animate-pulse">_</span>
           </h1>
           <p className="mt-1 text-xs text-muted-foreground">
-            {">"} monitored infrastructure hosts
+            {">"} {showAll ? "all hosts including subdomains" : "root hosts only"}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button asChild variant="outline" size="sm">
             <Link href="/infra">{"<"} overview</Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/infra/worldview">[worldview]</Link>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={toggleShowAll}
+            className={cn(showAll ? "border-primary text-primary" : "")}
+          >
+            {showAll ? "[root only]" : "[show all]"}
           </Button>
           <Button onClick={() => setShowAdd(!showAdd)}>
             {showAdd ? "[cancel]" : "+ Add Host"}
@@ -417,11 +442,11 @@ export default function InfraHostsPage() {
                 {">"} no hosts found
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {hasActiveFilters
+                {debouncedSearch
                   ? "try adjusting your search"
                   : "add your first host to start monitoring"}
               </p>
-              {!hasActiveFilters && (
+              {!debouncedSearch && (
                 <Button className="mt-4" onClick={() => setShowAdd(true)}>
                   + Add Host
                 </Button>
@@ -463,7 +488,8 @@ export default function InfraHostsPage() {
               </div>
 
               <p className="px-3 pt-2 text-xs text-muted-foreground">
-                {meta ? meta.total : hosts.length} host
+                {meta ? meta.total : hosts.length}{" "}
+                {showAll ? "host" : "root host"}
                 {(meta ? meta.total : hosts.length) !== 1 ? "s" : ""}
                 {meta && meta.totalPages > 1
                   ? ` -- page ${meta.page} of ${meta.totalPages}`
@@ -485,8 +511,12 @@ export default function InfraHostsPage() {
                   >
                     <Link
                       href={`/infra/hosts/${host.id}`}
-                      className="truncate text-foreground group-hover:text-primary font-medium transition-colors"
+                      className={cn(
+                        "truncate font-medium transition-colors group-hover:text-primary",
+                        host.isRoot ? "text-foreground" : "text-muted-foreground pl-3",
+                      )}
                     >
+                      {!host.isRoot && <span className="mr-1 select-none">└</span>}
                       {host.hostname}
                     </Link>
 
@@ -546,13 +576,15 @@ export default function InfraHostsPage() {
                       >
                         {scanBusy ? "..." : "[scan]"}
                       </button>
-                      <button
-                        disabled={discoverBusy}
-                        onClick={() => discoverHost(host)}
-                        className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
-                      >
-                        {discoverBusy ? "..." : "[discover]"}
-                      </button>
+                      {host.isRoot && (
+                        <button
+                          disabled={discoverBusy}
+                          onClick={() => discoverHost(host)}
+                          className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                        >
+                          {discoverBusy ? "..." : "[discover]"}
+                        </button>
+                      )}
                       <Link
                         href={`/infra/hosts/${host.id}`}
                         className="text-muted-foreground hover:text-primary transition-colors"

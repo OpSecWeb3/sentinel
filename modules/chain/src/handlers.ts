@@ -7,11 +7,11 @@
  *   - state-poller/index.ts  -> chain.state.poll
  *   - state-poller (rule-sync worker) -> chain.rule.sync
  *
- * Follows the same JobHandler pattern as the GitHub and release-chain modules.
+ * Follows the same JobHandler pattern as the GitHub and registry modules.
  */
 import type { Job } from 'bullmq';
 import { logger as rootLogger } from '@sentinel/shared/logger';
-import { eq, and, inArray, or, isNull, lt } from '@sentinel/db';
+import { eq, and, inArray, or, isNull, lt, desc, gte, sql } from '@sentinel/db';
 import { getDb } from '@sentinel/db';
 import { events, rules, detections } from '@sentinel/db/schema/core';
 import {
@@ -33,6 +33,7 @@ import {
   loadNetworkConfig,
   getNetworkIdBySlug,
   updateBlockCursor,
+  getNetworkSlugsWithBlockRules,
 } from './block-poller.js';
 import {
   normalizeMatchedEvent,
@@ -44,9 +45,14 @@ import {
 import { decodeLog, decodeFunctionCallData } from './decoder.js';
 import { detectTraits } from './traits.js';
 import { getChildResults } from '@sentinel/shared/fan-out';
-import { toFunctionSelector } from 'viem';
+import { toFunctionSelector, toEventSelector } from 'viem';
 
 const log = rootLogger.child({ component: 'chain' });
+
+// Maximum snapshots retained per rule. Older rows are pruned after each insert,
+// bounding storage to MAX_SNAPSHOTS_PER_RULE × (number of active poll rules).
+// Must be >= windowed_percent_change windowSize max (500).
+const MAX_SNAPSHOTS_PER_RULE = 500;
 
 // ---------------------------------------------------------------------------
 // Canonical rule type constants
@@ -308,14 +314,7 @@ export const blockProcessHandler: JobHandler = {
 
     const db = getDb();
     const eventsQueue = getQueue(QUEUE_NAMES.EVENTS);
-    const alertsQueue = getQueue(QUEUE_NAMES.ALERTS);
     let matchedEventCount = 0;
-
-    // Pre-load detection cooldown info to avoid N+1 queries (Fix #8, #12)
-    const detectionIds = new Set<string>();
-    for (const r of activeRules) detectionIds.add(r.detectionId);
-    for (const r of fnCallRules) detectionIds.add(r.detectionId);
-    const detectionMap = await loadDetectionCooldowns([...detectionIds]);
 
     // Collect all normalized event values for batch insert (Fix #12)
     const allNormalizedValues: Array<{
@@ -439,63 +438,11 @@ export const blockProcessHandler: JobHandler = {
 
       matchedEventCount = insertedEvents.length;
 
-      // Process each inserted event: enqueue evaluation, check cooldown, publish alerts
+      // Enqueue event.evaluate for each matched event.
+      // The event-processing handler owns cooldown checking and alert creation.
       for (let i = 0; i < insertedEvents.length; i++) {
         const event = insertedEvents[i]!;
-        const { rule, matchedInput } = allNormalizedValues[i]!;
-
-        // Enqueue rule evaluation
         await eventsQueue.add('event.evaluate', { eventId: event.id });
-
-        // Cooldown check before publishing alert (Fix #8)
-        const det = detectionMap.get(rule.detectionId);
-
-        if (det && det.cooldownMinutes > 0) {
-          const cooldownMs = det.cooldownMinutes * 60 * 1000;
-          const cooldownThreshold = new Date(Date.now() - cooldownMs);
-          const [acquired] = await db
-            .update(detections)
-            .set({ lastTriggeredAt: new Date() })
-            .where(and(
-              eq(detections.id, rule.detectionId),
-              or(
-                isNull(detections.lastTriggeredAt),
-                lt(detections.lastTriggeredAt, cooldownThreshold),
-              ),
-            ))
-            .returning({ id: detections.id });
-          if (!acquired) {
-            log.debug({ networkSlug, ruleId: rule.id }, 'rule suppressed by cooldown');
-            continue;
-          }
-          // Update in-memory map to avoid re-triggering within same block
-          if (det) det.lastTriggeredAt = new Date();
-        }
-
-        // Publish alert
-        await alertsQueue.add(
-          `alert-${rule.detectionId}-${blockNumber}-${i}`,
-          {
-            type: matchedInput.matchType,
-            detectionId: rule.detectionId,
-            ruleId: rule.id,
-            orgId: rule.orgId,
-            networkSlug,
-            blockNumber,
-            transactionHash: matchedInput.transactionHash,
-            eventName: matchedInput.eventName,
-            eventArgs: matchedInput.eventArgs,
-            matchedEventId: event.id,
-            channelIds: det?.channelIds ?? rule.channelIds,
-            timestamp: Date.now(),
-          },
-          {
-            attempts: 5,
-            backoff: { type: 'exponential', delay: 3_000 },
-          },
-        );
-
-        log.info({ networkSlug, ruleId: rule.id, transactionHash: matchedInput.transactionHash }, 'rule matched');
       }
     }
 
@@ -554,12 +501,13 @@ export const statePollHandler: JobHandler = {
       if (!rule.viewCall) {
         throw new Error(`view-call rule ${ruleId} is missing required viewCall configuration`);
       }
-      const result = await callViewFunction(
+      currentValue = await callViewFunction(
         client,
         rule.address,
         rule.viewCall.functionSignature,
+        rule.viewCall.args,
+        rule.viewCall.returnType,
       );
-      currentValue = result && result !== '0x' ? BigInt(result) : 0n;
     } else {
       // balance-track
       currentValue = await getTokenBalance(client, rule.address, rule.tokenAddress);
@@ -589,6 +537,11 @@ export const statePollHandler: JobHandler = {
       .returning({ id: chainStateSnapshots.id });
 
     log.debug({ ruleId, ruleType: rule.type, value: currentValue.toString(), snapshotId: snapshot?.id }, 'state poll snapshot stored');
+
+    // Prune old snapshots to keep the table bounded (fire-and-forget)
+    pruneOldSnapshots(ruleId, db).catch((err) =>
+      log.debug({ err, ruleId }, 'snapshot pruning failed (non-critical)'),
+    );
 
     // Evaluate condition
     const evalResult = await evaluateCondition(rule, currentValue, db);
@@ -771,9 +724,20 @@ export const ruleSyncHandler: JobHandler = {
         ruleType === RULE_TYPE.FUNCTION_CALL_MATCH ||
         ruleType === RULE_TYPE.BALANCE_TRACK
       ) {
-        const networkSlug = config?.networkSlug as string | undefined;
+        let networkSlug = config?.networkSlug as string | undefined;
+        // Rule configs store networkId (chain ID) rather than networkSlug — resolve it
+        if (!networkSlug && config?.networkId) {
+          const db = getDb();
+          const [network] = await db
+            .select({ slug: chainNetworks.slug })
+            .from(chainNetworks)
+            .where(eq(chainNetworks.chainId, Number(config.networkId)));
+          networkSlug = network?.slug;
+        }
         if (networkSlug) {
           await ensureBlockPollerScheduled(networkSlug);
+        } else {
+          log.warn({ ruleId, config }, 'could not resolve networkSlug for block poller');
         }
       }
     } else if (action === 'remove') {
@@ -893,24 +857,32 @@ async function loadActiveEventRules(
 
   return rows.flatMap((r) => {
     const config = r.config as Record<string, unknown>;
-    const cfgNetworkId = config.networkId as number | undefined;
+    const cfgNetworkId = config.networkId !== undefined ? Number(config.networkId) : undefined;
 
-    // Filter to the requested network
-    if (cfgNetworkId !== undefined && cfgNetworkId !== networkId) return [];
+    // Filter to the requested network by chainId (config stores Ethereum chainId, not DB row ID)
+    if (cfgNetworkId !== undefined && cfgNetworkId !== chainId) return [];
 
-    const topic0 = (config.topic0 as string)?.toLowerCase();
+    let topic0 = (config.topic0 as string)?.toLowerCase();
+    if (!topic0 && config.eventSignature) {
+      try {
+        topic0 = toEventSelector(config.eventSignature as string).toLowerCase();
+      } catch {
+        log.warn({ ruleId: r.id, eventSignature: config.eventSignature }, 'failed to compute topic0 from eventSignature, skipping');
+        return [];
+      }
+    }
     if (!topic0) {
-      log.warn({ ruleId: r.id }, 'event rule has no topic0, skipping');
+      log.warn({ ruleId: r.id }, 'event rule has no topic0 or eventSignature, skipping');
       return [];
     }
 
     const rt = canonicalType(r.ruleType);
     const matchType =
       rt === RULE_TYPE.WINDOWED_SPIKE
-        ? (RULE_TYPE.WINDOWED_SPIKE as const)
+        ? RULE_TYPE.WINDOWED_SPIKE
         : rt === RULE_TYPE.WINDOWED_COUNT
-          ? (RULE_TYPE.WINDOWED_COUNT as const)
-          : (RULE_TYPE.EVENT_MATCH as const);
+          ? RULE_TYPE.WINDOWED_COUNT
+          : RULE_TYPE.EVENT_MATCH;
 
     // Parse conditions
     let conditions: Condition[] = [];
@@ -938,7 +910,7 @@ async function loadActiveEventRules(
         networkSlug,
         chainId,
         topic0,
-        contractAddress: (config.contract_address as string)?.toLowerCase(),
+        contractAddress: ((config.contractAddress ?? config.contract_address) as string | undefined)?.toLowerCase(),
         conditions,
         window: config.window_config
           ? {
@@ -1105,6 +1077,40 @@ async function loadPollRuleById(ruleId: string): Promise<PollRule | null> {
 }
 
 // ---------------------------------------------------------------------------
+// Snapshot ring-buffer pruning
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete snapshots for a rule beyond the MAX_SNAPSHOTS_PER_RULE cap.
+ * Keeps the most recent MAX_SNAPSHOTS_PER_RULE rows; deletes everything older.
+ * Called fire-and-forget after each insert — never blocks the poll path.
+ */
+async function pruneOldSnapshots(
+  ruleId: string,
+  db: ReturnType<typeof getDb>,
+): Promise<void> {
+  // Find the polled_at of the oldest snapshot we want to keep
+  const cutoff = await db
+    .select({ polledAt: chainStateSnapshots.polledAt })
+    .from(chainStateSnapshots)
+    .where(eq(chainStateSnapshots.ruleId, ruleId))
+    .orderBy(desc(chainStateSnapshots.polledAt))
+    .limit(1)
+    .offset(MAX_SNAPSHOTS_PER_RULE - 1);
+
+  if (cutoff.length === 0) return; // fewer than MAX rows — nothing to prune
+
+  await db
+    .delete(chainStateSnapshots)
+    .where(
+      and(
+        eq(chainStateSnapshots.ruleId, ruleId),
+        sql`${chainStateSnapshots.polledAt} < ${cutoff[0]!.polledAt}`,
+      ),
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Condition evaluator (ported from ChainAlert's evaluator.ts)
 // ---------------------------------------------------------------------------
 
@@ -1136,20 +1142,85 @@ async function evaluateBalanceCondition(
   ruleId: string,
   db: ReturnType<typeof getDb>,
 ): Promise<EvalResult> {
-  // Get previous snapshot for comparison
+  // Fetch 2 most-recent snapshots (desc so [0]=current just stored, [1]=previous)
   const prevSnapshots = await db
-    .select({ value: chainStateSnapshots.value })
+    .select({ value: chainStateSnapshots.value, polledAt: chainStateSnapshots.polledAt })
     .from(chainStateSnapshots)
     .where(eq(chainStateSnapshots.ruleId, ruleId))
-    .orderBy(chainStateSnapshots.polledAt)
+    .orderBy(desc(chainStateSnapshots.polledAt))
     .limit(2);
 
-  // The most recent is the one we just inserted; the one before is "previous"
   const previousValue =
-    prevSnapshots.length >= 2 ? BigInt(prevSnapshots[0]!.value) : null;
+    prevSnapshots.length >= 2 ? BigInt(prevSnapshots[1]!.value) : null;
 
   switch (config.type) {
     case 'percent_change': {
+      // --- Windowed comparison: compare current vs peak/trough in window ------
+      if (config.windowMs && config.windowMs > 0) {
+        const windowStart = new Date(Date.now() - config.windowMs);
+        const windowRows = await db
+          .select({ value: chainStateSnapshots.value })
+          .from(chainStateSnapshots)
+          .where(
+            and(
+              eq(chainStateSnapshots.ruleId, ruleId),
+              gte(chainStateSnapshots.polledAt, windowStart),
+            ),
+          )
+          .orderBy(desc(chainStateSnapshots.polledAt));
+
+        const windowValues = windowRows.map((r) => BigInt(r.value));
+        if (windowValues.length === 0) return { triggered: false };
+
+        let maxInWindow = windowValues[0]!;
+        let minInWindow = windowValues[0]!;
+        for (const v of windowValues) {
+          if (v > maxInWindow) maxInWindow = v;
+          if (v < minInWindow) minInWindow = v;
+        }
+
+        const thresholdBps = config.value * 100n;
+
+        if (maxInWindow > 0n && currentValue < maxInWindow) {
+          const dropBps = ((maxInWindow - currentValue) * 10000n) / maxInWindow;
+          if (dropBps >= thresholdBps) {
+            return {
+              triggered: true,
+              context: {
+                conditionType: 'percent_change',
+                currentValue: currentValue.toString(),
+                referenceValue: maxInWindow.toString(),
+                percentChange: -Number(dropBps) / 100,
+                threshold: config.value.toString(),
+                windowMs: config.windowMs,
+                direction: 'drop',
+              },
+            };
+          }
+        }
+
+        if (config.bidirectional && minInWindow > 0n && currentValue > minInWindow) {
+          const riseBps = ((currentValue - minInWindow) * 10000n) / minInWindow;
+          if (riseBps >= thresholdBps) {
+            return {
+              triggered: true,
+              context: {
+                conditionType: 'percent_change',
+                currentValue: currentValue.toString(),
+                referenceValue: minInWindow.toString(),
+                percentChange: Number(riseBps) / 100,
+                threshold: config.value.toString(),
+                windowMs: config.windowMs,
+                direction: 'rise',
+              },
+            };
+          }
+        }
+
+        return { triggered: false };
+      }
+
+      // --- Non-windowed: compare current vs immediately previous --------------
       if (previousValue === null || previousValue === 0n) return { triggered: false };
       const diff =
         currentValue > previousValue
@@ -1214,16 +1285,16 @@ async function evaluateStateCondition(
   ruleId: string,
   db: ReturnType<typeof getDb>,
 ): Promise<EvalResult> {
-  // Get previous snapshot
+  // Fetch 2 most-recent snapshots (desc so [0]=current just stored, [1]=previous)
   const prevSnapshots = await db
     .select({ value: chainStateSnapshots.value })
     .from(chainStateSnapshots)
     .where(eq(chainStateSnapshots.ruleId, ruleId))
-    .orderBy(chainStateSnapshots.polledAt)
+    .orderBy(desc(chainStateSnapshots.polledAt))
     .limit(2);
 
   const previousValue =
-    prevSnapshots.length >= 2 ? BigInt(prevSnapshots[0]!.value) : null;
+    prevSnapshots.length >= 2 ? BigInt(prevSnapshots[1]!.value) : null;
 
   switch (config.type) {
     case 'changed':
@@ -1275,16 +1346,16 @@ async function evaluateStateCondition(
       if (config.percentThreshold === undefined) return { triggered: false };
       const windowSize = Math.min(Math.max(config.windowSize ?? 100, 1), 500);
 
-      // Load recent snapshots for rolling mean
+      // Fetch the N most-recent historical snapshots (desc), skip [0]=current
       const recentRows = await db
         .select({ value: chainStateSnapshots.value })
         .from(chainStateSnapshots)
         .where(eq(chainStateSnapshots.ruleId, ruleId))
-        .orderBy(chainStateSnapshots.polledAt)
+        .orderBy(desc(chainStateSnapshots.polledAt))
         .limit(windowSize + 1);
 
-      // Drop the most recent (current value just stored)
-      const recentValues = recentRows.slice(0, -1).map((r) => BigInt(r.value));
+      // recentRows[0] is the snapshot just inserted; skip it for the rolling mean
+      const recentValues = recentRows.slice(1).map((r) => BigInt(r.value));
       if (recentValues.length < 2) return { triggered: false };
 
       const sum = recentValues.reduce((a, b) => a + b, 0n);
@@ -1373,33 +1444,7 @@ async function reconcileAllPollRules(): Promise<void> {
 }
 
 async function reconcileBlockPollers(): Promise<void> {
-  const db = getDb();
-
-  // Find all active networks via chain rules
-  const activeRuleRows = await db
-    .select({ config: rules.config })
-    .from(rules)
-    .where(
-      and(
-        eq(rules.moduleId, 'chain'),
-        eq(rules.status, 'active'),
-        inArray(rules.ruleType, [
-          RULE_TYPE.EVENT_MATCH, RULE_TYPE.WINDOWED_COUNT, RULE_TYPE.WINDOWED_SPIKE,
-          RULE_TYPE.BALANCE_TRACK, RULE_TYPE.FUNCTION_CALL_MATCH,
-          'event-match', 'windowed-count', 'windowed-spike',
-          'balance-track', 'function-call-match',
-        ]),
-      ),
-    );
-
-  // Extract unique networkSlugs from rule configs
-  const slugs = new Set<string>();
-  for (const row of activeRuleRows) {
-    const config = row.config as Record<string, unknown>;
-    const slug = config.networkSlug as string | undefined;
-    if (slug) slugs.add(slug);
-  }
-
+  const slugs = await getNetworkSlugsWithBlockRules();
   for (const slug of slugs) {
     await ensureBlockPollerScheduled(slug);
   }
@@ -1476,7 +1521,8 @@ export const contractVerifyHandler: JobHandler = {
       return;
     }
 
-    if (!network.explorerApi) {
+    // Need either a chainId (enables Etherscan V2 universal endpoint) or a custom explorerApi URL
+    if (!network.chainId && !network.explorerApi) {
       log.warn({ networkSlug }, 'contract verify: no explorer API configured');
       await db
         .update(chainContracts)
@@ -1487,7 +1533,10 @@ export const contractVerifyHandler: JobHandler = {
 
     try {
       // 1. Fetch ABI from explorer
-      const { abi, contractName } = await fetchContractAbi(network.explorerApi, address, { chainId: network.chainId });
+      // When chainId is present, fetchContractAbi uses Etherscan V2 (explorerApi is ignored).
+      // When only explorerApi is present, it uses that URL directly.
+      const etherscanApiKey = process.env.ETHERSCAN_API_KEY ?? undefined;
+      const { abi, contractName, storageLayout } = await fetchContractAbi(network.explorerApi ?? '', address, { chainId: network.chainId ?? undefined, apiKey: etherscanApiKey });
 
       // 2. Check ERC-1967 proxy slot
       let isProxy = false;
@@ -1510,7 +1559,7 @@ export const contractVerifyHandler: JobHandler = {
 
             // Fetch implementation ABI
             try {
-              const implResult = await fetchContractAbi(network.explorerApi, implAddress, { chainId: network.chainId });
+              const implResult = await fetchContractAbi(network.explorerApi ?? '', implAddress, { chainId: network.chainId ?? undefined, apiKey: etherscanApiKey });
               implAbi = implResult.abi;
             } catch (err) {
               // Implementation ABI is best-effort
@@ -1538,7 +1587,8 @@ export const contractVerifyHandler: JobHandler = {
           implementation,
           traits,
           fetchedAt: new Date(),
-          layoutStatus: 'fetched',
+          storageLayout: storageLayout ?? undefined,
+          layoutStatus: storageLayout ? 'fetched' : 'no_layout',
         })
         .where(eq(chainContracts.id, contractId));
 

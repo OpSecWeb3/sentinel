@@ -106,17 +106,17 @@ export async function getNetworkSlugsWithBlockRules(): Promise<string[]> {
   const rows = await db
     .select({ slug: chainNetworks.slug })
     .from(rules)
-    .innerJoin(chainNetworks, eq(sql`(${rules.config}->>'networkId')::int`, chainNetworks.id))
+    .innerJoin(chainNetworks, eq(sql`(${rules.config}->>'networkId')::int`, chainNetworks.chainId))
     .where(
       and(
         eq(rules.status, 'active'),
         eq(rules.moduleId, 'chain'),
         inArray(rules.ruleType, [
-          'event-match',
-          'windowed-count',
-          'windowed-spike',
-          'balance-track',
-          'function-call-match',
+          'chain.event_match',
+          'chain.windowed_count',
+          'chain.windowed_spike',
+          'chain.balance_track',
+          'chain.function_call_match',
         ]),
       ),
     );

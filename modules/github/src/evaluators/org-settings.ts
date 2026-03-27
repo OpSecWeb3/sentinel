@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const configSchema = z.object({
   watchActions: z.array(z.string()).default([]),  // empty = all actions
@@ -9,6 +10,9 @@ export const orgSettingsEvaluator: RuleEvaluator = {
   moduleId: 'github',
   ruleType: 'github.org_settings',
   configSchema,
+  uiSchema: [
+    { key: 'watchActions', label: 'Actions to watch', type: 'string-array', required: false, placeholder: 'member_added\nteam_created\norg_setting_changed', help: 'Leave empty to watch all org/team actions.' },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

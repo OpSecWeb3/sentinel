@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import { NETWORK_UI_FIELD, CONTRACT_UI_FIELD, EVENT_SIG_UI_FIELD, GROUP_BY_UI_FIELD } from './_ui-shared.js';
 
 // ---------------------------------------------------------------------------
 // Config schema — ported from ChainAlert's windowed-spike rule config
@@ -161,6 +162,16 @@ export const windowedSpikeEvaluator: RuleEvaluator = {
   moduleId: 'chain',
   ruleType: 'chain.windowed_spike',
   configSchema,
+  uiSchema: [
+    NETWORK_UI_FIELD,
+    CONTRACT_UI_FIELD,
+    EVENT_SIG_UI_FIELD,
+    { key: 'observationMinutes', label: 'Observation window (min)', type: 'number', required: true, default: 5, min: 1 },
+    { key: 'baselineMinutes', label: 'Baseline window (min)', type: 'number', required: true, default: 60, min: 1 },
+    { key: 'increasePercent', label: 'Rate increase % to alert', type: 'number', required: true, default: 200, min: 1 },
+    { key: 'minBaselineCount', label: 'Minimum baseline count', type: 'number', required: false, default: 3, min: 1, help: 'Skip alert if baseline count is too low to be meaningful.' },
+    GROUP_BY_UI_FIELD,
+  ],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule, redis } = ctx;

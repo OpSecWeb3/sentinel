@@ -6,7 +6,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '@sentinel/db';
 import { events } from '@sentinel/db/schema/core';
-import { eq, and, gte, lte, count, desc } from '@sentinel/db';
+import { eq, and, gte, lte, count, desc, sql, ilike } from '@sentinel/db';
 import type { AppEnv } from '@sentinel/shared/hono-types';
 import { requireAuth, requireOrg } from '../middleware/rbac.js';
 import { requireScope } from '../middleware/scope.js';
@@ -18,6 +18,7 @@ router.use('*', requireAuth, requireOrg);
 const listQuerySchema = z.object({
   moduleId: z.string().optional(),
   eventType: z.string().optional(),
+  search: z.string().max(255).optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
   page: z.coerce.number().int().positive().default(1),
@@ -38,6 +39,11 @@ router.get('/', requireScope('api:read'), validate('query', listQuerySchema), as
   const conditions = [eq(events.orgId, orgId)];
   if (query.moduleId) conditions.push(eq(events.moduleId, query.moduleId));
   if (query.eventType) conditions.push(eq(events.eventType, query.eventType));
+  if (query.search) {
+    const escapedSearch = query.search.replace(/[%_\\]/g, (ch) => `\\${ch}`);
+    const term = `%${escapedSearch}%`;
+    conditions.push(sql`(${events.externalId} ILIKE ${term} OR ${events.eventType} ILIKE ${term} OR ${events.payload}::text ILIKE ${term})`);
+  }
   if (query.from) conditions.push(gte(events.receivedAt, new Date(query.from)));
   if (query.to) conditions.push(lte(events.receivedAt, new Date(query.to)));
 

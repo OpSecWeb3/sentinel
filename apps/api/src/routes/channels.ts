@@ -84,7 +84,11 @@ const updateBodySchema = z.object({
 );
 
 const idParamSchema = z.object({ id: z.string().uuid() });
-const listQuerySchema = z.object({ type: channelTypeEnum.optional() });
+const listQuerySchema = z.object({
+  type: channelTypeEnum.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -174,9 +178,11 @@ router.get('/', requireScope('api:read'), validate('query', listQuerySchema), as
 
   const channels = await db.select()
     .from(notificationChannels)
-    .where(and(...conditions));
+    .where(and(...conditions))
+    .limit(query.limit)
+    .offset(query.offset);
 
-  return c.json({ data: channels.map((ch) => redactChannelConfig(ch)) });
+  return c.json({ data: channels.map((ch) => redactChannelConfig(ch)), limit: query.limit, offset: query.offset });
 });
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
 import { conditionSchema, evaluateConditions, type Condition } from './event-match.js';
+import { NETWORK_UI_FIELD, CONTRACT_UI_FIELD } from './_ui-shared.js';
 
 // ---------------------------------------------------------------------------
 // Config schema — monitors read-only contract function return values
@@ -31,6 +32,12 @@ export const viewCallEvaluator: RuleEvaluator = {
   moduleId: 'chain',
   ruleType: 'chain.view_call',
   configSchema,
+  uiSchema: [
+    NETWORK_UI_FIELD,
+    CONTRACT_UI_FIELD,
+    { key: 'functionSignature', label: 'View function signature', type: 'text', required: true, placeholder: 'balanceOf(address)', help: 'Read-only function to call.' },
+    { key: 'resultField', label: 'Result field', type: 'text', required: false, placeholder: '0', help: 'Index or key of the return value to evaluate (default: first return value).' },
+  ],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

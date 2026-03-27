@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SearchInput } from "@/components/ui/search-input";
-import { NavTabs, type NavTab } from "@/components/ui/nav-tabs";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { useToast } from "@/hooks/use-toast";
 import { ToastContainer } from "@/components/ui/toast";
@@ -24,6 +24,7 @@ interface Network {
 
 interface ChainContract {
   id: number;
+  contractId: number;
   label: string;
   address: string;
   networkId: number;
@@ -73,15 +74,6 @@ const abiStatusColor: Record<string, string> = {
   error: "text-destructive",
 };
 
-const CHAIN_TABS: NavTab[] = [
-  { href: "/chain", label: "overview" },
-  { href: "/chain/networks", label: "networks" },
-  { href: "/chain/contracts", label: "contracts" },
-  { href: "/chain/rpc", label: "rpc" },
-  { href: "/chain/templates", label: "templates" },
-  { href: "/chain/events", label: "events" },
-  { href: "/chain/state-changes", label: "state-changes" },
-];
 
 /* ── page ──────────────────────────────────────────────────────── */
 
@@ -106,12 +98,6 @@ export default function ChainContractsPage() {
 
   // Contract detail
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [detailData, setDetailData] = useState<{
-    abi: unknown[];
-    events: { name: string; signature: string }[];
-    functions: { name: string; signature: string; stateMutability: string }[];
-  } | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
 
   // Edit tags/notes
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -214,32 +200,8 @@ export default function ChainContractsPage() {
     }
   }
 
-  async function loadContractDetail(contractId: number) {
-    if (expandedId === contractId) {
-      setExpandedId(null);
-      setDetailData(null);
-      return;
-    }
-    setExpandedId(contractId);
-    setDetailLoading(true);
-    try {
-      const res = await apiFetch<{
-        abi: unknown[];
-        events: { name: string; signature: string }[];
-        functions: {
-          name: string;
-          signature: string;
-          stateMutability: string;
-        }[];
-      }>(`/modules/chain/contracts/${contractId}/detail`, {
-        credentials: "include",
-      });
-      setDetailData(res);
-    } catch {
-      setDetailData(null);
-    } finally {
-      setDetailLoading(false);
-    }
+  function loadContractDetail(contractId: number) {
+    setExpandedId((prev) => (prev === contractId ? null : contractId));
   }
 
   async function saveTagsNotes(contractId: number) {
@@ -288,9 +250,6 @@ export default function ChainContractsPage() {
           {showAddForm ? "Cancel" : "+ Add Contract"}
         </Button>
       </div>
-
-      {/* Navigation */}
-      <NavTabs tabs={CHAIN_TABS} />
 
       {/* Add Contract Form */}
       {showAddForm && (
@@ -497,25 +456,23 @@ export default function ChainContractsPage() {
                     </span>
                   </button>
 
-                  {/* Expanded detail */}
+                  {/* Inline quick-actions panel */}
                   {expandedId === contract.id && (
-                    <div className="border-l-2 border-primary/30 bg-muted/10 ml-3 mb-2 pl-4 py-4 space-y-4">
+                    <div className="border-l-2 border-primary/30 bg-muted/10 ml-3 mb-2 pl-4 py-3 space-y-3">
                       <div className="flex items-center justify-between">
-                        <p className="text-xs text-muted-foreground">
-                          $ cat contract/{truncateAddress(contract.address)}/detail
-                        </p>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                          <span className="font-mono">{contract.address}</span>
+                          <span>[{contract.networkName}]</span>
+                          <span>{contract.detectionCount} detection{contract.detectionCount !== 1 ? "s" : ""}</span>
+                        </div>
                         <div className="flex items-center gap-2">
                           {contract.abiStatus !== "loaded" && (
                             <button
-                              onClick={() =>
-                                fetchAbiForContract(contract.id)
-                              }
+                              onClick={() => fetchAbiForContract(contract.id)}
                               disabled={fetchingAbi}
                               className="text-xs text-primary hover:underline disabled:opacity-50"
                             >
-                              {fetchingAbi
-                                ? "[fetching...]"
-                                : "[fetch ABI]"}
+                              {fetchingAbi ? "[fetching...]" : "[fetch ABI]"}
                             </button>
                           )}
                           <button
@@ -530,16 +487,21 @@ export default function ChainContractsPage() {
                             }}
                             className="text-xs text-muted-foreground hover:text-primary transition-colors"
                           >
-                            {editingId === contract.id
-                              ? "[cancel edit]"
-                              : "[edit]"}
+                            {editingId === contract.id ? "[cancel]" : "[edit]"}
                           </button>
+                          <Link
+                            href={`/chain/contracts/${contract.contractId}`}
+                            className="text-xs text-primary hover:underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            [view]
+                          </Link>
                         </div>
                       </div>
 
                       {/* Edit form */}
                       {editingId === contract.id && (
-                        <div className="space-y-2 border-b border-border pb-3">
+                        <div className="space-y-2 border-t border-border pt-3">
                           <div>
                             <label className="text-xs text-muted-foreground block mb-1">
                               tags (comma-separated)
@@ -560,100 +522,10 @@ export default function ChainContractsPage() {
                               className="h-7 text-xs"
                             />
                           </div>
-                          <Button
-                            size="sm"
-                            onClick={() => saveTagsNotes(contract.id)}
-                          >
+                          <Button size="sm" onClick={() => saveTagsNotes(contract.id)}>
                             $ save
                           </Button>
                         </div>
-                      )}
-
-                      {detailLoading ? (
-                        <div className="animate-pulse space-y-2">
-                          <div className="h-3 w-48 bg-muted-foreground/20 rounded" />
-                          <div className="h-3 w-36 bg-muted-foreground/20 rounded" />
-                        </div>
-                      ) : detailData ? (
-                        <div className="space-y-3">
-                          {/* Events */}
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">
-                              events ({detailData.events.length})
-                            </p>
-                            {detailData.events.length > 0 ? (
-                              <div className="space-y-0.5">
-                                {detailData.events.map((ev) => (
-                                  <div
-                                    key={ev.signature}
-                                    className="text-xs flex gap-2"
-                                  >
-                                    <span className="text-primary font-medium">
-                                      {ev.name}
-                                    </span>
-                                    <span className="text-muted-foreground truncate">
-                                      {ev.signature}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-xs text-muted-foreground">
-                                no events
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Functions */}
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">
-                              functions ({detailData.functions.length})
-                            </p>
-                            {detailData.functions.length > 0 ? (
-                              <div className="space-y-0.5">
-                                {detailData.functions.map((fn) => (
-                                  <div
-                                    key={fn.signature}
-                                    className="text-xs flex gap-2"
-                                  >
-                                    <span className="text-foreground font-medium">
-                                      {fn.name}
-                                    </span>
-                                    <span
-                                      className={cn(
-                                        "font-mono",
-                                        fn.stateMutability === "view" ||
-                                          fn.stateMutability === "pure"
-                                          ? "text-muted-foreground"
-                                          : "text-warning",
-                                      )}
-                                    >
-                                      [{fn.stateMutability}]
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-xs text-muted-foreground">
-                                no functions
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Raw ABI */}
-                          <details>
-                            <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
-                              raw ABI ({detailData.abi.length} entries)
-                            </summary>
-                            <pre className="mt-2 text-xs text-foreground overflow-x-auto max-h-64 overflow-y-auto bg-background p-2 border border-border">
-                              {JSON.stringify(detailData.abi, null, 2)}
-                            </pre>
-                          </details>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">
-                          no detail data available
-                        </p>
                       )}
                     </div>
                   )}

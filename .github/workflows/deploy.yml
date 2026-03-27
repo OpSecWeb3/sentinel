@@ -45,7 +45,9 @@ jobs:
           DATABASE_URL=$(fetch_param /sentinel/production/DATABASE_URL)
           SESSION_SECRET=$(fetch_param /sentinel/production/SESSION_SECRET)
           ENCRYPTION_KEY=$(fetch_param /sentinel/production/ENCRYPTION_KEY)
+          ENCRYPTION_KEY_PREV=$(fetch_param /sentinel/production/ENCRYPTION_KEY_PREV)
           ALLOWED_ORIGINS=$(fetch_param /sentinel/production/ALLOWED_ORIGINS)
+          NEXT_PUBLIC_API_URL=$(fetch_param /sentinel/production/NEXT_PUBLIC_API_URL)
           REDIS_PASSWORD=$(fetch_param /shared/production/REDIS_PASSWORD)
 
           # Optional secrets
@@ -56,8 +58,13 @@ jobs:
           GITHUB_APP_WEBHOOK_SECRET=$(fetch_param /sentinel/production/GITHUB_APP_WEBHOOK_SECRET)
           GITHUB_APP_CLIENT_ID=$(fetch_param /sentinel/production/GITHUB_APP_CLIENT_ID)
           GITHUB_APP_CLIENT_SECRET=$(fetch_param /sentinel/production/GITHUB_APP_CLIENT_SECRET)
+          GITHUB_APP_SLUG=$(fetch_param /sentinel/production/GITHUB_APP_SLUG)
+          GITHUB_TOKEN=$(fetch_param /sentinel/production/GITHUB_TOKEN)
           SMTP_URL=$(fetch_param /sentinel/production/SMTP_URL)
           SMTP_FROM=$(fetch_param /sentinel/production/SMTP_FROM "alerts@sentinel.dev")
+          SENTRY_DSN=$(fetch_param /sentinel/production/SENTRY_DSN)
+          SENTRY_ENVIRONMENT=$(fetch_param /sentinel/production/SENTRY_ENVIRONMENT "production")
+          ETHERSCAN_API_KEY=$(fetch_param /sentinel/production/ETHERSCAN_API_KEY)
 
           cat > /tmp/sentinel.env << 'ENVEOF'
           NODE_ENV=production
@@ -70,7 +77,10 @@ jobs:
             printf 'REDIS_URL=redis://:%s@redis:6379\n' "$REDIS_PASSWORD"
             printf 'SESSION_SECRET=%s\n' "$SESSION_SECRET"
             printf 'ENCRYPTION_KEY=%s\n' "$ENCRYPTION_KEY"
+            printf 'ENCRYPTION_KEY_PREV=%s\n' "$ENCRYPTION_KEY_PREV"
             printf 'ALLOWED_ORIGINS=%s\n' "$ALLOWED_ORIGINS"
+            printf 'NEXT_PUBLIC_API_URL=%s\n' "$NEXT_PUBLIC_API_URL"
+            printf 'API_BASE_URL=%s\n' "$NEXT_PUBLIC_API_URL"
             printf 'SLACK_CLIENT_ID=%s\n' "$SLACK_CLIENT_ID"
             printf 'SLACK_CLIENT_SECRET=%s\n' "$SLACK_CLIENT_SECRET"
             printf 'GITHUB_APP_ID=%s\n' "$GITHUB_APP_ID"
@@ -78,55 +88,65 @@ jobs:
             printf 'GITHUB_APP_WEBHOOK_SECRET=%s\n' "$GITHUB_APP_WEBHOOK_SECRET"
             printf 'GITHUB_APP_CLIENT_ID=%s\n' "$GITHUB_APP_CLIENT_ID"
             printf 'GITHUB_APP_CLIENT_SECRET=%s\n' "$GITHUB_APP_CLIENT_SECRET"
+            printf 'GITHUB_APP_SLUG=%s\n' "$GITHUB_APP_SLUG"
+            printf 'GITHUB_TOKEN=%s\n' "$GITHUB_TOKEN"
             printf 'SMTP_URL=%s\n' "$SMTP_URL"
             printf 'SMTP_FROM=%s\n' "$SMTP_FROM"
+            printf 'SENTRY_DSN=%s\n' "$SENTRY_DSN"
+            printf 'SENTRY_ENVIRONMENT=%s\n' "$SENTRY_ENVIRONMENT"
+            printf 'ETHERSCAN_API_KEY=%s\n' "$ETHERSCAN_API_KEY"
           } >> /tmp/sentinel.env
 
           # Strip leading whitespace from heredoc lines
           sed -i 's/^[[:space:]]*//' /tmp/sentinel.env
 
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.HETZNER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.HETZNER_HOST }} >> ~/.ssh/known_hosts
+
       - name: Ensure repo is cloned on server
-        uses: appleboy/ssh-action@v1
         env:
+          HOST: ${{ secrets.HETZNER_HOST }}
+          USER: ${{ secrets.HETZNER_USER }}
           GH_TOKEN: ${{ secrets.GH_APP_TOKEN }}
-        with:
-          host: ${{ secrets.HETZNER_HOST }}
-          username: ${{ secrets.HETZNER_USER }}
-          key: ${{ secrets.HETZNER_SSH_KEY }}
-          envs: GH_TOKEN
-          script: |
+          REPO: ${{ github.repository }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ${USER}@${HOST} "
             if [ ! -d /opt/sentinel/.git ]; then
               sudo mkdir -p /opt/sentinel
-              sudo chown $USER:$USER /opt/sentinel
-              git clone "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" /opt/sentinel
+              sudo chown \$USER:\$USER /opt/sentinel
+              git clone 'https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git' /opt/sentinel
             fi
+          "
 
       - name: Copy .env to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.HETZNER_HOST }}
-          username: ${{ secrets.HETZNER_USER }}
-          key: ${{ secrets.HETZNER_SSH_KEY }}
-          source: /tmp/sentinel.env
-          target: /opt/sentinel/.env
+        env:
+          HOST: ${{ secrets.HETZNER_HOST }}
+          USER: ${{ secrets.HETZNER_USER }}
+        run: scp -i ~/.ssh/deploy_key /tmp/sentinel.env ${USER}@${HOST}:/opt/sentinel/.env
 
       - name: Deploy to Hetzner
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.HETZNER_HOST }}
-          username: ${{ secrets.HETZNER_USER }}
-          key: ${{ secrets.HETZNER_SSH_KEY }}
-          script: |
+        env:
+          HOST: ${{ secrets.HETZNER_HOST }}
+          USER: ${{ secrets.HETZNER_USER }}
+          GH_TOKEN: ${{ secrets.GH_APP_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ${USER}@${HOST} "
             cd /opt/sentinel
+            git remote set-url origin 'https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git'
             bash scripts/deploy.sh
+            git remote set-url origin 'https://github.com/${REPO}.git'
+          "
 
       - name: Collect logs on failure
         if: failure()
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.HETZNER_HOST }}
-          username: ${{ secrets.HETZNER_USER }}
-          key: ${{ secrets.HETZNER_SSH_KEY }}
-          script: |
-            cd /opt/sentinel
-            docker compose -f docker-compose.prod.yml logs --tail=100
+        env:
+          HOST: ${{ secrets.HETZNER_HOST }}
+          USER: ${{ secrets.HETZNER_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ${USER}@${HOST} \
+            "cd /opt/sentinel && docker compose -f docker-compose.prod.yml logs --tail=100" || true

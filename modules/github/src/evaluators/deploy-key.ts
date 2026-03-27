@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const configSchema = z.object({
   alertOnActions: z.array(z.enum(['created', 'deleted'])).default(['created']),
@@ -10,6 +11,10 @@ export const deployKeyEvaluator: RuleEvaluator = {
   moduleId: 'github',
   ruleType: 'github.deploy_key',
   configSchema,
+  uiSchema: [
+    { key: 'alertOnActions', label: 'Actions to alert on', type: 'string-array', required: false, placeholder: 'created\ndeleted', help: 'Leave empty for all actions.' },
+    { key: 'alertOnWriteKeys', label: 'Alert only on write-access keys', type: 'boolean', required: false, default: true, help: 'When true, only alert on deploy keys with write access.' },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

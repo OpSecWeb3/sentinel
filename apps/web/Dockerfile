@@ -19,7 +19,7 @@ COPY packages/notifications/package.json ./packages/notifications/
 COPY modules/github/package.json ./modules/github/
 COPY modules/chain/package.json ./modules/chain/
 COPY modules/infra/package.json ./modules/infra/
-COPY modules/release-chain/package.json ./modules/release-chain/
+COPY modules/registry/package.json ./modules/registry/
 
 # Install all dependencies (including devDependencies for the build)
 RUN pnpm install --frozen-lockfile
@@ -36,6 +36,11 @@ COPY --from=deps /app/ ./
 
 # Copy web app source
 COPY apps/web/ ./apps/web/
+
+# NEXT_PUBLIC_* vars are inlined into the JS bundle at build time.
+# They must be passed as build args — runtime env vars are too late.
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 # Build the Next.js app (output: "standalone" in next.config.ts)
 RUN pnpm --filter @sentinel/web build

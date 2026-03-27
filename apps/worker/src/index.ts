@@ -13,12 +13,15 @@ import { dataRetentionHandler, DEFAULT_RETENTION_POLICIES } from './handlers/dat
 import { createCorrelationHandler } from './handlers/correlation-evaluate.js';
 import { createCorrelationExpiryHandler } from './handlers/correlation-expiry.js';
 import { pollSweepHandler } from './handlers/poll-sweep.js';
+import { sessionCleanupHandler } from './handlers/session-cleanup.js';
+import { keyRotationHandler } from './handlers/key-rotation.js';
 
 // Module imports
 import { GitHubModule } from '@sentinel/module-github';
-import { ReleaseChainModule } from '@sentinel/module-release-chain';
+import { RegistryModule } from '@sentinel/module-registry';
 import { ChainModule } from '@sentinel/module-chain';
 import { InfraModule } from '@sentinel/module-infra';
+import { AwsModule } from '@sentinel/module-aws';
 
 // Platform-level evaluators
 import { compoundEvaluator } from '@sentinel/shared/evaluators/compound';
@@ -34,6 +37,10 @@ async function main() {
   });
   setupGlobalHandlers(log);
 
+  // Initialise Sigstore trust material for registry signature verification
+  const { initVerification } = await import('@sentinel/module-registry');
+  await initVerification();
+
   log.info('Starting Sentinel workers');
 
   const redis = new IORedis(config.REDIS_URL, {
@@ -47,7 +54,7 @@ async function main() {
   getDb();
 
   // ── Register modules ────────────────────────────────────────────────
-  const modules = [GitHubModule, ReleaseChainModule, ChainModule, InfraModule];
+  const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule, AwsModule];
 
   // Build evaluator registry
   const evaluators = new Map<string, RuleEvaluator>();
@@ -75,6 +82,8 @@ async function main() {
     alertDispatchHandler,
     dataRetentionHandler,
     pollSweepHandler,
+    sessionCleanupHandler,
+    keyRotationHandler,
   ];
 
   const moduleHandlers = modules.flatMap((m) => m.jobHandlers);
@@ -113,6 +122,20 @@ async function main() {
     { repeat: { every: 86_400_000 }, jobId: 'daily-retention' },
   );
 
+  // ── Schedule session garbage collection every hour ─────────────────
+  await deferredQueue.add(
+    'platform.session.cleanup',
+    {},
+    { repeat: { every: 3_600_000 }, jobId: 'session-cleanup' },
+  );
+
+  // ── Schedule encryption key rotation every 5 minutes ────────────────
+  await deferredQueue.add(
+    'platform.key.rotation',
+    {},
+    { repeat: { every: 300_000 }, jobId: 'key-rotation' },
+  );
+
   // ── Schedule correlation expiry sweep every 5 minutes ───────────────
   await deferredQueue.add(
     'correlation.expiry',
@@ -128,11 +151,18 @@ async function main() {
     { repeat: { every: 300_000 }, jobId: 'rpc-usage-flush' },
   );
 
-  // ── Schedule release-chain artifact poll sweep every 60 seconds ─────
+  // ── Schedule registry artifact poll sweep every 60 seconds ─────
   await moduleJobsQueue.add(
-    'release-chain.poll-sweep',
+    'registry.poll-sweep',
     {},
-    { repeat: { every: 60_000 }, jobId: 'release-chain-poll-sweep' },
+    { repeat: { every: 60_000 }, jobId: 'registry-poll-sweep' },
+  );
+
+  // ── Schedule AWS SQS poll sweep every 60 seconds ─────────────────────
+  await moduleJobsQueue.add(
+    'aws.poll-sweep',
+    {},
+    { repeat: { every: 60_000 }, jobId: 'aws-poll-sweep' },
   );
 
   // ── Graceful shutdown ───────────────────────────────────────────────

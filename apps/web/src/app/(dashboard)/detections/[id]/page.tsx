@@ -12,6 +12,35 @@ import { apiGet, apiFetch } from "@/lib/api";
 
 /* ── types ───────────────────────────────────────────────────── */
 
+type TemplateInputType =
+  | "text"
+  | "number"
+  | "boolean"
+  | "select"
+  | "string-array"
+  | "address"
+  | "contract"
+  | "network";
+
+interface TemplateInput {
+  key: string;
+  label: string;
+  type: TemplateInputType;
+  required: boolean;
+  default?: string | number | boolean | string[];
+  placeholder?: string;
+  help?: string;
+  options?: Array<{ label: string; value: string }>;
+}
+
+interface Template {
+  slug: string;
+  name: string;
+  description: string;
+  severity: string;
+  inputs?: TemplateInput[];
+}
+
 interface Rule {
   id: string;
   ruleType: string;
@@ -33,6 +62,7 @@ interface Detection {
   lastTriggeredAt: string | null;
   createdAt: string;
   updatedAt: string;
+  config: Record<string, unknown>;
   rules: Rule[];
 }
 
@@ -52,12 +82,40 @@ const severityColor: Record<string, string> = {
   low: "text-muted-foreground",
 };
 
+/** True if value is still an unfilled {{placeholder}} */
+function isPlaceholder(val: unknown): boolean {
+  return typeof val === "string" && /^\{\{.+\}\}$/.test(val);
+}
+
+/** Check all rule configs recursively for any unfilled {{placeholder}} tokens */
+function hasUnfilledPlaceholders(rules: Rule[]): boolean {
+  function check(val: unknown): boolean {
+    if (isPlaceholder(val)) return true;
+    if (Array.isArray(val)) return val.some(check);
+    if (val && typeof val === "object")
+      return Object.values(val as Record<string, unknown>).some(check);
+    return false;
+  }
+  return rules.some((r) => check(r.config));
+}
+
+/** Format a config value for display */
+function displayValue(val: unknown, type: TemplateInputType): string {
+  if (val === undefined || val === null || val === "") return "";
+  if (isPlaceholder(val)) return "";
+  if (type === "string-array" && Array.isArray(val))
+    return (val as string[]).join(", ");
+  if (type === "boolean") return val ? "true" : "false";
+  return String(val);
+}
+
 /* ── page ────────────────────────────────────────────────────── */
 
 export default function DetectionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [detection, setDetection] = useState<Detection | null>(null);
+  const [template, setTemplate] = useState<Template | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -67,7 +125,21 @@ export default function DetectionDetailPage() {
     setError(null);
     try {
       const res = await apiGet<{ data: Detection }>(`/api/detections/${id}`);
-      setDetection(res.data);
+      const d = res.data;
+      setDetection(d);
+
+      // If this detection came from a template, fetch its definition so we can
+      // render the inputs as a human-readable configuration panel.
+      if (d.templateId) {
+        apiFetch<{ data: { template: Template } }>(
+          `/api/detections/resolve-template?moduleId=${encodeURIComponent(d.moduleId)}&slug=${encodeURIComponent(d.templateId)}`,
+          { credentials: "include" },
+        )
+          .then((r) => setTemplate(r.data.template))
+          .catch(() => {
+            /* non-fatal — fall back to rule display */
+          });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load detection");
     } finally {
@@ -88,7 +160,9 @@ export default function DetectionDetailPage() {
         method: "PATCH",
         body: JSON.stringify({ status: newStatus }),
       });
-      setDetection((prev) => prev ? { ...prev, status: newStatus } : prev);
+      setDetection((prev) =>
+        prev ? { ...prev, status: newStatus } : prev,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update status");
     } finally {
@@ -103,7 +177,9 @@ export default function DetectionDetailPage() {
       await apiFetch(`/api/detections/${id}`, { method: "DELETE" });
       router.push("/detections");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to archive detection");
+      setError(
+        err instanceof Error ? err.message : "Failed to archive detection",
+      );
       setActionLoading(false);
     }
   }
@@ -121,11 +197,18 @@ export default function DetectionDetailPage() {
   if (error || !detection) {
     return (
       <div className="font-mono space-y-3">
-        <p className="text-sm text-destructive">[ERR] {error ?? "Detection not found"}</p>
-        <Button variant="outline" size="sm" onClick={fetchDetection}>$ retry</Button>
+        <p className="text-sm text-destructive">
+          [ERR] {error ?? "Detection not found"}
+        </p>
+        <Button variant="outline" size="sm" onClick={fetchDetection}>
+          $ retry
+        </Button>
       </div>
     );
   }
+
+  const unfilled = hasUnfilledPlaceholders(detection.rules);
+  const templateInputs = template?.inputs ?? [];
 
   return (
     <div className="space-y-6 font-mono">
@@ -133,7 +216,10 @@ export default function DetectionDetailPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs text-muted-foreground mb-1">
-            <Link href="/detections" className="hover:text-primary transition-colors">
+            <Link
+              href="/detections"
+              className="hover:text-primary transition-colors"
+            >
               detections
             </Link>
             {" / "}
@@ -178,15 +264,55 @@ export default function DetectionDetailPage() {
         )}
       </div>
 
+      {/* Unfilled placeholder warning */}
+      {unfilled && (
+        <div className="border border-warning/40 bg-warning/5 p-3 space-y-1">
+          <p className="text-xs text-warning">
+            [!] this detection has unconfigured inputs — rules will not fire correctly
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {">"} open the editor to fill in the required values (network,
+            contract, thresholds, etc.)
+          </p>
+          <Link
+            href={`/detections/${id}/edit`}
+            className="text-xs text-primary hover:underline"
+          >
+            [configure now →]
+          </Link>
+        </div>
+      )}
+
       {/* Meta */}
       <Card>
         <CardContent className="p-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
           {[
-            { key: "STATUS", value: detection.status, className: statusColor[detection.status] },
-            { key: "SEVERITY", value: detection.severity, className: severityColor[detection.severity] ?? "text-muted-foreground" },
-            { key: "MODULE", value: detection.moduleId, className: "text-foreground" },
-            { key: "COOLDOWN", value: `${detection.cooldownMinutes}m`, className: "text-foreground" },
-            { key: "RULES", value: String(detection.rules.length), className: "text-foreground" },
+            {
+              key: "STATUS",
+              value: detection.status,
+              className: statusColor[detection.status],
+            },
+            {
+              key: "SEVERITY",
+              value: detection.severity,
+              className:
+                severityColor[detection.severity] ?? "text-muted-foreground",
+            },
+            {
+              key: "MODULE",
+              value: detection.moduleId,
+              className: "text-foreground",
+            },
+            {
+              key: "COOLDOWN",
+              value: `${detection.cooldownMinutes}m`,
+              className: "text-foreground",
+            },
+            {
+              key: "RULES",
+              value: String(detection.rules.length),
+              className: "text-foreground",
+            },
             {
               key: "LAST_ALERT",
               value: detection.lastTriggeredAt
@@ -197,7 +323,9 @@ export default function DetectionDetailPage() {
           ].map(({ key, value, className }) => (
             <div key={key}>
               <p className="text-muted-foreground">{key}</p>
-              <p className={cn("mt-0.5 font-mono uppercase", className)}>{value}</p>
+              <p className={cn("mt-0.5 font-mono uppercase", className)}>
+                {value}
+              </p>
             </div>
           ))}
         </CardContent>
@@ -211,11 +339,89 @@ export default function DetectionDetailPage() {
         </div>
       )}
 
-      {/* Template */}
+      {/* Template + configuration */}
       {detection.templateId && (
-        <div className="text-xs text-muted-foreground">
-          {">"} created from template:{" "}
-          <span className="text-foreground">{detection.templateId}</span>
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">$ cat config</p>
+
+          {/* Template badge */}
+          <div className="border border-border p-3 space-y-1">
+            <p className="text-xs text-muted-foreground">template</p>
+            <p className="text-sm text-foreground">
+              {template?.name ?? detection.templateId}
+            </p>
+            {template?.description && (
+              <p className="text-xs text-muted-foreground/70">
+                {template.description}
+              </p>
+            )}
+          </div>
+
+          {/* Input values */}
+          {templateInputs.length > 0 && (
+            <div className="border border-border divide-y divide-border">
+              {templateInputs.map((inp) => {
+                const raw = detection.config[inp.key];
+                const val = displayValue(raw, inp.type);
+                const missing = val === "" && inp.required;
+                const unfill = isPlaceholder(raw);
+
+                return (
+                  <div
+                    key={inp.key}
+                    className="flex items-start justify-between gap-4 px-3 py-2 text-xs"
+                  >
+                    <span className="text-muted-foreground shrink-0">
+                      {inp.label}
+                    </span>
+                    {unfill || missing ? (
+                      <span className="text-warning font-mono">
+                        [not configured]
+                      </span>
+                    ) : val ? (
+                      <span className="text-foreground font-mono text-right break-all">
+                        {val}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground/50 font-mono">
+                        —
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Resource scoping: infra hostIds */}
+          {detection.moduleId === "infra" &&
+            Array.isArray(detection.config.hostIds) &&
+            (detection.config.hostIds as string[]).length > 0 && (
+              <div className="border border-border px-3 py-2 text-xs space-y-1">
+                <p className="text-muted-foreground">scope · hosts</p>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {(detection.config.hostIds as string[]).map((h) => (
+                    <span
+                      key={h}
+                      className="border border-border px-1.5 py-0.5 text-foreground font-mono"
+                    >
+                      {h}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          {/* Resource scoping: registry artifactName */}
+          {detection.moduleId === "registry" &&
+            !!detection.config.artifactName && (
+              <div className="border border-border px-3 py-2 text-xs flex items-center justify-between">
+                <span className="text-muted-foreground">scope · artifact</span>
+                <span className="text-foreground font-mono">
+                  {String(detection.config.artifactName)}
+                </span>
+              </div>
+            )}
         </div>
       )}
 
@@ -223,27 +429,58 @@ export default function DetectionDetailPage() {
       <div>
         <p className="mb-3 text-xs text-muted-foreground">$ rules ls</p>
         <div className="space-y-2">
-          {detection.rules.map((rule, i) => (
-            <Card key={rule.id}>
-              <CardContent className="p-3 text-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-foreground font-mono">{rule.ruleType}</span>
-                  <div className="flex items-center gap-3">
-                    <Badge variant="secondary">{rule.action}</Badge>
-                    <span className="text-muted-foreground">p:{rule.priority}</span>
-                    <span className={rule.status === "active" ? "text-primary" : "text-muted-foreground"}>
-                      [{rule.status}]
+          {detection.rules.map((rule, i) => {
+            const ruleHasPlaceholders = hasUnfilledPlaceholders([rule]);
+
+            return (
+              <Card key={rule.id}>
+                <CardContent className="p-3 text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-foreground font-mono">
+                      {rule.ruleType}
                     </span>
+                    <div className="flex items-center gap-3">
+                      <Badge variant="secondary">{rule.action}</Badge>
+                      <span className="text-muted-foreground">
+                        p:{rule.priority}
+                      </span>
+                      <span
+                        className={
+                          rule.status === "active"
+                            ? "text-primary"
+                            : "text-muted-foreground"
+                        }
+                      >
+                        [{rule.status}]
+                      </span>
+                    </div>
                   </div>
-                </div>
-                {Object.keys(rule.config).length > 0 && (
-                  <pre className="text-muted-foreground overflow-x-auto text-xs">
-                    {JSON.stringify(rule.config, null, 2)}
-                  </pre>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+
+                  {ruleHasPlaceholders && (
+                    <p className="text-warning text-[10px]">
+                      [!] rule[{i}] has unconfigured inputs —{" "}
+                      <Link
+                        href={`/detections/${id}/edit`}
+                        className="underline"
+                      >
+                        configure →
+                      </Link>
+                    </p>
+                  )}
+
+                  {/* Only show config for rules without placeholders —
+                      if there are placeholders, the config is meaningless raw JSON */}
+                  {!ruleHasPlaceholders &&
+                    !detection.templateId &&
+                    Object.keys(rule.config).length > 0 && (
+                      <pre className="text-muted-foreground overflow-x-auto text-xs">
+                        {JSON.stringify(rule.config, null, 2)}
+                      </pre>
+                    )}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       </div>
 

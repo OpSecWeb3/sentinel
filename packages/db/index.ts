@@ -2,10 +2,11 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as coreSchema from './schema/core';
 import * as githubSchema from './schema/github';
-import * as releaseChainSchema from './schema/release-chain';
+import * as registrySchema from './schema/registry';
 import * as infraSchema from './schema/infra';
 import * as chainSchema from './schema/chain';
 import * as correlationSchema from './schema/correlation';
+import * as awsSchema from './schema/aws';
 
 // ---------------------------------------------------------------------------
 // Re-export drizzle-orm query helpers.
@@ -40,10 +41,11 @@ export { migrate } from 'drizzle-orm/postgres-js/migrator';
 export const schema = {
   ...coreSchema,
   ...githubSchema,
-  ...releaseChainSchema,
+  ...registrySchema,
   ...infraSchema,
   ...chainSchema,
   ...correlationSchema,
+  ...awsSchema,
 };
 
 let _sql: ReturnType<typeof postgres> | undefined;
@@ -67,5 +69,5 @@ export async function closeDb() {
   }
 }
 
-export { coreSchema, githubSchema, releaseChainSchema, infraSchema, chainSchema, correlationSchema };
+export { coreSchema, githubSchema, registrySchema, infraSchema, chainSchema, correlationSchema, awsSchema };
 export type Db = ReturnType<typeof getDb>;

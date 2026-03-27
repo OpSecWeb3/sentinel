@@ -15,6 +15,11 @@ const envSchema = z.object({
 
   // Encryption (64 hex chars = 32 bytes for AES-256)
   ENCRYPTION_KEY: z.string().length(64),
+  // Previous encryption key for key rotation (optional, decrypt-only)
+  ENCRYPTION_KEY_PREV: z.string().length(64).optional(),
+
+  // API base URL (used for OAuth redirect_uri; must not be derived from request headers)
+  API_BASE_URL: z.string().url().default('http://localhost:4000'),
 
   // CORS
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
@@ -27,6 +32,7 @@ const envSchema = z.object({
   GITHUB_APP_ID: z.string().optional(),
   GITHUB_APP_PRIVATE_KEY: z.string().optional(), // PEM format for signing JWTs
   GITHUB_APP_WEBHOOK_SECRET: z.string().optional(), // shared secret or per-installation
+  GITHUB_APP_SLUG: z.string().optional(),
   GITHUB_APP_CLIENT_ID: z.string().optional(),
   GITHUB_APP_CLIENT_SECRET: z.string().optional(),
 

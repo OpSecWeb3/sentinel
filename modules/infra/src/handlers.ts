@@ -30,7 +30,7 @@ import { eq, and, lte, desc } from '@sentinel/db';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { getChildResults } from '@sentinel/shared/fan-out';
 import type { ScanCallbacks, ScanResult } from './scanner/orchestrator.js';
-import type { DnsRecord, WhoisData } from './scanner/types.js';
+import type { DnsRecord, WhoisData, StepName } from './scanner/types.js';
 import type { FindingSuppression } from './scanner/scoring.js';
 import { normalizeScanResult, normalizeProbeResult } from './normalizer.js';
 
@@ -544,7 +544,7 @@ export const scheduleLoaderHandler: JobHandler = {
 // ---------------------------------------------------------------------------
 
 interface ScanStepChildResult {
-  step: string;
+  step: StepName;
   status: 'success' | 'error';
   data?: Record<string, unknown>;
   error?: string;

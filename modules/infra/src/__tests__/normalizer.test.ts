@@ -472,7 +472,7 @@ describe('normalizeScanResult — clean scan', () => {
 // ===========================================================================
 
 describe('normalizeProbeResult — host unreachable', () => {
-  it('emits infra.host.unreachable when host is not reachable', () => {
+  it('emits infra.host.unreachable when host is not reachable', async () => {
     const probe = baseProbeResult({
       isReachable: false,
       httpStatus: null,
@@ -480,7 +480,7 @@ describe('normalizeProbeResult — host unreachable', () => {
       dnsResolved: false,
     });
 
-    const events = normalizeProbeResult(probe, ORG_ID);
+    const events = await normalizeProbeResult(probe, ORG_ID);
 
     const probeCompleted = events.find((e) => e.eventType === 'infra.probe.completed');
     expect(probeCompleted).toBeDefined();
@@ -497,37 +497,37 @@ describe('normalizeProbeResult — host unreachable', () => {
     });
   });
 
-  it('does not emit host.unreachable when host is reachable', () => {
+  it('does not emit host.unreachable when host is reachable', async () => {
     const probe = baseProbeResult({ isReachable: true });
 
-    const events = normalizeProbeResult(probe, ORG_ID);
+    const events = await normalizeProbeResult(probe, ORG_ID);
     const unreachable = events.filter((e) => e.eventType === 'infra.host.unreachable');
     expect(unreachable).toHaveLength(0);
   });
 });
 
 describe('normalizeProbeResult — slow response', () => {
-  it('emits infra.host.slow when response time >= 5000ms', () => {
+  it('emits infra.host.slow when response time >= 5000ms', async () => {
     const probe = baseProbeResult({ responseTimeMs: 6500, isReachable: true });
 
-    const events = normalizeProbeResult(probe, ORG_ID);
+    const events = await normalizeProbeResult(probe, ORG_ID);
     const slow = events.find((e) => e.eventType === 'infra.host.slow');
 
     expect(slow).toBeDefined();
     expect(slow!.payload.responseTimeMs).toBe(6500);
   });
 
-  it('does not emit slow for unreachable hosts even with high responseTimeMs', () => {
+  it('does not emit slow for unreachable hosts even with high responseTimeMs', async () => {
     const probe = baseProbeResult({ responseTimeMs: 10000, isReachable: false });
 
-    const events = normalizeProbeResult(probe, ORG_ID);
+    const events = await normalizeProbeResult(probe, ORG_ID);
     const slow = events.filter((e) => e.eventType === 'infra.host.slow');
     expect(slow).toHaveLength(0);
   });
 });
 
 describe('normalizeProbeResult — DNS changes from probe', () => {
-  it('emits infra.dns.change when probe detects DNS changes', () => {
+  it('emits infra.dns.change when probe detects DNS changes', async () => {
     const probe = baseProbeResult({
       dnsChanged: true,
       dnsChangesCount: 1,
@@ -536,7 +536,7 @@ describe('normalizeProbeResult — DNS changes from probe', () => {
       ],
     });
 
-    const events = normalizeProbeResult(probe, ORG_ID);
+    const events = await normalizeProbeResult(probe, ORG_ID);
     const dnsEvent = events.find((e) => e.eventType === 'infra.dns.change');
 
     expect(dnsEvent).toBeDefined();

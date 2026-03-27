@@ -133,7 +133,8 @@ export const chainStateSnapshots = pgTable('chain_state_snapshots', {
   triggered: boolean('triggered').notNull().default(false),
   triggerContext: jsonb('trigger_context'),
 }, (t) => [
-  index('idx_chain_snapshots_rule').on(t.ruleId),
+  // Composite index: all window/previous-value queries ORDER BY polled_at DESC
+  index('idx_chain_snapshots_rule_time').on(t.ruleId, t.polledAt),
   index('idx_chain_snapshots_address_slot').on(t.address, t.slot).where(sql`slot IS NOT NULL`),
   index('idx_chain_snapshots_triggered').on(t.detectionId, t.polledAt).where(sql`triggered = true`),
 ]);

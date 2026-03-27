@@ -49,6 +49,8 @@ vi.mock('@sentinel/db', () => ({
     insert: vi.fn(() => ({ values: vi.fn(() => ({ onConflictDoUpdate: vi.fn(() => ({ returning: vi.fn() })) })) })),
     update: vi.fn(),
   }),
+  eq: (col: any, val: any) => ({ col, val }),
+  and: (...args: any[]) => args,
 }));
 
 // Mock @sentinel/db/schema/github
@@ -64,7 +66,7 @@ vi.mock('@sentinel/db/schema/github', () => ({
 
 // Mock @sentinel/shared/queue
 vi.mock('@sentinel/shared/queue', () => ({
-  getQueue: () => ({ add: vi.fn() }),
+  getQueue: vi.fn(() => ({ add: vi.fn() })),
   QUEUE_NAMES: { MODULE_JOBS: 'module-jobs', EVENTS: 'events' },
 }));
 
@@ -243,27 +245,27 @@ describe('GitHub webhook HMAC verification', () => {
     expect(res.status).toBe(400);
   });
 
-  it('unknown installation returns 404', async () => {
+  it('unknown installation returns 401 (anti-enumeration)', async () => {
     mockLimit.mockResolvedValueOnce([]); // no installation found
 
     const body = JSON.stringify({ action: 'opened' });
     const req = webhookRequest(body);
 
     const res = await app.request(req);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
 
     const json = await res.json();
-    expect(json.error).toMatch(/unknown|inactive/i);
+    expect(json.error).toMatch(/invalid signature/i);
   });
 
-  it('inactive installation returns 404', async () => {
+  it('inactive installation returns 401 (anti-enumeration)', async () => {
     mockLimit.mockResolvedValueOnce([{ ...mockInstallation, status: 'removed' }]);
 
     const body = JSON.stringify({ action: 'opened' });
     const req = webhookRequest(body);
 
     const res = await app.request(req);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
   });
 
   it('valid request enqueues job with correct data', async () => {
@@ -278,11 +280,15 @@ describe('GitHub webhook HMAC verification', () => {
     const res = await app.request(req);
     expect(res.status).toBe(202);
 
-    expect(addMock).toHaveBeenCalledWith('github.webhook.process', expect.objectContaining({
-      deliveryId: 'delivery-123',
-      eventType: 'push',
-      installationId: INSTALLATION_ID,
-      orgId: 'org_1',
-    }));
+    expect(addMock).toHaveBeenCalledWith(
+      'github.webhook.process',
+      expect.objectContaining({
+        deliveryId: 'delivery-123',
+        eventType: 'push',
+        installationId: INSTALLATION_ID,
+        orgId: 'org_1',
+      }),
+      expect.objectContaining({ jobId: expect.any(String) }),
+    );
   });
 });

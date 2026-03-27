@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sentinel/db": "workspace:*",
     "@sentry/node": "^9.0.0",
     "bullmq": "^5.34.0",
     "hono": "^4.7.0",

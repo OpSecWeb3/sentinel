@@ -324,6 +324,8 @@ export async function runScan(data: ScanJobData, callbacks: ScanCallbacks): Prom
     }
     details.score = adjustedScore;
     details.grade = scoreResult.grade;
+    details.deductions = scoreResult.deductions;
+    details.breakdown = scoreResult.breakdown;
 
     const hasSuccess = stepResults.some((s) => s.status === 'success');
     const status = errors.length === 0 ? 'success' : hasSuccess ? 'partial' : 'error';

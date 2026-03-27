@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const configSchema = z.object({
   alertOnActions: z.array(z.enum(['added', 'removed', 'edited'])).default(['added', 'removed']),
@@ -10,6 +11,10 @@ export const memberChangeEvaluator: RuleEvaluator = {
   moduleId: 'github',
   ruleType: 'github.member_change',
   configSchema,
+  uiSchema: [
+    { key: 'alertOnActions', label: 'Membership actions to alert on', type: 'string-array', required: false, placeholder: 'added\nremoved\nedited', help: 'Leave empty for all actions.' },
+    { key: 'watchRoles', label: 'Roles to watch', type: 'string-array', required: false, placeholder: 'admin\nbilling_manager', help: 'Leave empty to watch all roles.' },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

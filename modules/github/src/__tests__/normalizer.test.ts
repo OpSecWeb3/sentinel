@@ -338,8 +338,8 @@ describe('normalizeGitHubEvent — missing fields', () => {
     );
 
     expect(result).not.toBeNull();
-    // sender is picked but the source is undefined, so pick returns undefined
-    expect(result!.payload.sender).toBeUndefined();
+    // sender is missing so pick returns empty object
+    expect(result!.payload.sender).toEqual({});
   });
 
   it('handles null repository in pick gracefully', () => {

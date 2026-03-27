@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { minimatch } from 'minimatch';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const configSchema = z.object({
   alertOn: z.enum(['publicized', 'privatized', 'any']).default('publicized'),
@@ -11,6 +12,10 @@ export const repoVisibilityEvaluator: RuleEvaluator = {
   moduleId: 'github',
   ruleType: 'github.repo_visibility',
   configSchema,
+  uiSchema: [
+    { key: 'alertOn', label: 'Alert when repo is', type: 'select', required: false, options: [{ value: 'publicized', label: 'Made public' }, { value: 'privatized', label: 'Made private' }, { value: 'any', label: 'Either direction' }] },
+    { key: 'excludeRepos', label: 'Repos to exclude', type: 'string-array', required: false, placeholder: 'my-public-repo\narchived-*', help: 'Glob patterns for repositories to ignore.' },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

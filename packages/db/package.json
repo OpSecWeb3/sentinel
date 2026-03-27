@@ -8,10 +8,12 @@
     ".": "./index.ts",
     "./schema/core": "./schema/core.ts",
     "./schema/github": "./schema/github.ts",
-    "./schema/release-chain": "./schema/release-chain.ts",
+    "./schema/registry": "./schema/registry.ts",
     "./schema/infra": "./schema/infra.ts",
     "./schema/chain": "./schema/chain.ts",
-    "./schema/correlation": "./schema/correlation.ts"
+    "./schema/correlation": "./schema/correlation.ts",
+    "./schema/aws": "./schema/aws.ts",
+    "./seed/chain-networks": "./src/seed/chain-networks.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import { NETWORK_UI_FIELD, CONTRACT_UI_FIELD } from './_ui-shared.js';
 
 // ---------------------------------------------------------------------------
 // Config schema — ported from ChainAlert's StateConditionConfig
@@ -31,7 +32,7 @@ function recentValuesKey(ruleId: string): string {
 async function getPreviousState(redis: EvalContext['redis'], ruleId: string): Promise<bigint | null> {
   const raw = await redis.get(prevStateKey(ruleId));
   if (raw === null) return null;
-  return BigInt(raw);
+  return BigInt(/^[0-9a-fA-F]+$/.test(raw) && raw.length > 10 ? `0x${raw}` : raw);
 }
 
 async function setPreviousState(redis: EvalContext['redis'], ruleId: string, value: bigint): Promise<void> {
@@ -183,6 +184,14 @@ export const statePollEvaluator: RuleEvaluator = {
   moduleId: 'chain',
   ruleType: 'chain.state_poll',
   configSchema,
+  uiSchema: [
+    NETWORK_UI_FIELD,
+    CONTRACT_UI_FIELD,
+    { key: 'conditionType', label: 'Condition type', type: 'select', required: true, options: [{ value: 'changed', label: 'Any change' }, { value: 'threshold_above', label: 'Above threshold' }, { value: 'threshold_below', label: 'Below threshold' }, { value: 'windowed_percent_change', label: 'Percent change over window' }] },
+    { key: 'value', label: 'Threshold value', type: 'text', required: false, help: 'Required for threshold_above / threshold_below conditions.' },
+    { key: 'percentThreshold', label: 'Percent threshold', type: 'number', required: false, help: 'Required for windowed_percent_change.' },
+    { key: 'windowSize', label: 'Window size (blocks)', type: 'number', required: false, min: 1, max: 500, placeholder: '100' },
+  ],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule, redis } = ctx;
@@ -198,7 +207,8 @@ export const statePollEvaluator: RuleEvaluator = {
       blockNumber?: string;
     };
 
-    const currentValue = BigInt(payload.value);
+    const raw = payload.value;
+    const currentValue = BigInt(/^[0-9a-fA-F]+$/.test(raw) && raw.length > 10 ? `0x${raw}` : raw);
     const thresholdValue = config.value !== undefined ? BigInt(config.value) : undefined;
 
     // Retrieve previous state value from Redis

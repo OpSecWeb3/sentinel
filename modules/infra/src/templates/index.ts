@@ -8,6 +8,18 @@ export const templates: DetectionTemplate[] = [
     description: 'Alert on expiring certificates and certificate issues (chain errors, self-signed, weak key, SHA-1, revocation).',
     category: 'certificate',
     severity: 'critical',
+    inputs: [
+      {
+        key: 'thresholdDays',
+        label: 'Alert when cert expires within (days)',
+        type: 'number',
+        required: false,
+        default: 30,
+        min: 1,
+        max: 365,
+        help: 'Alert when the certificate expires within this many days.',
+      },
+    ],
     rules: [
       {
         ruleType: 'infra.cert_expiry',
@@ -81,6 +93,28 @@ export const templates: DetectionTemplate[] = [
     description: 'Alert when a host becomes unreachable or responds slowly. Requires probe scheduling to be enabled.',
     category: 'availability',
     severity: 'critical',
+    inputs: [
+      {
+        key: 'thresholdMs',
+        label: 'Response timeout (ms)',
+        type: 'number',
+        required: false,
+        default: 5000,
+        min: 500,
+        max: 30000,
+        help: 'Alert when a host takes longer than this to respond.',
+      },
+      {
+        key: 'consecutiveFailures',
+        label: 'Consecutive failures before alert',
+        type: 'number',
+        required: false,
+        default: 2,
+        min: 1,
+        max: 10,
+        help: 'Number of consecutive failed probes before triggering an alert.',
+      },
+    ],
     rules: [
       {
         ruleType: 'infra.host_unreachable',
@@ -98,6 +132,17 @@ export const templates: DetectionTemplate[] = [
     description: 'Alert when a domain registration is approaching its expiry date. Prevents accidental domain loss and potential hijacking.',
     category: 'dns',
     severity: 'high',
+    inputs: [
+      {
+        key: 'thresholdDays',
+        label: 'Alert when domain expires within (days)',
+        type: 'number',
+        required: false,
+        default: 30,
+        min: 1,
+        max: 365,
+      },
+    ],
     rules: [
       {
         ruleType: 'infra.whois_expiry',
@@ -132,6 +177,18 @@ export const templates: DetectionTemplate[] = [
     description: 'Enable all infrastructure security monitors in one detection. Covers certificates, TLS, DNS, headers, availability, score tracking, and subdomain discovery.',
     category: 'comprehensive',
     severity: 'critical',
+    inputs: [
+      {
+        key: 'thresholdDays',
+        label: 'Expiry warning threshold (days)',
+        type: 'number',
+        required: false,
+        default: 30,
+        min: 1,
+        max: 365,
+        help: 'Alert when certificates or domains expire within this many days.',
+      },
+    ],
     rules: [
       {
         ruleType: 'infra.cert_expiry',

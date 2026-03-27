@@ -7,7 +7,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '@sentinel/db';
 import { alerts, detections, events } from '@sentinel/db/schema/core';
-import { eq, and, gte, lte, sql, count, desc } from '@sentinel/db';
+import { eq, and, gte, lte, sql, count, desc, or, ilike } from '@sentinel/db';
 import type { AppEnv } from '@sentinel/shared/hono-types';
 import { requireAuth, requireOrg } from '../middleware/rbac.js';
 import { requireScope } from '../middleware/scope.js';
@@ -26,6 +26,7 @@ const listQuerySchema = z.object({
   severity: z.enum(['critical', 'high', 'medium', 'low']).optional(),
   triggerType: z.string().optional(),
   notificationStatus: z.enum(['pending', 'sent', 'partial', 'failed', 'no_channels']).optional(),
+  search: z.string().max(255).optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
   page: z.coerce.number().int().positive().default(1),
@@ -50,6 +51,11 @@ router.get('/', requireScope('api:read'), validate('query', listQuerySchema), as
   if (query.severity) conditions.push(eq(alerts.severity, query.severity));
   if (query.triggerType) conditions.push(eq(alerts.triggerType, query.triggerType));
   if (query.notificationStatus) conditions.push(eq(alerts.notificationStatus, query.notificationStatus));
+  if (query.search) {
+    const escapedSearch = query.search.replace(/[%_\\]/g, (ch) => `\\${ch}`);
+    const term = `%${escapedSearch}%`;
+    conditions.push(or(ilike(alerts.title, term), ilike(alerts.description, term))!);
+  }
   if (query.from) conditions.push(gte(alerts.createdAt, new Date(query.from)));
   if (query.to) conditions.push(lte(alerts.createdAt, new Date(query.to)));
 

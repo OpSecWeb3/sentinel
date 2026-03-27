@@ -2,16 +2,16 @@ import { logger as rootLogger } from '@sentinel/shared/logger';
 
 const log = rootLogger.child({ component: 'cdn-cloudfront' });
 
-interface CloudFrontClient {
+interface CFClient {
   send: (cmd: unknown) => Promise<unknown>;
 }
 
-async function makeClient(accessKeyId: string, secretAccessKey: string, region: string): Promise<CloudFrontClient> {
+async function makeClient(accessKeyId: string, secretAccessKey: string, region: string): Promise<CFClient> {
   const { CloudFrontClient } = await import('@aws-sdk/client-cloudfront');
   return new CloudFrontClient({
     region: region || 'us-east-1',
     credentials: { accessKeyId, secretAccessKey },
-  });
+  }) as unknown as CFClient;
 }
 
 export async function validateCredentials(

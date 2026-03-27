@@ -1,9 +1,9 @@
 /**
- * release-chain.poll-sweep
+ * registry.poll-sweep
  *
  * Runs every 60 seconds. Queries all enabled rcArtifacts that are due for
  * polling (lastPolledAt IS NULL OR lastPolledAt + pollIntervalSeconds has
- * elapsed), then enqueues a release-chain.poll job for each one.
+ * elapsed), then enqueues a registry.poll job for each one.
  *
  * Using jobId: `poll-${artifact.id}` prevents duplicate concurrent polls for
  * the same artifact — BullMQ will deduplicate by jobId within a queue.
@@ -11,14 +11,14 @@
 import type { Job } from 'bullmq';
 import { getDb, sql } from '@sentinel/db';
 import { eq, isNull, or, and } from '@sentinel/db';
-import { rcArtifacts, rcArtifactVersions } from '@sentinel/db/schema/release-chain';
+import { rcArtifacts, rcArtifactVersions } from '@sentinel/db/schema/registry';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { createLogger } from '@sentinel/shared/logger';
 
 const log = createLogger({ service: 'sentinel-worker' }).child({ component: 'poll-sweep' });
 
 export const pollSweepHandler: JobHandler = {
-  jobName: 'release-chain.poll-sweep',
+  jobName: 'registry.poll-sweep',
   queueName: QUEUE_NAMES.MODULE_JOBS,
 
   async process(_job: Job) {
@@ -82,11 +82,12 @@ export const pollSweepHandler: JobHandler = {
         lastPolledAt: artifact.lastPolledAt,
         storedVersions,
         metadata: (artifact.metadata as Record<string, unknown>) ?? {},
+        credentialsEncrypted: artifact.credentialsEncrypted,
       };
 
       try {
         await moduleJobsQueue.add(
-          'release-chain.poll',
+          'registry.poll',
           { artifact: monitoredArtifact },
           { jobId: `poll-${artifact.id}` },
         );

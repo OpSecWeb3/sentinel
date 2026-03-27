@@ -2,11 +2,14 @@ import type { NextConfig } from "next";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+const isDev = process.env.NODE_ENV !== "production";
+
 const csp = [
   "default-src 'self'",
   // Next.js App Router requires unsafe-inline for styles and inline scripts.
   // Tighten to a nonce-based policy once the app is stable.
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  // unsafe-eval is only needed for Turbopack HMR in development.
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   `connect-src 'self' ${apiUrl}`.trim(),
@@ -22,6 +25,7 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
   { key: "Content-Security-Policy", value: csp },
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
 ];
 
 const nextConfig: NextConfig = {

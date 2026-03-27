@@ -7,7 +7,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '@sentinel/db';
 import { detections, rules } from '@sentinel/db/schema/core';
-import { eq, and, sql, count, desc, asc, ilike } from '@sentinel/db';
+import { eq, and, sql, count, desc, asc, ilike, inArray, ne } from '@sentinel/db';
 import type { AppEnv } from '@sentinel/shared/hono-types';
 import { requireAuth, requireOrg, requireRole } from '../middleware/rbac.js';
 import { requireScope } from '../middleware/scope.js';
@@ -64,6 +64,10 @@ const updateBodySchema = z.object({
     action: z.enum(['alert', 'log', 'suppress']).default('alert'),
     priority: z.coerce.number().int().min(0).max(100).default(50),
   })).min(1).optional(),
+  /** Template-based update: re-derive rules from template + new inputs */
+  templateSlug: z.string().min(1).optional(),
+  inputs: z.record(z.string(), z.unknown()).optional(),
+  overrides: z.record(z.string(), z.unknown()).optional(),
 }).refine(
   (data) => Object.values(data).some((v) => v !== undefined),
   { message: 'At least one field must be provided' },
@@ -152,11 +156,6 @@ router.get('/', requireScope('api:read'), validate('query', listQuerySchema), as
       lastTriggeredAt: detections.lastTriggeredAt,
       createdAt: detections.createdAt,
       updatedAt: detections.updatedAt,
-      ruleCount: sql<number>`(
-        SELECT count(*)::int FROM rules
-        WHERE rules.detection_id = ${detections.id}
-          AND rules.status != 'disabled'
-      )`.as('rule_count'),
     })
       .from(detections)
       .where(where)
@@ -166,8 +165,22 @@ router.get('/', requireScope('api:read'), validate('query', listQuerySchema), as
     db.select({ total: count() }).from(detections).where(where),
   ]);
 
+  const detectionIds = rows.map((r) => r.id);
+  let ruleCountMap = new Map<string, number>();
+  if (detectionIds.length > 0) {
+    const ruleCounts = await db
+      .select({ detectionId: rules.detectionId, total: count() })
+      .from(rules)
+      .where(and(
+        inArray(rules.detectionId, detectionIds),
+        ne(rules.status, 'disabled'),
+      ))
+      .groupBy(rules.detectionId);
+    ruleCountMap = new Map(ruleCounts.map((r) => [r.detectionId, Number(r.total)]));
+  }
+
   return c.json({
-    data: rows,
+    data: rows.map((r) => ({ ...r, ruleCount: ruleCountMap.get(r.id) ?? 0 })),
     meta: {
       page: query.page,
       limit: query.limit,
@@ -175,6 +188,63 @@ router.get('/', requireScope('api:read'), validate('query', listQuerySchema), as
       totalPages: Math.ceil(total / query.limit),
     },
   });
+});
+
+// ---------------------------------------------------------------------------
+// GET /detections/resolve-template — return a template definition by moduleId + slug
+// Must be defined BEFORE /:id to prevent "resolve-template" matching as a UUID param.
+// ---------------------------------------------------------------------------
+
+const resolveTemplateQuerySchema = z.object({
+  moduleId: z.string().min(1),
+  slug: z.string().min(1),
+});
+
+router.get('/resolve-template', requireScope('api:read'), validate('query', resolveTemplateQuerySchema), async (c) => {
+  const { moduleId, slug } = getValidated<z.infer<typeof resolveTemplateQuerySchema>>(c, 'query');
+
+  const { GitHubModule } = await import('@sentinel/module-github');
+  const { RegistryModule } = await import('@sentinel/module-registry');
+  const { ChainModule } = await import('@sentinel/module-chain');
+  const { InfraModule } = await import('@sentinel/module-infra');
+  const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule];
+
+  const mod = modules.find((m) => m.id === moduleId);
+  if (!mod) return c.json({ error: `Module "${moduleId}" not found` }, 404);
+
+  const template = mod.templates.find((t) => t.slug === slug);
+  if (!template) return c.json({ error: `Template "${slug}" not found` }, 404);
+
+  return c.json({ data: { template } });
+});
+
+// ---------------------------------------------------------------------------
+// GET /detections/rule-schema — return uiSchema for a given ruleType
+// Must be defined BEFORE /:id to prevent "rule-schema" matching as a UUID param.
+// ---------------------------------------------------------------------------
+
+const ruleSchemaQuerySchema = z.object({
+  ruleType: z.string().min(1),
+});
+
+router.get('/rule-schema', requireScope('api:read'), validate('query', ruleSchemaQuerySchema), async (c) => {
+  const { ruleType } = getValidated<z.infer<typeof ruleSchemaQuerySchema>>(c, 'query');
+
+  const { GitHubModule } = await import('@sentinel/module-github');
+  const { RegistryModule } = await import('@sentinel/module-registry');
+  const { ChainModule } = await import('@sentinel/module-chain');
+  const { InfraModule } = await import('@sentinel/module-infra');
+  const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule];
+
+  for (const mod of modules) {
+    const evaluator = mod.evaluators.find((e) => e.ruleType === ruleType);
+    if (evaluator) {
+      return c.json({ data: { uiSchema: evaluator.uiSchema ?? [] } });
+    }
+  }
+
+  // Unknown rule type — return empty schema (graceful degradation)
+  return c.json({ data: { uiSchema: [] } });
 });
 
 // ---------------------------------------------------------------------------
@@ -260,6 +330,54 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
         })),
       );
     });
+
+    // Keep detection.config in sync with the merged rule configs so the
+    // detail and edit pages reflect the current values.
+    const mergedConfig = body.rules.reduce<Record<string, unknown>>(
+      (acc, r) => ({ ...acc, ...r.config }),
+      {},
+    );
+    updateSet.config = mergedConfig;
+  }
+
+  // Template-based rule rebuild: resolve template, apply inputs, replace rules
+  if (body.templateSlug !== undefined) {
+    const { GitHubModule } = await import('@sentinel/module-github');
+    const { RegistryModule } = await import('@sentinel/module-registry');
+    const { ChainModule } = await import('@sentinel/module-chain');
+    const { InfraModule } = await import('@sentinel/module-infra');
+    const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule];
+
+    const mod = modules.find((m) => m.id === existing.moduleId);
+    if (!mod) return c.json({ error: `Module "${existing.moduleId}" not found` }, 400);
+
+    const template = mod.templates.find((t) => t.slug === body.templateSlug);
+    if (!template) return c.json({ error: `Template "${body.templateSlug}" not found` }, 400);
+
+    const inputsMap = body.inputs ?? {};
+    const patchBuiltConfigs = template.rules.map((r) => applyTemplateInputs(r.config, inputsMap));
+    const patchUnresolved = findUnresolvedPlaceholders(patchBuiltConfigs);
+    if (patchUnresolved.length > 0) {
+      return c.json({ error: `Missing required inputs: ${patchUnresolved.join(', ')}` }, 400);
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.delete(rules).where(eq(rules.detectionId, id));
+      await tx.insert(rules).values(
+        template.rules.map((r, i) => ({
+          detectionId: id,
+          orgId,
+          moduleId: existing.moduleId,
+          ruleType: r.ruleType,
+          config: patchBuiltConfigs[i],
+          action: r.action,
+          priority: r.priority ?? 50,
+        })),
+      );
+    });
+
+    // Keep config in sync so the edit page can pre-fill on next load
+    updateSet.config = { ...inputsMap, ...(body.overrides ?? {}) };
   }
 
   const [updated] = await db.update(detections)
@@ -305,6 +423,55 @@ router.delete('/:id', requireRole('admin'), requireScope('api:write'), validate(
 // POST /detections/from-template — create detection from a module template
 // ---------------------------------------------------------------------------
 
+/**
+ * Deep-interpolate {{key}} placeholders in a config object using user inputs.
+ * A token that is the ENTIRE string value (e.g. "{{threshold}}") is replaced
+ * with the typed value from inputs. Partial replacements stay as strings.
+ * After interpolation, all inputs are merged in as direct config overrides.
+ */
+function applyTemplateInputs(
+  config: Record<string, unknown>,
+  inputs: Record<string, unknown>,
+): Record<string, unknown> {
+  function interpolate(val: unknown): unknown {
+    if (typeof val === 'string') {
+      const full = val.match(/^\{\{(\w+)\}\}$/);
+      if (full) return inputs[full[1]] ?? val;
+      return val.replace(/\{\{(\w+)\}\}/g, (_, k) =>
+        inputs[k] !== undefined ? String(inputs[k]) : `{{${k}}}`,
+      );
+    }
+    if (Array.isArray(val)) return val.map(interpolate);
+    if (val && typeof val === 'object') {
+      return Object.fromEntries(
+        Object.entries(val as Record<string, unknown>).map(([k, v]) => [k, interpolate(v)]),
+      );
+    }
+    return val;
+  }
+  return { ...(interpolate(config) as Record<string, unknown>), ...inputs };
+}
+
+/**
+ * Scan all rule configs for remaining {{key}} tokens left after interpolation.
+ * Returns a deduplicated list of unresolved token names.
+ */
+function findUnresolvedPlaceholders(configs: Record<string, unknown>[]): string[] {
+  const found: string[] = [];
+  function scan(val: unknown) {
+    if (typeof val === 'string') {
+      const matches = val.match(/\{\{(\w+)\}\}/g);
+      if (matches) found.push(...matches);
+    } else if (Array.isArray(val)) {
+      val.forEach(scan);
+    } else if (val && typeof val === 'object') {
+      Object.values(val as object).forEach(scan);
+    }
+  }
+  configs.forEach((c) => scan(c));
+  return [...new Set(found)];
+}
+
 const fromTemplateSchema = z.object({
   moduleId: z.string().min(1),
   templateSlug: z.string().min(1),
@@ -313,6 +480,9 @@ const fromTemplateSchema = z.object({
   slackChannelId: z.string().optional(),
   slackChannelName: z.string().optional(),
   cooldownMinutes: z.coerce.number().int().min(0).max(1440).default(5),
+  /** Template form inputs — replace {{placeholders}} and merge into rule configs */
+  inputs: z.record(z.string(), z.unknown()).default({}),
+  /** Detection-level config overrides (e.g. hostIds for infra, artifactName for registry) */
   overrides: z.record(z.string(), z.unknown()).default({}),
 });
 
@@ -324,10 +494,10 @@ router.post('/from-template', requireRole('admin', 'editor'), requireScope('api:
 
   // Import all modules to search their templates
   const { GitHubModule } = await import('@sentinel/module-github');
-  const { ReleaseChainModule } = await import('@sentinel/module-release-chain');
+  const { RegistryModule } = await import('@sentinel/module-registry');
   const { ChainModule } = await import('@sentinel/module-chain');
   const { InfraModule } = await import('@sentinel/module-infra');
-  const modules = [GitHubModule, ReleaseChainModule, ChainModule, InfraModule];
+  const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule];
 
   const mod = modules.find((m) => m.id === body.moduleId);
   if (!mod) return c.json({ error: `Module "${body.moduleId}" not found` }, 404);
@@ -336,6 +506,13 @@ router.post('/from-template', requireRole('admin', 'editor'), requireScope('api:
   if (!template) return c.json({ error: `Template "${body.templateSlug}" not found` }, 404);
 
   const detectionName = body.name ?? template.name;
+
+  // Guard: reject if any required template inputs were not provided
+  const builtConfigs = template.rules.map((r) => applyTemplateInputs(r.config, body.inputs));
+  const unresolved = findUnresolvedPlaceholders(builtConfigs);
+  if (unresolved.length > 0) {
+    return c.json({ error: `Missing required inputs: ${unresolved.join(', ')}` }, 400);
+  }
 
   const result = await db.transaction(async (tx) => {
     const [detection] = await tx.insert(detections).values({
@@ -350,16 +527,16 @@ router.post('/from-template', requireRole('admin', 'editor'), requireScope('api:
       slackChannelId: body.slackChannelId,
       slackChannelName: body.slackChannelName,
       cooldownMinutes: body.cooldownMinutes,
-      config: body.overrides,
+      config: { ...body.inputs, ...body.overrides },
     }).returning();
 
     const ruleRows = await tx.insert(rules).values(
-      template.rules.map((r) => ({
+      template.rules.map((r, i) => ({
         detectionId: detection.id,
         orgId,
         moduleId: body.moduleId,
         ruleType: r.ruleType,
-        config: { ...r.config, ...body.overrides },
+        config: builtConfigs[i],
         action: r.action,
         priority: r.priority ?? 50,
       })),
@@ -443,11 +620,11 @@ router.post('/:id/test', requireScope('api:read'), async (c) => {
 
   // Build evaluator registry
   const { GitHubModule } = await import('@sentinel/module-github');
-  const { ReleaseChainModule } = await import('@sentinel/module-release-chain');
+  const { RegistryModule } = await import('@sentinel/module-registry');
   const { ChainModule } = await import('@sentinel/module-chain');
   const { InfraModule } = await import('@sentinel/module-infra');
   const { compoundEvaluator } = await import('@sentinel/shared/evaluators/compound');
-  const modules = [GitHubModule, ReleaseChainModule, ChainModule, InfraModule];
+  const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule];
 
   const { RuleEngine } = await import('@sentinel/shared/rule-engine');
   const { default: IORedis } = await import('ioredis');

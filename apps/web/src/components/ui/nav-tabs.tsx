@@ -18,7 +18,7 @@ export function NavTabs({ tabs, className }: NavTabsProps) {
   const pathname = usePathname();
 
   return (
-    <div className={cn("flex border-b border-border overflow-x-auto", className)}>
+    <div className={cn("flex border-b border-border", className)}>
       {tabs.map((tab) => {
         const isActive = pathname === tab.href;
         return (
@@ -26,9 +26,9 @@ export function NavTabs({ tabs, className }: NavTabsProps) {
             key={tab.href}
             href={tab.href}
             className={cn(
-              "px-4 py-2 text-xs font-mono whitespace-nowrap transition-colors border-b-2 -mb-px",
+              "px-4 py-2 text-xs font-mono whitespace-nowrap transition-colors border-b-2 -mb-px shrink-0",
               isActive
-                ? "border-primary text-primary"
+                ? "border-primary text-primary text-glow"
                 : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >

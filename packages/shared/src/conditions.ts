@@ -8,7 +8,7 @@ export type Operator = '==' | '!=' | '>' | '<' | '>=' | '<=';
 export interface Condition {
   field: string;
   operator: Operator;
-  value: unknown;
+  value?: unknown;
 }
 
 /**

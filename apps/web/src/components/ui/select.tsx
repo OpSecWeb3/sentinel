@@ -187,11 +187,11 @@ const Select = forwardRef<HTMLButtonElement, SelectProps>(
           }}
           onKeyDown={handleKeyDown}
           className={cn(
-            "flex h-10 min-w-[150px] items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-sm font-mono",
+            "flex h-10 w-full min-w-[150px] items-center justify-between border-b border-border bg-transparent px-1 py-2 text-sm font-mono",
             "text-foreground transition-colors",
-            "hover:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary",
+            "hover:border-primary/50 focus:outline-none focus:border-primary",
             "disabled:cursor-not-allowed disabled:opacity-50",
-            open && "border-primary ring-1 ring-primary",
+            open && "border-primary",
           )}
         >
           <span

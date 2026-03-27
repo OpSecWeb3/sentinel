@@ -37,6 +37,7 @@ export interface DetectionRow {
   slackChannelName: string | null;
   cooldownMinutes: number;
   lastTriggeredAt: Date | null;
+  config: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,8 +92,16 @@ export interface RuleEvaluator {
   /** Must match rules.ruleType, e.g. 'github.repo_visibility' */
   readonly ruleType: string;
 
-  /** Zod schema for validating rule.config */
+  /** Zod schema for validating rule.config (server-side) */
   readonly configSchema: ZodSchema;
+
+  /**
+   * UI schema for rendering rule config as a dynamic form in the frontend.
+   * Uses the same TemplateInput[] shape as detection template inputs so the
+   * existing renderInput() renderer can be reused without changes.
+   * Optional — evaluators without a uiSchema show a fallback key=value editor.
+   */
+  readonly uiSchema?: import('./module.js').TemplateInput[];
 
   /** Evaluate an event against this rule. Return AlertCandidate if triggered, null otherwise. */
   evaluate(ctx: EvalContext): Promise<AlertCandidate | null>;

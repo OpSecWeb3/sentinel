@@ -81,13 +81,7 @@ function createRedisMock() {
     }),
   };
 
-  return mock as unknown as ReturnType<typeof createRedisMock> & {
-    _store: Map<string, string>;
-    get: Mock;
-    set: Mock;
-    del: Mock;
-    pipeline: Mock;
-  };
+  return mock;
 }
 
 function createDbMock() {
@@ -1388,20 +1382,16 @@ describe('Edge Cases', () => {
     const rule = makeRule();
     db._selectChain.orderBy.mockResolvedValue([rule]);
 
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
     // Make Redis get fail
     redis.get = vi.fn(async () => {
       throw new Error('Redis read error');
     }) as any;
 
     const event = makeEvent();
-    // Should not throw, continues gracefully
+    // Should not throw — engine logs via structured logger and continues gracefully
     const result = await engine.evaluate(event);
 
-    // The load fails but should not crash
-    expect(consoleSpy).toHaveBeenCalled();
-    consoleSpy.mockRestore();
+    expect(result).toBeDefined();
   });
 
   it('empty correlation rules for org returns empty', async () => {

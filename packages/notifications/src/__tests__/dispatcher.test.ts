@@ -18,6 +18,11 @@ vi.mock('../webhook.js', () => ({
   sendWebhookNotification: vi.fn(),
 }));
 
+vi.mock('@sentinel/shared/crypto', () => ({
+  decrypt: vi.fn((v: string) => v),
+  encrypt: vi.fn((v: string) => v),
+}));
+
 // Import after mocks
 import { dispatchAlert } from '../dispatcher.js';
 import { sendSlackMessage } from '../slack.js';
@@ -33,8 +38,8 @@ function baseAlert(): SlackAlertPayload {
     title: 'New release detected',
     severity: 'high',
     description: 'nginx:latest digest changed',
-    module: 'release-chain',
-    eventType: 'release-chain.docker.digest_change',
+    module: 'registry',
+    eventType: 'registry.docker.digest_change',
     fields: [
       { label: 'Artifact', value: 'library/nginx' },
       { label: 'Tag', value: 'latest' },
@@ -73,9 +78,10 @@ beforeEach(() => {
 
 describe('dispatchAlert — Slack bot token', () => {
   it('dispatches to Slack bot token (direct channel)', async () => {
-    const results = await dispatchAlert([], baseAlert(), 'xoxb-token', 'C012345');
+    const alert = baseAlert();
+    const results = await dispatchAlert([], alert, 'xoxb-token', 'C012345');
 
-    expect(sendSlackMessage).toHaveBeenCalledWith('xoxb-token', 'C012345', baseAlert());
+    expect(sendSlackMessage).toHaveBeenCalledWith('xoxb-token', 'C012345', alert, undefined);
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({
       channelId: 'C012345',
@@ -121,7 +127,8 @@ describe('dispatchAlert — email channel', () => {
 
 describe('dispatchAlert — webhook channel', () => {
   it('dispatches to webhook channel', async () => {
-    const results = await dispatchAlert([webhookChannel()], baseAlert());
+    const alert = baseAlert();
+    const results = await dispatchAlert([webhookChannel()], alert);
 
     expect(sendWebhookNotification).toHaveBeenCalledWith(
       {
@@ -129,7 +136,7 @@ describe('dispatchAlert — webhook channel', () => {
         secret: 'whsec_abc123',
         headers: { 'X-Custom': 'sentinel' },
       },
-      { alert: baseAlert() },
+      { alert },
     );
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({
@@ -194,15 +201,16 @@ describe('dispatchAlert — partial failure', () => {
     vi.mocked(sendWebhookNotification).mockRejectedValueOnce(new Error('Connection refused'));
 
     const channels = [emailChannel(), webhookChannel()];
-    const results = await dispatchAlert(channels, baseAlert());
 
-    const emailResult = results.find((r) => r.channelId === 'ch-email-1')!;
-    expect(emailResult.status).toBe('failed');
-    expect(emailResult.error).toBe('SMTP refused');
-
-    const webhookResult = results.find((r) => r.channelId === 'ch-webhook-1')!;
-    expect(webhookResult.status).toBe('failed');
-    expect(webhookResult.error).toBe('Connection refused');
+    // When ALL channels fail, dispatchAlert throws with combined error messages
+    try {
+      await dispatchAlert(channels, baseAlert());
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain('email: SMTP refused');
+      expect(msg).toContain('webhook: Connection refused');
+    }
   });
 });
 

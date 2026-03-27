@@ -14,7 +14,7 @@ export function useToast() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const toast = useCallback(
-    (message: string, variant: "error" | "success" = "error") => {
+    (message: string, variant: "error" | "success" = "success") => {
       const id = String(++toastCounter);
       setToasts((prev) => [...prev, { id, message, variant }]);
       setTimeout(() => {

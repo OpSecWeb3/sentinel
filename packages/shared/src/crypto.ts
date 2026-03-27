@@ -4,41 +4,99 @@ import { env } from './env.js';
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
+const VERSION_1 = 0x01;
+// Minimum versioned buffer length: version(1) + IV(12) + authTag(16) = 29
+const MIN_VERSIONED_LENGTH = 1 + IV_LENGTH + TAG_LENGTH;
 
 function getKey(): Buffer {
   return Buffer.from(env().ENCRYPTION_KEY, 'hex');
 }
 
-/**
- * Encrypt plaintext with AES-256-GCM.
- * Returns base64 string: iv + ciphertext + authTag
- */
-export function encrypt(plaintext: string): string {
-  const key = getKey();
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
-
-  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-
-  return Buffer.concat([iv, encrypted, tag]).toString('base64');
+function getPrevKey(): Buffer | undefined {
+  const prev = env().ENCRYPTION_KEY_PREV;
+  return prev ? Buffer.from(prev, 'hex') : undefined;
 }
 
-/**
- * Decrypt AES-256-GCM ciphertext.
- */
-export function decrypt(ciphertext: string): string {
-  const key = getKey();
-  const packed = Buffer.from(ciphertext, 'base64');
+function encryptWithKey(plaintext: string, key: Buffer): Buffer {
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, encrypted, tag]);
+}
 
+function decryptRaw(packed: Buffer, key: Buffer): string {
   const iv = packed.subarray(0, IV_LENGTH);
   const tag = packed.subarray(packed.length - TAG_LENGTH);
   const encrypted = packed.subarray(IV_LENGTH, packed.length - TAG_LENGTH);
 
   const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(tag);
-
   return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
+}
+
+/**
+ * Check whether a ciphertext needs re-encryption.
+ * Returns true if the value is legacy (no version byte) or cannot be
+ * decrypted with the current primary key (i.e. only works with PREV key).
+ */
+export function needsReEncrypt(ciphertext: string): boolean {
+  const buf = Buffer.from(ciphertext, 'base64');
+
+  // Legacy format (no version byte) always needs re-encryption
+  if (buf.length < MIN_VERSIONED_LENGTH || buf[0] !== VERSION_1) return true;
+
+  // Versioned — try decrypting with the current key only
+  try {
+    decryptRaw(buf.subarray(1), getKey());
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Encrypt plaintext with AES-256-GCM.
+ * Returns base64 string: version(1) + iv(12) + ciphertext + authTag(16)
+ */
+export function encrypt(plaintext: string): string {
+  const raw = encryptWithKey(plaintext, getKey());
+  return Buffer.concat([Buffer.from([VERSION_1]), raw]).toString('base64');
+}
+
+/**
+ * Decrypt AES-256-GCM ciphertext.
+ * Supports versioned format (version byte prefix) and legacy format (no prefix).
+ * During key rotation, falls back to ENCRYPTION_KEY_PREV when the primary key fails.
+ */
+export function decrypt(ciphertext: string): string {
+  const buf = Buffer.from(ciphertext, 'base64');
+  const key = getKey();
+  const prevKey = getPrevKey();
+
+  // Versioned format: first byte is VERSION_1
+  if (buf.length >= MIN_VERSIONED_LENGTH && buf[0] === VERSION_1) {
+    const payload = buf.subarray(1);
+    try {
+      return decryptRaw(payload, key);
+    } catch {
+      // Fall back to previous key during rotation
+      if (prevKey) {
+        return decryptRaw(payload, prevKey);
+      }
+      throw new Error('Decryption failed');
+    }
+  }
+
+  // Legacy format (no version byte): try current key, then previous key
+  try {
+    return decryptRaw(buf, key);
+  } catch {
+    if (prevKey) {
+      return decryptRaw(buf, prevKey);
+    }
+    throw new Error('Decryption failed');
+  }
 }
 
 /**

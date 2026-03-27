@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const configSchema = z.object({
   /** Subdomain patterns to ignore (glob-like). E.g. ['staging-*', 'test.*'] */
@@ -28,6 +29,9 @@ export const newSubdomainEvaluator: RuleEvaluator = {
   moduleId: 'infra',
   ruleType: 'infra.new_subdomain',
   configSchema,
+  uiSchema: [
+    { key: 'ignorePatterns', label: 'Subdomains to ignore', type: 'string-array', required: false, placeholder: 'staging-*\n*.internal\n*.dev', help: 'Glob patterns for subdomains that should not trigger alerts.' },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import { NETWORK_UI_FIELD, CONTRACT_UI_FIELD } from './_ui-shared.js';
 
 // ---------------------------------------------------------------------------
 // Config schema — ported from ChainAlert's BalanceConditionConfig
@@ -230,6 +231,14 @@ export const balanceTrackEvaluator: RuleEvaluator = {
   moduleId: 'chain',
   ruleType: 'chain.balance_track',
   configSchema,
+  uiSchema: [
+    NETWORK_UI_FIELD,
+    CONTRACT_UI_FIELD,
+    { key: 'conditionType', label: 'Condition type', type: 'select', required: true, options: [{ value: 'percent_change', label: 'Balance changes by %' }, { value: 'threshold_above', label: 'Balance exceeds threshold' }, { value: 'threshold_below', label: 'Balance drops below threshold' }] },
+    { key: 'value', label: 'Threshold / percent', type: 'text', required: true, placeholder: '1000000000000000000', help: 'Amount in wei, or percent (e.g. 20 for 20%).' },
+    { key: 'windowMs', label: 'Window (ms)', type: 'number', required: false, placeholder: '3600000', help: 'Time window in milliseconds for percent_change condition.' },
+    { key: 'bidirectional', label: 'Alert on increase too', type: 'boolean', required: false },
+  ],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule, redis } = ctx;

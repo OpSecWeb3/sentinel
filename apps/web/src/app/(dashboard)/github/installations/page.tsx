@@ -10,7 +10,7 @@ import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { cn } from "@/lib/utils";
-import { apiGet, apiPost, apiDelete } from "@/lib/api";
+import { apiGet, apiPost, apiDelete, apiFetch } from "@/lib/api";
 
 /* -- types --------------------------------------------------------- */
 
@@ -59,6 +59,7 @@ export default function GitHubInstallationsPage() {
     webhookSecret: "",
   });
   const [setupLoading, setSetupLoading] = useState(false);
+  const [installLoading, setInstallLoading] = useState(false);
 
   const fetchInstallations = useCallback(async () => {
     try {
@@ -78,6 +79,20 @@ export default function GitHubInstallationsPage() {
   }, [fetchInstallations]);
 
   /* -- actions ----------------------------------------------------- */
+
+  async function handleInstallApp() {
+    setInstallLoading(true);
+    try {
+      const res = await apiFetch<{ url: string }>("/modules/github/app/install", { credentials: "include" });
+      if (!/^https?:\/\//i.test(res.url)) {
+        throw new Error("Invalid redirect URL received from server");
+      }
+      window.location.href = res.url;
+    } catch {
+      toast("Failed to get install URL");
+      setInstallLoading(false);
+    }
+  }
 
   async function handleSync(installation: Installation) {
     setActionLoading((prev) => ({ ...prev, [`sync-${installation.id}`]: true }));
@@ -166,6 +181,13 @@ export default function GitHubInstallationsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleInstallApp}
+            disabled={installLoading}
+            className="text-xs text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+          >
+            {installLoading ? "..." : "[install app]"}
+          </button>
           <button
             onClick={() => setShowSetup(!showSetup)}
             className="text-xs text-muted-foreground hover:text-primary transition-colors"

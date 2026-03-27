@@ -16,6 +16,10 @@ import { generateNotifyKey } from '../middleware/notify-key.js';
 
 const SALT_ROUNDS = 12;
 
+// Pre-computed dummy hash for constant-time login responses when user is not found.
+// This prevents timing-based user enumeration (bcrypt compare takes ~200ms).
+const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', SALT_ROUNDS);
+
 const auth = new Hono<AppEnv>();
 
 // Apply baseline rate limiting to all auth routes
@@ -144,6 +148,9 @@ auth.post('/login', authLimiter, async (c) => {
     .limit(1);
 
   if (!user) {
+    // Perform a dummy bcrypt compare to equalize response timing and prevent
+    // user-existence enumeration via timing side-channel.
+    await bcrypt.compare(password, DUMMY_HASH);
     return c.json({ error: 'Invalid username or password' }, 401);
   }
 
@@ -180,6 +187,9 @@ auth.post('/login', authLimiter, async (c) => {
     .from(orgMemberships)
     .where(eq(orgMemberships.userId, user.id))
     .limit(1);
+
+  // Destroy any pre-existing session to prevent session fixation attacks.
+  await destroySession(c);
 
   await createSession(c, {
     id: user.id,
@@ -219,7 +229,7 @@ auth.get('/me', requireAuth, (c) => {
 
 const createKeySchema = z.object({
   name: z.string().min(1).max(100),
-  scopes: z.array(z.string()).default(['api:read']),
+  scopes: z.array(z.enum(['api:read', 'api:write'])).default(['api:read']),
   expiresInDays: z.number().int().positive().optional(),
 });
 
@@ -526,7 +536,7 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8),
 });
 
-auth.post('/change-password', requireAuth, async (c) => {
+auth.post('/change-password', authLimiter, requireAuth, async (c) => {
   const { currentPassword, newPassword } = changePasswordSchema.parse(await c.req.json());
   const userId = c.get('userId')!;
   const db = getDb();

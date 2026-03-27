@@ -1,10 +1,22 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/api";
+
 export default function AuthLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const router = useRouter();
+
+  useEffect(() => {
+    apiFetch("/auth/me", { credentials: "include" })
+      .then(() => router.replace("/dashboard"))
+      .catch(() => {/* not logged in, stay on page */});
+  }, [router]);
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4 font-mono">
       <div className="w-full max-w-md">

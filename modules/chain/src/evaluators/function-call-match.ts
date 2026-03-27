@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
 import { conditionSchema, evaluateConditions, type Condition } from './event-match.js';
+import { NETWORK_UI_FIELD, CONTRACT_UI_FIELD } from './_ui-shared.js';
 
 // ---------------------------------------------------------------------------
 // Config schema — matches ChainAlert's FnCallRuleConfig shape
@@ -27,6 +28,11 @@ export const functionCallMatchEvaluator: RuleEvaluator = {
   moduleId: 'chain',
   ruleType: 'chain.function_call_match',
   configSchema,
+  uiSchema: [
+    NETWORK_UI_FIELD,
+    CONTRACT_UI_FIELD,
+    { key: 'functionSignature', label: 'Function signature', type: 'text', required: true, placeholder: 'transfer(address,uint256)', help: 'ABI function signature to match.' },
+  ],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

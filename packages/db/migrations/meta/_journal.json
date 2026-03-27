@@ -15,6 +15,34 @@
       "when": 1774620000000,
       "tag": "0004_infra_cdn_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774626000000,
+      "tag": "0006_notification_deliveries",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1743033600000,
+      "tag": "0007_chain_snapshot_composite_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1743206400000,
+      "tag": "0008_aws_module",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1743292800000,
+      "tag": "0009_aws_org_integration",
+      "breakpoints": true
     }
   ]
 }

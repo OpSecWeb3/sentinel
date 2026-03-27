@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SearchInput } from "@/components/ui/search-input";
 import { FilterBar } from "@/components/ui/filter-bar";
+import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api";
@@ -68,7 +69,7 @@ const severityColor: Record<string, string> = {
 };
 
 const PAGE_SIZE = 20;
-const MODULES = ["github", "release-chain"];
+const MODULES = ["chain", "github", "infra", "registry"];
 
 function formatDate(iso: string | null): string {
   if (!iso) return "Never";
@@ -102,7 +103,7 @@ export default function DetectionsPage() {
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>(
     {},
   );
-  const { toast } = useToast();
+  const { toast, toasts, dismiss } = useToast();
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Confirm dialog state
@@ -228,6 +229,7 @@ export default function DetectionsPage() {
 
   return (
     <div className="space-y-6">
+      <ToastContainer toasts={toasts} dismiss={dismiss} />
       <ConfirmDialog
         open={confirmOpen}
         title={confirmTitle}

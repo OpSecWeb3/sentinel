@@ -5,3 +5,10 @@ dist/
 !.env.example
 *.tsbuildinfo
 .DS_Store
+
+# Next.js build output
+apps/web/.next/
+apps/web/out/
+
+# Claude Code
+.claude/

@@ -22,10 +22,10 @@ import Redis from 'ioredis';
 // Re-export schema so tests can import from one place.
 import * as coreSchema from '../../packages/db/schema/core.js';
 import * as githubSchema from '../../packages/db/schema/github.js';
-import * as releaseChainSchema from '../../packages/db/schema/release-chain.js';
+import * as registrySchema from '../../packages/db/schema/registry.js';
 import * as infraSchema from '../../packages/db/schema/infra.js';
 
-export const schema = { ...coreSchema, ...githubSchema, ...releaseChainSchema, ...infraSchema };
+export const schema = { ...coreSchema, ...githubSchema, ...registrySchema, ...infraSchema };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -414,7 +414,7 @@ async function pushSchema(sql: ReturnType<typeof postgres>): Promise<void> {
   `;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS uq_gh_repo ON github_repositories(installation_id, repo_id)`;
 
-  // --- release-chain.ts tables ---
+  // --- registry.ts tables ---
   await sql`
     CREATE TABLE IF NOT EXISTS rc_artifacts (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import { NETWORK_UI_FIELD, CONTRACT_UI_FIELD, EVENT_SIG_UI_FIELD } from './_ui-shared.js';
 
 // ---------------------------------------------------------------------------
 // Condition types — ported from ChainAlert's event-filter conditions
@@ -94,63 +95,108 @@ export const eventMatchEvaluator: RuleEvaluator = {
   moduleId: 'chain',
   ruleType: 'chain.event_match',
   configSchema,
+  uiSchema: [
+    NETWORK_UI_FIELD,
+    CONTRACT_UI_FIELD,
+    EVENT_SIG_UI_FIELD,
+  ],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;
 
-    // Only handle on-chain log events
-    if (event.eventType !== 'chain.log') return null;
-
     const config = configSchema.parse(rule.config);
-    const payload = event.payload as {
-      topics: string[];
-      address: string;
-      decodedArgs?: Record<string, unknown>;
-      eventName?: string;
-      blockNumber?: string;
-      transactionHash?: string;
-      logIndex?: number;
-    };
 
-    // ----- topic0 matching -----
-    const logTopic0 = payload.topics?.[0]?.toLowerCase();
-    if (!logTopic0) return null;
+    let contractAddress: string;
+    let args: Record<string, unknown>;
+    let eventName: string;
+    let blockNumber: string | undefined;
+    let transactionHash: string | undefined;
+    let logIndex: number | undefined;
 
-    const ruleTopic0 = (config.topic0 ?? '').toLowerCase();
-    if (!ruleTopic0) return null; // misconfigured rule
-    if (logTopic0 !== ruleTopic0) return null;
+    if (event.eventType === 'chain.event.matched') {
+      // Payload produced by blockProcessHandler via normalizeMatchedEvent
+      const p = event.payload as {
+        contractAddress: string;
+        eventArgs?: Record<string, unknown>;
+        eventName?: string;
+        topic0?: string;
+        blockNumber?: string;
+        transactionHash?: string;
+        logIndex?: number;
+      };
+
+      // Verify the event actually matches the rule's expected event signature.
+      // RuleEngine evaluates ALL rules against every event, so a Transfer event
+      // would otherwise match a Paused rule if they share a contract address.
+      const expectedEventName = config.eventSignature?.split('(')[0];
+      if (expectedEventName && p.eventName && p.eventName !== expectedEventName) {
+        return null;
+      }
+
+      contractAddress = p.contractAddress;
+      args = p.eventArgs ?? {};
+      eventName = p.eventName ?? 'UnknownEvent';
+      blockNumber = p.blockNumber;
+      transactionHash = p.transactionHash;
+      logIndex = p.logIndex;
+    } else if (event.eventType === 'chain.log') {
+      // Raw log event shape
+      const p = event.payload as {
+        topics: string[];
+        address: string;
+        decodedArgs?: Record<string, unknown>;
+        eventName?: string;
+        blockNumber?: string;
+        transactionHash?: string;
+        logIndex?: number;
+      };
+
+      // topic0 matching
+      const logTopic0 = p.topics?.[0]?.toLowerCase();
+      if (!logTopic0) return null;
+      const ruleTopic0 = (config.topic0 ?? '').toLowerCase();
+      if (!ruleTopic0) return null;
+      if (logTopic0 !== ruleTopic0) return null;
+
+      contractAddress = p.address;
+      args = p.decodedArgs ?? {};
+      eventName = p.eventName ?? 'UnknownEvent';
+      blockNumber = p.blockNumber;
+      transactionHash = p.transactionHash;
+      logIndex = p.logIndex;
+    } else {
+      return null;
+    }
 
     // ----- contract address filter -----
     if (config.contractAddress) {
-      if (payload.address.toLowerCase() !== config.contractAddress.toLowerCase()) {
+      if (contractAddress.toLowerCase() !== config.contractAddress.toLowerCase()) {
         return null;
       }
     }
 
     // ----- field conditions -----
-    const args = payload.decodedArgs ?? {};
     if (!evaluateConditions(args, config.conditions)) {
       return null;
     }
 
     // ----- matched -----
-    const eventName = payload.eventName ?? 'UnknownEvent';
     return {
       orgId: event.orgId,
       detectionId: rule.detectionId,
       ruleId: rule.id,
       eventId: event.id,
       severity: 'high',
-      title: `Event ${eventName} matched on ${payload.address}`,
-      description: `Transaction ${payload.transactionHash ?? 'unknown'} emitted ${eventName} matching rule conditions`,
+      title: `Event ${eventName} matched on ${contractAddress}`,
+      description: `Transaction ${transactionHash ?? 'unknown'} emitted ${eventName} matching rule conditions`,
       triggerType: 'immediate',
       triggerData: {
         type: 'event-match',
         eventName,
-        contractAddress: payload.address,
-        blockNumber: payload.blockNumber,
-        transactionHash: payload.transactionHash,
-        logIndex: payload.logIndex,
+        contractAddress,
+        blockNumber,
+        transactionHash,
+        logIndex,
         decodedArgs: args,
       },
     };

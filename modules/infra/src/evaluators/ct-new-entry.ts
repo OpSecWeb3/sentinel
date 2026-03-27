@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const configSchema = z.object({
   /** Issuer name patterns to ignore (glob-like). E.g. ["Let's Encrypt*", "DigiCert*"] */
@@ -24,6 +25,9 @@ export const ctNewEntryEvaluator: RuleEvaluator = {
   moduleId: 'infra',
   ruleType: 'infra.ct_new_entry',
   configSchema,
+  uiSchema: [
+    { key: 'ignorePatterns', label: 'Issuer patterns to ignore', type: 'string-array', required: false, placeholder: "Let's Encrypt\nZeroSSL", help: 'Certificate issuers whose CT log entries should not trigger alerts.' },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

@@ -180,7 +180,7 @@ describe('GET /api/detections', () => {
   it('filters by moduleId', async () => {
     const admin = await setupAdmin(app);
     await createDetection(app, admin.cookie, { moduleId: 'github', name: 'GH Det' });
-    await createDetection(app, admin.cookie, { moduleId: 'release-chain', name: 'RC Det' });
+    await createDetection(app, admin.cookie, { moduleId: 'registry', name: 'RC Det' });
 
     const res = await appRequest(app, 'GET', '/api/detections', {
       cookie: admin.cookie,

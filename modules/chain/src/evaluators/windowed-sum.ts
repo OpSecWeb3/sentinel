@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import { NETWORK_UI_FIELD, CONTRACT_UI_FIELD, EVENT_SIG_UI_FIELD, GROUP_BY_UI_FIELD } from './_ui-shared.js';
 
 // ---------------------------------------------------------------------------
 // Config schema
@@ -115,6 +116,16 @@ export const windowedSumEvaluator: RuleEvaluator = {
   moduleId: 'chain',
   ruleType: 'chain.windowed_sum',
   configSchema,
+  uiSchema: [
+    NETWORK_UI_FIELD,
+    CONTRACT_UI_FIELD,
+    EVENT_SIG_UI_FIELD,
+    { key: 'sumField', label: 'Field to sum', type: 'text', required: true, placeholder: 'value', help: 'Event payload field whose values are summed (e.g. "value" for ERC-20 amount).' },
+    { key: 'windowMinutes', label: 'Time window (minutes)', type: 'number', required: true, default: 60, min: 1 },
+    { key: 'threshold', label: 'Sum threshold (wei)', type: 'text', required: true, placeholder: '1000000000000000000', help: 'Alert when total sum in window exceeds this.' },
+    { key: 'operator', label: 'Operator', type: 'select', required: false, options: [{ value: 'gt', label: '> greater than' }, { value: 'gte', label: '>= greater or equal' }, { value: 'lt', label: '< less than' }, { value: 'lte', label: '<= less or equal' }] },
+    GROUP_BY_UI_FIELD,
+  ],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule, redis } = ctx;

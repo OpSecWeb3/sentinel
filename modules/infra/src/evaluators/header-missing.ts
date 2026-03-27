@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const ALL_HEADERS = [
   'HSTS',
@@ -19,6 +20,9 @@ export const headerMissingEvaluator: RuleEvaluator = {
   moduleId: 'infra',
   ruleType: 'infra.header_missing',
   configSchema,
+  uiSchema: [
+    { key: 'requiredHeaders', label: 'Required security headers', type: 'string-array', required: false, placeholder: 'Strict-Transport-Security\nContent-Security-Policy\nX-Frame-Options', help: 'HTTP response headers that must be present. Leave empty to check all known security headers.' },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

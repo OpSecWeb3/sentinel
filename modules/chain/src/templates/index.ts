@@ -1,6 +1,38 @@
 import type { DetectionTemplate } from '@sentinel/shared/module';
 import { WELL_KNOWN_SLOTS } from '../well-known-slots.js';
 
+const CONDITION_TYPE_OPTIONS = [
+  { value: 'changed', label: 'Any change' },
+  { value: 'equals', label: 'Equals value' },
+  { value: 'gt', label: 'Greater than' },
+  { value: 'lt', label: 'Less than' },
+  { value: 'percent_change', label: 'Changes by %' },
+];
+
+const FILTER_OP_OPTIONS = [
+  { value: '==', label: '==' },
+  { value: '!=', label: '!=' },
+  { value: '>', label: '>' },
+  { value: '>=', label: '>=' },
+  { value: '<', label: '<' },
+  { value: '<=', label: '<=' },
+];
+
+const NETWORK_INPUT = {
+  key: 'networkId',
+  label: 'Network',
+  type: 'network' as const,
+  required: true,
+};
+
+const CONTRACT_REQUIRED_INPUT = {
+  key: 'contractAddress',
+  label: 'Contract',
+  type: 'contract' as const,
+  required: true,
+  help: 'Select a monitored contract or paste an address directly.',
+};
+
 export const templates: DetectionTemplate[] = [
   // ── Token Activity ─────────────────────────────────────────────────────
   {
@@ -10,6 +42,19 @@ export const templates: DetectionTemplate[] = [
       'Alert when an ERC-20 Transfer event moves more than a specified amount of tokens. Catches whale movements and potential exploits.',
     category: 'token-activity',
     severity: 'high',
+    inputs: [
+      NETWORK_INPUT,
+      CONTRACT_REQUIRED_INPUT,
+      {
+        key: 'threshold',
+        label: 'Transfer threshold',
+        type: 'number',
+        required: true,
+        placeholder: '1000000000000000000',
+        help: 'Minimum token amount in base units (e.g. 1e18 = 1 token with 18 decimals).',
+        min: 1,
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.event_match',
@@ -33,6 +78,45 @@ export const templates: DetectionTemplate[] = [
       'Alert when the native or token balance of a contract drops by a specified percentage within a time window. Detects hacks, rug pulls, and unexpected outflows.',
     category: 'balance',
     severity: 'critical',
+    inputs: [
+      NETWORK_INPUT,
+      CONTRACT_REQUIRED_INPUT,
+      {
+        key: 'windowMinutes',
+        label: 'Time window (minutes)',
+        type: 'number',
+        required: true,
+        default: 60,
+        min: 1,
+      },
+      {
+        key: 'countThreshold',
+        label: 'Transfer count threshold',
+        type: 'number',
+        required: true,
+        default: 10,
+        min: 1,
+        help: 'Number of transfers within the window before alerting.',
+      },
+      {
+        key: 'tokenAddress',
+        label: 'Token address',
+        type: 'address',
+        required: false,
+        placeholder: '0x...',
+        help: 'ERC-20 token to track. Leave empty to track native ETH/MATIC balance.',
+      },
+      {
+        key: 'dropPercent',
+        label: 'Balance drop % to alert',
+        type: 'number',
+        required: true,
+        default: 20,
+        min: 1,
+        max: 100,
+        help: 'Alert when balance drops by this percentage within the window.',
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.windowed_count',
@@ -70,6 +154,7 @@ export const templates: DetectionTemplate[] = [
       'Alert when ownership of a contract is transferred or a transfer is initiated. Covers OpenZeppelin Ownable and Ownable2Step patterns.',
     category: 'governance',
     severity: 'critical',
+    inputs: [NETWORK_INPUT, CONTRACT_REQUIRED_INPUT],
     rules: [
       {
         ruleType: 'chain.event_match',
@@ -98,6 +183,44 @@ export const templates: DetectionTemplate[] = [
       'Monitor an EVM storage slot for unexpected changes or threshold crossings. Useful for detecting proxy upgrades, parameter manipulation, and silent contract changes.',
     category: 'governance',
     severity: 'high',
+    inputs: [
+      NETWORK_INPUT,
+      CONTRACT_REQUIRED_INPUT,
+      {
+        key: 'slot',
+        label: 'Storage slot',
+        type: 'text',
+        required: true,
+        placeholder: '0x0',
+        help: 'Hex-encoded storage slot index (e.g. 0x0 for slot 0, 0x1 for slot 1).',
+      },
+      {
+        key: 'pollIntervalMs',
+        label: 'Poll interval (ms)',
+        type: 'number',
+        required: false,
+        default: 60000,
+        min: 10000,
+        help: 'How often to read the storage slot.',
+      },
+      {
+        key: 'conditionType',
+        label: 'Alert condition',
+        type: 'select',
+        required: true,
+        default: 'changed',
+        options: CONDITION_TYPE_OPTIONS,
+      },
+      {
+        key: 'conditionValue',
+        label: 'Condition value',
+        type: 'text',
+        required: false,
+        showIf: 'conditionType',
+        placeholder: '0',
+        help: 'Value to compare against (not needed for "any change").',
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.state_poll',
@@ -107,8 +230,6 @@ export const templates: DetectionTemplate[] = [
           condition: {
             type: '{{conditionType}}',
             value: '{{conditionValue}}',
-            percentThreshold: '{{percentThreshold}}',
-            windowSize: '{{windowSize}}',
           },
         },
         action: 'alert',
@@ -124,6 +245,17 @@ export const templates: DetectionTemplate[] = [
       'Alert when a new contract is deployed by a monitored address. Catches factory deployments and unexpected contract creation.',
     category: 'contract-activity',
     severity: 'high',
+    inputs: [
+      NETWORK_INPUT,
+      {
+        key: 'watchAddress',
+        label: 'Watch address',
+        type: 'address',
+        required: true,
+        placeholder: '0x...',
+        help: 'Alert when this address deploys a new contract.',
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.event_match',
@@ -144,6 +276,50 @@ export const templates: DetectionTemplate[] = [
       'Watch for any on-chain event by providing its Solidity signature. Optionally filter on decoded parameters.',
     category: 'custom',
     severity: 'medium',
+    inputs: [
+      NETWORK_INPUT,
+      CONTRACT_REQUIRED_INPUT,
+      {
+        key: 'eventSignature',
+        label: 'Event signature',
+        type: 'text',
+        required: true,
+        placeholder: 'Transfer(address,address,uint256)',
+        help: 'Full Solidity event signature (e.g. Transfer(address,address,uint256)).',
+      },
+      {
+        key: 'eventName',
+        label: 'Event name',
+        type: 'text',
+        required: false,
+        placeholder: 'Transfer',
+        help: 'Human-readable event name for display purposes.',
+      },
+      {
+        key: 'filterField',
+        label: 'Filter field (optional)',
+        type: 'text',
+        required: false,
+        placeholder: 'from',
+        help: 'Decoded event parameter to filter on. Leave empty to match all events.',
+      },
+      {
+        key: 'filterOp',
+        label: 'Operator',
+        type: 'select',
+        required: false,
+        showIf: 'filterField',
+        options: FILTER_OP_OPTIONS,
+      },
+      {
+        key: 'filterValue',
+        label: 'Filter value',
+        type: 'text',
+        required: false,
+        showIf: 'filterField',
+        placeholder: '0x...',
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.event_match',
@@ -172,6 +348,62 @@ export const templates: DetectionTemplate[] = [
       'Monitor the native or token balance of an address and alert when it falls below a minimum, exceeds a maximum, or changes by a configurable percentage.',
     category: 'balance',
     severity: 'medium',
+    inputs: [
+      NETWORK_INPUT,
+      { ...CONTRACT_REQUIRED_INPUT, label: 'Address to monitor', help: 'Address whose balance to track.' },
+      {
+        key: 'tokenAddress',
+        label: 'Token address',
+        type: 'address',
+        required: false,
+        placeholder: '0x...',
+        help: 'ERC-20 token to track. Leave empty for native ETH/MATIC balance.',
+      },
+      {
+        key: 'pollIntervalMs',
+        label: 'Poll interval (ms)',
+        type: 'number',
+        required: false,
+        default: 60000,
+        min: 10000,
+      },
+      {
+        key: 'windowMinutes',
+        label: 'Window (minutes)',
+        type: 'number',
+        required: true,
+        default: 60,
+        min: 1,
+      },
+      {
+        key: 'conditionType',
+        label: 'Alert when balance',
+        type: 'select',
+        required: true,
+        default: 'percent_change',
+        options: [
+          { value: 'min', label: 'Falls below minimum' },
+          { value: 'max', label: 'Exceeds maximum' },
+          { value: 'percent_change', label: 'Changes by %' },
+        ],
+      },
+      {
+        key: 'conditionValue',
+        label: 'Threshold',
+        type: 'number',
+        required: true,
+        placeholder: '20',
+        help: 'Amount (for min/max) or percentage (for percent change).',
+        min: 0,
+      },
+      {
+        key: 'bidirectional',
+        label: 'Alert on both increase and decrease',
+        type: 'boolean',
+        required: false,
+        default: false,
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.balance_track',
@@ -198,6 +430,68 @@ export const templates: DetectionTemplate[] = [
       'Alert when the firing rate of any event increases dramatically compared to a baseline period. Detects unusual bursts of activity that may signal an attack.',
     category: 'custom',
     severity: 'high',
+    inputs: [
+      NETWORK_INPUT,
+      CONTRACT_REQUIRED_INPUT,
+      {
+        key: 'eventSignature',
+        label: 'Event signature',
+        type: 'text',
+        required: true,
+        placeholder: 'Transfer(address,address,uint256)',
+      },
+      {
+        key: 'eventName',
+        label: 'Event name',
+        type: 'text',
+        required: false,
+        placeholder: 'Transfer',
+      },
+      {
+        key: 'groupByField',
+        label: 'Group by field',
+        type: 'text',
+        required: false,
+        placeholder: 'to',
+        help: 'Count spikes per unique value of this decoded parameter.',
+      },
+      {
+        key: 'observationMinutes',
+        label: 'Observation window (minutes)',
+        type: 'number',
+        required: true,
+        default: 5,
+        min: 1,
+        help: 'Recent window to compare against baseline.',
+      },
+      {
+        key: 'baselineMinutes',
+        label: 'Baseline window (minutes)',
+        type: 'number',
+        required: true,
+        default: 60,
+        min: 5,
+        help: 'Historical window used as the normal baseline.',
+      },
+      {
+        key: 'increasePercent',
+        label: 'Spike threshold (%)',
+        type: 'number',
+        required: true,
+        default: 300,
+        min: 10,
+        help: 'Alert when rate increases by this percentage above baseline.',
+      },
+      {
+        key: 'minBaselineCount',
+        label: 'Minimum baseline events',
+        type: 'number',
+        required: false,
+        default: 1,
+        min: 0,
+        help: 'Minimum baseline events required before spike detection activates.',
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.windowed_spike',
@@ -223,6 +517,7 @@ export const templates: DetectionTemplate[] = [
       'Alert when an AccessControl role is granted or revoked on a contract. Detects privilege escalation and unexpected permission changes.',
     category: 'governance',
     severity: 'high',
+    inputs: [NETWORK_INPUT, CONTRACT_REQUIRED_INPUT],
     rules: [
       {
         ruleType: 'chain.event_match',
@@ -251,6 +546,7 @@ export const templates: DetectionTemplate[] = [
       'Alert when an ERC-1967 Upgraded event is emitted. Catches proxy implementation changes that could alter contract logic.',
     category: 'governance',
     severity: 'critical',
+    inputs: [NETWORK_INPUT, { ...CONTRACT_REQUIRED_INPUT, help: 'The proxy contract to monitor.' }],
     rules: [
       {
         ruleType: 'chain.event_match',
@@ -271,6 +567,19 @@ export const templates: DetectionTemplate[] = [
       'Poll the ERC-1967 implementation storage slot for changes. Detects proxy upgrades even when events are suppressed or non-standard.',
     category: 'governance',
     severity: 'critical',
+    inputs: [
+      NETWORK_INPUT,
+      { ...CONTRACT_REQUIRED_INPUT, help: 'The proxy contract to monitor.' },
+      {
+        key: 'pollIntervalMs',
+        label: 'Poll interval (ms)',
+        type: 'number',
+        required: false,
+        default: 60000,
+        min: 10000,
+        help: 'How often to read the implementation slot.',
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.state_poll',
@@ -292,6 +601,7 @@ export const templates: DetectionTemplate[] = [
       'Alert when owners are added to or removed from a multisig wallet such as Safe (Gnosis Safe). Catches unauthorized signer modifications.',
     category: 'governance',
     severity: 'high',
+    inputs: [NETWORK_INPUT, CONTRACT_REQUIRED_INPUT],
     rules: [
       {
         ruleType: 'chain.event_match',
@@ -320,6 +630,7 @@ export const templates: DetectionTemplate[] = [
       'Alert when a contract is paused or unpaused. Detects emergency halts and unexpected protocol freezes that may indicate an incident.',
     category: 'governance',
     severity: 'high',
+    inputs: [NETWORK_INPUT, CONTRACT_REQUIRED_INPUT],
     rules: [
       {
         ruleType: 'chain.event_match',
@@ -350,6 +661,27 @@ export const templates: DetectionTemplate[] = [
       'Alert when the same recipient receives more than a threshold number of transfers within a time window. Identifies wash trading, drip attacks, and automated drains.',
     category: 'token-activity',
     severity: 'high',
+    inputs: [
+      NETWORK_INPUT,
+      { ...CONTRACT_REQUIRED_INPUT, label: 'Token contract' },
+      {
+        key: 'windowMinutes',
+        label: 'Time window (minutes)',
+        type: 'number',
+        required: true,
+        default: 60,
+        min: 1,
+      },
+      {
+        key: 'threshold',
+        label: 'Transfer count threshold',
+        type: 'number',
+        required: true,
+        default: 10,
+        min: 1,
+        help: 'Alert when a single recipient receives this many transfers within the window.',
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.windowed_count',
@@ -373,6 +705,27 @@ export const templates: DetectionTemplate[] = [
       'Alert when the native (ETH/MATIC/etc.) balance of a monitored address drops by a configurable percentage within a time window. Detects unexpected outflows and potential key compromise.',
     category: 'balance',
     severity: 'high',
+    inputs: [
+      NETWORK_INPUT,
+      { ...CONTRACT_REQUIRED_INPUT, label: 'Address to monitor', help: 'Address whose native balance to watch.' },
+      {
+        key: 'windowMinutes',
+        label: 'Time window (minutes)',
+        type: 'number',
+        required: true,
+        default: 60,
+        min: 1,
+      },
+      {
+        key: 'dropPercent',
+        label: 'Balance drop % to alert',
+        type: 'number',
+        required: true,
+        default: 20,
+        min: 1,
+        max: 100,
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.balance_track',
@@ -397,6 +750,42 @@ export const templates: DetectionTemplate[] = [
       'Poll an arbitrary EVM storage slot and alert when its value matches a user-defined condition. Enables low-level state monitoring for any contract.',
     category: 'custom',
     severity: 'medium',
+    inputs: [
+      NETWORK_INPUT,
+      CONTRACT_REQUIRED_INPUT,
+      {
+        key: 'slot',
+        label: 'Storage slot',
+        type: 'text',
+        required: true,
+        placeholder: '0x0',
+        help: 'Hex-encoded slot index (e.g. 0x0, 0x1, 0x360894...).',
+      },
+      {
+        key: 'pollIntervalMs',
+        label: 'Poll interval (ms)',
+        type: 'number',
+        required: false,
+        default: 60000,
+        min: 10000,
+      },
+      {
+        key: 'conditionType',
+        label: 'Alert condition',
+        type: 'select',
+        required: true,
+        default: 'changed',
+        options: CONDITION_TYPE_OPTIONS,
+      },
+      {
+        key: 'conditionValue',
+        label: 'Condition value',
+        type: 'text',
+        required: false,
+        showIf: 'conditionType',
+        placeholder: '0',
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.state_poll',
@@ -421,6 +810,50 @@ export const templates: DetectionTemplate[] = [
       'Call a read-only contract function on a schedule and alert when the returned value satisfies a condition. Useful for monitoring protocol parameters, oracle prices, and governance state.',
     category: 'custom',
     severity: 'medium',
+    inputs: [
+      NETWORK_INPUT,
+      CONTRACT_REQUIRED_INPUT,
+      {
+        key: 'functionSignature',
+        label: 'Function signature',
+        type: 'text',
+        required: true,
+        placeholder: 'balanceOf(address)',
+        help: 'Read-only function to call periodically (must be view/pure).',
+      },
+      {
+        key: 'resultField',
+        label: 'Result field',
+        type: 'text',
+        required: false,
+        placeholder: '0',
+        help: 'Index or name of the return value to evaluate (0 for first).',
+      },
+      {
+        key: 'filterField',
+        label: 'Filter field (optional)',
+        type: 'text',
+        required: false,
+        placeholder: '0',
+        help: 'Return value index to compare.',
+      },
+      {
+        key: 'filterOp',
+        label: 'Operator',
+        type: 'select',
+        required: false,
+        showIf: 'filterField',
+        options: FILTER_OP_OPTIONS,
+      },
+      {
+        key: 'filterValue',
+        label: 'Compare value',
+        type: 'text',
+        required: false,
+        showIf: 'filterField',
+        placeholder: '0',
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.view_call',
@@ -449,6 +882,49 @@ export const templates: DetectionTemplate[] = [
       'Count occurrences of any on-chain event within a sliding time window and alert when the count exceeds a threshold. Supports grouping by a decoded field for per-entity counting.',
     category: 'custom',
     severity: 'medium',
+    inputs: [
+      NETWORK_INPUT,
+      CONTRACT_REQUIRED_INPUT,
+      {
+        key: 'eventSignature',
+        label: 'Event signature',
+        type: 'text',
+        required: true,
+        placeholder: 'Transfer(address,address,uint256)',
+      },
+      {
+        key: 'eventName',
+        label: 'Event name',
+        type: 'text',
+        required: false,
+        placeholder: 'Transfer',
+      },
+      {
+        key: 'groupByField',
+        label: 'Group by field (optional)',
+        type: 'text',
+        required: false,
+        placeholder: 'to',
+        help: 'Count per unique value of this decoded parameter.',
+      },
+      {
+        key: 'windowMinutes',
+        label: 'Time window (minutes)',
+        type: 'number',
+        required: true,
+        default: 60,
+        min: 1,
+      },
+      {
+        key: 'threshold',
+        label: 'Count threshold',
+        type: 'number',
+        required: true,
+        default: 10,
+        min: 1,
+        help: 'Alert when event count exceeds this value within the window.',
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.windowed_count',
@@ -472,6 +948,35 @@ export const templates: DetectionTemplate[] = [
       'Alert when the total value transferred via a token exceeds a threshold within a rolling time window. Detects large cumulative outflows that individual transfer monitors might miss.',
     category: 'token-activity',
     severity: 'high',
+    inputs: [
+      NETWORK_INPUT,
+      { ...CONTRACT_REQUIRED_INPUT, label: 'Token contract' },
+      {
+        key: 'windowMinutes',
+        label: 'Time window (minutes)',
+        type: 'number',
+        required: true,
+        default: 60,
+        min: 1,
+      },
+      {
+        key: 'threshold',
+        label: 'Volume threshold',
+        type: 'number',
+        required: true,
+        default: 1000000,
+        min: 1,
+        help: 'Alert when total transferred volume exceeds this amount within the window.',
+      },
+      {
+        key: 'groupByField',
+        label: 'Group by field (optional)',
+        type: 'text',
+        required: false,
+        placeholder: 'to',
+        help: 'Alert per-entity when their cumulative volume exceeds the threshold.',
+      },
+    ],
     rules: [
       {
         ruleType: 'chain.windowed_sum',

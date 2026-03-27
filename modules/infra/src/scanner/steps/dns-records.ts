@@ -1,7 +1,7 @@
 /**
  * Step 1: DNS record resolution + change detection.
  *
- * Resolves A, AAAA, MX, NS, TXT, CNAME, SOA records using node:dns/promises.
+ * Resolves A, AAAA, MX, NS, TXT, CNAME records using node:dns/promises.
  * Compares against previously stored records to detect changes.
  * CDN-aware suppression for A/AAAA changes when IPs belong to same provider.
  */
@@ -9,15 +9,63 @@ import dns from 'node:dns/promises';
 
 import type { DnsChange, DnsRecord, Severity, StepResult } from '../types.js';
 
-const RECORD_TYPES = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'CNAME', 'SOA'] as const;
+// SOA excluded: the serial increments on every zone change, causing constant
+// false-positive "SOA modified" noise. SOA is queried separately for DNSSEC checks.
+const RECORD_TYPES = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'CNAME'] as const;
 
 /** Well-known CDN CNAME suffixes used for edge-IP-rotation suppression. */
 const CDN_CNAME_PATTERNS: Record<string, string[]> = {
-  cloudflare: ['.cdn.cloudflare.net'],
+  cloudflare: ['.cdn.cloudflare.net', '.cloudflare.net'],
   cloudfront: ['.cloudfront.net'],
   fastly: ['.fastly.net', '.fastlylb.net'],
   akamai: ['.akamaiedge.net', '.akamai.net', '.edgekey.net'],
 };
+
+/**
+ * Known CDN IPv4 CIDR ranges for fallback provider detection when CNAME records
+ * are absent (e.g. Cloudflare CNAME flattening at apex domains).
+ * Format: [base address as uint32, prefix length]
+ */
+const CDN_IP_RANGES: Record<string, [number, number][]> = {
+  cloudflare: [
+    [0x68100000, 13],  // 104.16.0.0/13
+    [0x68180000, 14],  // 104.24.0.0/14
+    [0xac400000, 13],  // 172.64.0.0/13
+    [0xa29e0000, 15],  // 162.158.0.0/15
+    [0x8d654000, 18],  // 141.101.64.0/18
+    [0x6ca2c000, 18],  // 108.162.192.0/18
+    [0x6715f400, 22],  // 103.21.244.0/22
+    [0x6716c800, 22],  // 103.22.200.0/22
+    [0x671f0400, 22],  // 103.31.4.0/22
+    [0x83004800, 22],  // 131.0.72.0/22
+    [0xadf53000, 20],  // 173.245.48.0/20
+    [0xbc726000, 20],  // 188.114.96.0/20
+    [0xbe5df000, 20],  // 190.93.240.0/20
+    [0xc5eaf000, 22],  // 197.234.240.0/22
+    [0xc6298000, 17],  // 198.41.128.0/17
+  ],
+};
+
+function ipv4ToUint32(ip: string): number {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return 0;
+  return (
+    ((parseInt(parts[0], 10) << 24) |
+     (parseInt(parts[1], 10) << 16) |
+     (parseInt(parts[2], 10) << 8)  |
+      parseInt(parts[3], 10)) >>> 0
+  );
+}
+
+function isInCidr(ip: string, base: number, prefixLen: number): boolean {
+  try {
+    const ipInt = ipv4ToUint32(ip);
+    const mask = prefixLen === 0 ? 0 : ((~0 << (32 - prefixLen)) >>> 0);
+    return (ipInt & mask) === (base & mask);
+  } catch {
+    return false;
+  }
+}
 
 // -------------------------------------------------------------------------
 // DNS resolution
@@ -122,9 +170,13 @@ function changeSeverity(recordType: string): Severity {
 }
 
 /**
- * Detect CDN provider from CNAME records for edge-IP-rotation suppression.
+ * Detect CDN provider from current DNS records for edge-IP-rotation suppression.
+ * Layer 1: CNAME suffix matching (definitive).
+ * Layer 2: IPv4 range matching (fallback for CNAME-flattened apex domains where
+ *           the resolver returns A records directly with no CNAME in the response).
  */
 function detectCdnProvider(records: DnsRecord[]): string | null {
+  // Layer 1: CNAME patterns
   for (const rec of records) {
     if (rec.recordType !== 'CNAME') continue;
     const value = rec.recordValue.replace(/\.$/, '').toLowerCase();
@@ -132,6 +184,17 @@ function detectCdnProvider(records: DnsRecord[]): string | null {
       if (patterns.some((p) => value.endsWith(p))) return provider;
     }
   }
+
+  // Layer 2: A record IP ranges (handles CNAME flattening at apex)
+  for (const rec of records) {
+    if (rec.recordType !== 'A') continue;
+    for (const [provider, ranges] of Object.entries(CDN_IP_RANGES)) {
+      if (ranges.some(([base, prefix]) => isInCidr(rec.recordValue, base, prefix))) {
+        return provider;
+      }
+    }
+  }
+
   return null;
 }
 
@@ -175,6 +238,9 @@ export function detectDnsChanges(
 
   for (const rtype of allTypes) {
     if (failedTypes.has(rtype)) continue;
+    // Skip SOA regardless — serial increments on every zone change (noisy).
+    // Any legacy SOA rows in the DB should not generate "removed" change records.
+    if (rtype === 'SOA') continue;
 
     const oldValues = oldByType.get(rtype) ?? new Set<string>();
     const newValues = newByType.get(rtype) ?? new Set<string>();
@@ -185,18 +251,25 @@ export function detectDnsChanges(
     if (added.length === 0 && removed.length === 0) continue;
     hasDiff = true;
 
-    // CDN-aware suppression for A/AAAA on proxied hosts
+    // CDN-aware suppression for A/AAAA on proxied hosts.
+    // detectCdnProvider uses CNAME patterns then IPv4 range matching as fallback,
+    // so !newProvider means the IPs are genuinely not in any known CDN range.
     if ((rtype === 'A' || rtype === 'AAAA') && options.isProxied && options.knownProvider) {
       const newProvider = detectCdnProvider(currentRecords);
-      if (newProvider && newProvider === options.knownProvider) {
+      if (newProvider === options.knownProvider) {
+        // Same CDN provider — suppress edge IP rotation noise.
         suppressedAaaaa = true;
         continue;
       }
       if (!newProvider) {
-        // Cannot determine new provider; assume edge rotation for known proxied hosts
+        // IPs not in any known CDN range and no CDN CNAME present.
+        // This may indicate the host went unproxied, but could also be a provider
+        // we don't have IP ranges for. Suppress conservatively; the proxy detection
+        // system will update isProxied on the next full scan.
         suppressedAaaaa = true;
         continue;
       }
+      // newProvider !== knownProvider: CDN provider changed — fall through to record it.
     }
 
     if (added.length > 0 && removed.length > 0) {

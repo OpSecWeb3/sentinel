@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { apiFetch } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { FilterBar } from "@/components/ui/filter-bar";
+import { SearchInput } from "@/components/ui/search-input";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 
 /* ── types ───────────────────────────────────────────────────── */
@@ -36,16 +37,51 @@ interface EventsResponse {
 
 /* ── constants ───────────────────────────────────────────────── */
 
-const MODULES = ["github", "release-chain"];
-const EVENT_TYPES = [
-  "push",
-  "pull_request",
-  "release",
-  "workflow_run",
-  "package",
-  "registry_change",
+const MODULE_COLORS: Record<string, string> = {
+  chain: "text-yellow-500",
+  github: "text-purple-400",
+  infra: "text-blue-400",
+  "registry": "text-teal-400",
+  aws: "text-orange-400",
+};
+
+const DATE_PRESETS = [
+  { value: "1h", label: "1h", hours: 1 },
+  { value: "6h", label: "6h", hours: 6 },
+  { value: "24h", label: "24h", hours: 24 },
+  { value: "7d", label: "7d", hours: 168 },
+  { value: "30d", label: "30d", hours: 720 },
 ];
-const LIMIT = 20;
+
+const LIMIT = 25;
+
+/* ── helpers ─────────────────────────────────────────────────── */
+
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ${mins % 60}m ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ${hrs % 24}h ago`;
+}
+
+/** Extract a human-readable summary line from event payload */
+function payloadSummary(event: Event): string {
+  const p = event.payload;
+  if (event.moduleId === "chain") {
+    const name = (p.eventName as string) ?? "";
+    const addr = (p.contractAddress as string) ?? "";
+    const tx = (p.transactionHash as string) ?? "";
+    if (name && addr) return `${name} on ${addr.slice(0, 10)}...${addr.slice(-4)}`;
+    if (tx) return `tx ${tx.slice(0, 14)}...`;
+  }
+  if (event.externalId) return event.externalId;
+  return "--";
+}
 
 /* ── page ────────────────────────────────────────────────────── */
 
@@ -53,16 +89,28 @@ export default function EventsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // URL-driven state
   const currentPage = Number(searchParams.get("page") ?? "1");
   const currentModule = searchParams.get("moduleId") ?? null;
   const currentEventType = searchParams.get("eventType") ?? null;
+  const currentSearch = searchParams.get("search") ?? null;
+  const currentTimeRange = searchParams.get("range") ?? null;
 
+  // Data state
   const [data, setData] = useState<Event[]>([]);
   const [meta, setMeta] = useState<EventsMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const showLoading = useDelayedLoading(loading);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Dynamic event type options (populated from data)
+  const [eventTypes, setEventTypes] = useState<string[]>([]);
+  const [modules, setModules] = useState<string[]>([]);
+
+  // Local search input (debounced)
+  const [searchInput, setSearchInput] = useState(currentSearch ?? "");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const buildQs = useCallback(
     (overrides: Record<string, string | null>) => {
@@ -71,14 +119,16 @@ export default function EventsPage() {
         page: String(currentPage),
         moduleId: currentModule,
         eventType: currentEventType,
+        search: currentSearch,
+        range: currentTimeRange,
         ...overrides,
       };
       for (const [k, v] of Object.entries(merged)) {
-        if (v !== null && v !== undefined) params.set(k, v);
+        if (v !== null && v !== undefined && v !== "") params.set(k, v);
       }
       return params.toString();
     },
-    [currentPage, currentModule, currentEventType],
+    [currentPage, currentModule, currentEventType, currentSearch, currentTimeRange],
   );
 
   const fetchEvents = useCallback(async () => {
@@ -90,6 +140,13 @@ export default function EventsPage() {
       qs.set("limit", String(LIMIT));
       if (currentModule) qs.set("moduleId", currentModule);
       if (currentEventType) qs.set("eventType", currentEventType);
+      if (currentSearch) qs.set("search", currentSearch);
+      if (currentTimeRange) {
+        const preset = DATE_PRESETS.find((p) => p.value === currentTimeRange);
+        if (preset) {
+          qs.set("from", new Date(Date.now() - preset.hours * 3600_000).toISOString());
+        }
+      }
 
       const res = await apiFetch<EventsResponse>(
         `/api/events?${qs.toString()}`,
@@ -97,12 +154,24 @@ export default function EventsPage() {
       );
       setData(res.data);
       setMeta(res.meta);
+
+      // Populate dynamic filter options from first page of results
+      const types = [...new Set(res.data.map((e) => e.eventType))].sort();
+      setEventTypes((prev) => {
+        const merged = [...new Set([...prev, ...types])].sort();
+        return merged;
+      });
+      const mods = [...new Set(res.data.map((e) => e.moduleId))].sort();
+      setModules((prev) => {
+        const merged = [...new Set([...prev, ...mods])].sort();
+        return merged;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
-  }, [currentPage, currentModule, currentEventType]);
+  }, [currentPage, currentModule, currentEventType, currentSearch, currentTimeRange]);
 
   useEffect(() => {
     fetchEvents();
@@ -114,13 +183,31 @@ export default function EventsPage() {
     navigate(buildQs({ page: String(page) }));
   };
 
+  // Debounced search
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      navigate(buildQs({ search: value || null, page: "1" }));
+    }, 400);
+  };
+
+  // Sync search input with URL
+  useEffect(() => {
+    setSearchInput(currentSearch ?? "");
+  }, [currentSearch]);
+
+  const activeFilterCount = [currentModule, currentEventType, currentTimeRange].filter(Boolean).length;
+
   // Dynamic command
-  const cmdParts = ["$   events ls"];
+  const cmdParts = ["$  events ls"];
+  if (currentSearch) cmdParts.push(`--search "${currentSearch}"`);
   if (currentModule) cmdParts.push(`--module ${currentModule}`);
   if (currentEventType) cmdParts.push(`--type ${currentEventType}`);
+  if (currentTimeRange) cmdParts.push(`--since ${currentTimeRange}`);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
       <div>
         <h1 className="text-lg text-primary text-glow">
@@ -129,45 +216,66 @@ export default function EventsPage() {
         </h1>
         <p className="mt-1 text-xs text-muted-foreground">
           {">"} raw events received from modules
+          {meta && !loading && (
+            <span className="text-foreground/70 ml-2">
+              [{meta.total} total{activeFilterCount > 0 ? `, ${activeFilterCount} filter${activeFilterCount > 1 ? "s" : ""} active` : ""}]
+            </span>
+          )}
         </p>
       </div>
 
-      {/* Filters */}
-      <FilterBar
-        filters={[
-          {
-            key: "module",
-            label: "module",
-            value: currentModule,
-            options: MODULES.map((m) => ({ value: m, label: m })),
-            onChange: (v) =>
-              navigate(buildQs({ moduleId: v, page: "1" })),
-          },
-          {
-            key: "type",
-            label: "type",
-            value: currentEventType,
-            options: EVENT_TYPES.map((et) => ({ value: et, label: et })),
-            onChange: (v) =>
-              navigate(buildQs({ eventType: v, page: "1" })),
-          },
-        ]}
-        onClearAll={() =>
-          navigate(buildQs({ moduleId: null, eventType: null, page: "1" }))
-        }
-      />
+      {/* Search + Filters row */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <SearchInput
+          value={searchInput}
+          onChange={handleSearchChange}
+          placeholder="search events..."
+          className="sm:w-72"
+        />
+        <div className="flex-1">
+          <FilterBar
+            filters={[
+              {
+                key: "module",
+                label: "module",
+                value: currentModule,
+                options: modules.map((m) => ({ value: m, label: m })),
+                onChange: (v) =>
+                  navigate(buildQs({ moduleId: v, page: "1" })),
+              },
+              {
+                key: "type",
+                label: "type",
+                value: currentEventType,
+                options: eventTypes.map((et) => ({ value: et, label: et })),
+                onChange: (v) =>
+                  navigate(buildQs({ eventType: v, page: "1" })),
+              },
+              {
+                key: "range",
+                label: "time",
+                value: currentTimeRange,
+                allLabel: "all time",
+                options: DATE_PRESETS.map((p) => ({
+                  value: p.value,
+                  label: p.label,
+                })),
+                onChange: (v) =>
+                  navigate(buildQs({ range: v, page: "1" })),
+              },
+            ]}
+            onClearAll={() =>
+              navigate(buildQs({ moduleId: null, eventType: null, range: null, search: null, page: "1" }))
+            }
+          />
+        </div>
+      </div>
 
       {/* Content */}
       <div className="min-h-[400px]">
         {/* Loading */}
-        {(showLoading || loading) && (
-          <div
-            className={
-              showLoading
-                ? "py-16 text-center"
-                : "py-16 text-center invisible"
-            }
-          >
+        {showLoading && (
+          <div className="py-16 text-center">
             <p className="text-sm text-primary">
               {">"} fetching event log...
               <span className="ml-1 animate-pulse">_</span>
@@ -196,8 +304,19 @@ export default function EventsPage() {
         {!showLoading && !loading && !error && data.length === 0 && (
           <div className="py-16 text-center">
             <p className="text-sm text-muted-foreground">
-              {">"} /var/log/events: empty. no events captured yet.
+              {">"} /var/log/events: empty.
+              {(currentSearch || activeFilterCount > 0) ? " no events match current filters." : " no events captured yet."}
             </p>
+            {(currentSearch || activeFilterCount > 0) && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-4 text-xs"
+                onClick={() => navigate("")}
+              >
+                $ clear filters
+              </Button>
+            )}
           </div>
         )}
 
@@ -205,82 +324,110 @@ export default function EventsPage() {
         {!showLoading && !loading && !error && data.length > 0 && (
           <div className="animate-content-ready">
             {/* Header */}
-            <div className="grid grid-cols-[100px_120px_minmax(100px,1fr)_180px] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            <div className="grid grid-cols-[80px_140px_minmax(100px,1fr)_100px] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               <span>Module</span>
               <span>Type</span>
-              <span>External ID</span>
+              <span>Summary</span>
               <span>Received</span>
             </div>
 
-            <p className="px-3 pt-2 text-xs text-muted-foreground">
-              {meta?.total ?? data.length} event
-              {(meta?.total ?? data.length) !== 1 ? "s" : ""}
-            </p>
-
             {/* Rows */}
-            {data.map((event) => (
-              <div key={event.id}>
-                <button
-                  onClick={() =>
-                    setExpandedId(expandedId === event.id ? null : event.id)
-                  }
-                  className="group grid w-full grid-cols-[100px_120px_minmax(100px,1fr)_180px] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30 text-left"
-                >
-                  <span className="text-primary text-xs">
-                    [{event.moduleId}]
-                  </span>
-                  <span className="text-foreground text-xs">
-                    {event.eventType}
-                  </span>
-                  <span className="truncate text-muted-foreground text-xs">
-                    {event.externalId ?? "--"}
-                  </span>
-                  <span className="text-muted-foreground text-xs">
-                    {new Date(event.receivedAt).toLocaleString()}
-                  </span>
-                </button>
+            <div className="animate-stagger">
+              {data.map((event) => (
+                <div key={event.id}>
+                  <button
+                    onClick={() =>
+                      setExpandedId(expandedId === event.id ? null : event.id)
+                    }
+                    className="group grid w-full grid-cols-[80px_140px_minmax(100px,1fr)_100px] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30 text-left"
+                  >
+                    <span className={cn("text-xs font-mono", MODULE_COLORS[event.moduleId] ?? "text-primary")}>
+                      [{event.moduleId}]
+                    </span>
+                    <span className="text-foreground text-xs font-medium">
+                      {event.eventType}
+                    </span>
+                    <span className="truncate text-muted-foreground text-xs">
+                      {payloadSummary(event)}
+                    </span>
+                    <span className="text-muted-foreground text-xs" title={new Date(event.receivedAt).toLocaleString()}>
+                      {timeAgo(event.receivedAt)}
+                    </span>
+                  </button>
 
-                {/* Expanded payload */}
-                {expandedId === event.id && (
-                  <div className="border-l-2 border-primary/30 bg-muted/10 ml-3 mb-2 pl-4 py-3">
-                    <p className="text-xs text-muted-foreground mb-2">
-                      $ cat event/{event.id.slice(0, 8)}/payload.json
-                    </p>
-                    <pre className="text-xs text-foreground overflow-x-auto max-h-64 overflow-y-auto">
-                      {JSON.stringify(event.payload, null, 2)}
-                    </pre>
-                  </div>
-                )}
-              </div>
-            ))}
+                  {/* Expanded payload */}
+                  {expandedId === event.id && (
+                    <div className="border-l-2 border-primary/30 bg-muted/10 ml-3 mb-2 pl-4 py-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs text-muted-foreground">
+                          $ cat event/{event.id.slice(0, 8)}/payload.json
+                        </p>
+                        <button
+                          className="text-xs text-muted-foreground hover:text-primary transition-colors"
+                          onClick={() => {
+                            navigator.clipboard.writeText(JSON.stringify(event.payload, null, 2));
+                          }}
+                        >
+                          [copy]
+                        </button>
+                      </div>
+                      <pre className="text-xs text-foreground overflow-x-auto max-h-64 overflow-y-auto">
+                        {JSON.stringify(event.payload, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
 
       {/* Pagination */}
       {meta && meta.totalPages > 1 && (
-        <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
           <span>
-            page {meta.page}/{meta.totalPages}
+            {meta.total} event{meta.total !== 1 ? "s" : ""} &middot; page {meta.page}/{meta.totalPages}
           </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-xs"
-            disabled={meta.page <= 1}
-            onClick={() => goToPage(meta.page - 1)}
-          >
-            [{"<"} prev]
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-xs"
-            disabled={meta.page >= meta.totalPages}
-            onClick={() => goToPage(meta.page + 1)}
-          >
-            [next {">"}]
-          </Button>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs h-7"
+              disabled={meta.page <= 1}
+              onClick={() => goToPage(1)}
+            >
+              [{"<<"} first]
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs h-7"
+              disabled={meta.page <= 1}
+              onClick={() => goToPage(meta.page - 1)}
+            >
+              [{"<"} prev]
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs h-7"
+              disabled={meta.page >= meta.totalPages}
+              onClick={() => goToPage(meta.page + 1)}
+            >
+              [next {">"}]
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs h-7"
+              disabled={meta.page >= meta.totalPages}
+              onClick={() => goToPage(meta.totalPages)}
+            >
+              [last {">>"}]
+            </Button>
+          </div>
         </div>
       )}
     </div>

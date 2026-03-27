@@ -129,9 +129,6 @@ export default function InfraOverviewPage() {
             <Link href="/infra/hosts">hosts/</Link>
           </Button>
           <Button asChild variant="outline" size="sm">
-            <Link href="/infra/cdn-providers">cdn-providers/</Link>
-          </Button>
-          <Button asChild variant="outline" size="sm">
             <Link href="/infra/changes">changes/</Link>
           </Button>
           <Button asChild variant="outline" size="sm">

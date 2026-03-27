@@ -184,7 +184,8 @@ githubRouter.get('/app/callback', async (c) => {
 
 githubRouter.get('/app/install', async (c) => {
   const clientId = env().GITHUB_APP_CLIENT_ID;
-  if (!clientId) {
+  const appSlug = env().GITHUB_APP_SLUG;
+  if (!clientId || !appSlug) {
     return c.json({ error: 'GitHub App not configured on this server' }, 501);
   }
 
@@ -198,7 +199,7 @@ githubRouter.get('/app/install', async (c) => {
   const state = `${stateB64}.${stateSig}`;
 
   // GitHub App installation URL includes state for CSRF protection
-  const url = `https://github.com/apps/sentinel/installations/new?state=${encodeURIComponent(state)}`;
+  const url = `https://github.com/apps/${appSlug}/installations/new?state=${encodeURIComponent(state)}`;
 
   return c.json({ url });
 });
@@ -362,9 +363,17 @@ githubRouter.post('/webhooks/:installationId', async (c) => {
 // ---------------------------------------------------------------------------
 
 // GET /modules/github/installations — list installations for org
+const installationsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 githubRouter.get('/installations', async (c) => {
   const orgId = c.get('orgId');
   if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+
+  const rawQuery = c.req.query();
+  const query = installationsQuerySchema.parse(rawQuery);
 
   const db = getDb();
   const installations = await db.select({
@@ -378,9 +387,11 @@ githubRouter.get('/installations', async (c) => {
     createdAt: githubInstallations.createdAt,
   })
     .from(githubInstallations)
-    .where(eq(githubInstallations.orgId, orgId));
+    .where(eq(githubInstallations.orgId, orgId))
+    .limit(query.limit)
+    .offset(query.offset);
 
-  return c.json({ data: installations });
+  return c.json({ data: installations, limit: query.limit, offset: query.offset });
 });
 
 // POST /modules/github/installations — register a new GitHub App installation
@@ -450,16 +461,26 @@ githubRouter.delete('/installations/:id', async (c) => {
 });
 
 // GET /modules/github/repositories — list tracked repos
+const repositoriesQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 githubRouter.get('/repositories', async (c) => {
   const orgId = c.get('orgId');
   if (!orgId) return c.json({ error: 'Organisation required' }, 403);
 
+  const rawQuery = c.req.query();
+  const query = repositoriesQuerySchema.parse(rawQuery);
+
   const db = getDb();
   const repos = await db.select()
     .from(githubRepositories)
-    .where(eq(githubRepositories.orgId, orgId));
+    .where(eq(githubRepositories.orgId, orgId))
+    .limit(query.limit)
+    .offset(query.offset);
 
-  return c.json({ data: repos });
+  return c.json({ data: repos, limit: query.limit, offset: query.offset });
 });
 
 // POST /modules/github/installations/:id/sync — trigger a filtered repo sync

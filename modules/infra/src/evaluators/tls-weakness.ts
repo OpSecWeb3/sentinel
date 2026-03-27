@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const configSchema = z.object({
   /** Alert on legacy TLS versions (1.0 / 1.1) */
@@ -14,6 +15,11 @@ export const tlsWeaknessEvaluator: RuleEvaluator = {
   moduleId: 'infra',
   ruleType: 'infra.tls_weakness',
   configSchema,
+  uiSchema: [
+    { key: 'alertOnLegacyVersions', label: 'Alert on TLS 1.0 / 1.1', type: 'boolean', required: false, default: true },
+    { key: 'alertOnWeakCiphers', label: 'Alert on weak cipher suites', type: 'boolean', required: false, default: true },
+    { key: 'alertOnMissingTls13', label: 'Alert when TLS 1.3 not supported', type: 'boolean', required: false, default: false },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;

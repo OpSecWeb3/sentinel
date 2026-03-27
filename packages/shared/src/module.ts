@@ -12,6 +12,52 @@ export interface RetentionPolicy {
   table: string;
   timestampColumn: string;
   retentionDays: number;
+  /** Optional SQL fragment appended as an extra AND condition (e.g. "module_id = 'aws'") */
+  filter?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Template input — defines a user-configurable field for a detection template
+// ---------------------------------------------------------------------------
+
+export type TemplateInputType =
+  | 'text'
+  | 'number'
+  | 'boolean'
+  | 'select'
+  | 'string-array'
+  | 'address'
+  | 'contract'
+  | 'network';
+
+export interface TemplateInput {
+  /** Config key this input maps to (used in placeholder substitution and rule config merge) */
+  key: string;
+
+  /** Human-readable label shown in the form */
+  label: string;
+
+  /** How to render the input */
+  type: TemplateInputType;
+
+  required: boolean;
+
+  /** Default value. Arrays are shown as newline-separated text in string-array inputs. */
+  default?: string | number | boolean | string[];
+
+  placeholder?: string;
+
+  /** Helper text shown below the field */
+  help?: string;
+
+  /** Options for select type */
+  options?: Array<{ label: string; value: string }>;
+
+  min?: number;
+  max?: number;
+
+  /** Only show this input when the referenced input key has a non-empty value */
+  showIf?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,4 +136,11 @@ export interface DetectionTemplate {
     action: 'alert' | 'log' | 'suppress';
     priority?: number;
   }>;
+
+  /**
+   * User-configurable inputs. The UI renders a form field for each input.
+   * Values replace {{key}} placeholders in rule configs and are also merged
+   * directly as top-level config keys.
+   */
+  inputs?: TemplateInput[];
 }

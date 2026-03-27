@@ -6,6 +6,8 @@
 export interface EtherscanAbiResult {
   abi: unknown[];
   contractName: string;
+  /** Parsed storage layout from Etherscan getsourcecode, if available */
+  storageLayout: { storage: { label: string; slot: string; type: string; offset: number }[] } | null;
 }
 
 export interface FetchContractAbiOptions {
@@ -75,8 +77,9 @@ export async function fetchContractAbi(
 
   const abi = JSON.parse(data.result) as unknown[];
 
-  // Try to extract contract name from getsourcecode endpoint
+  // Extract contract name and storage layout from getsourcecode endpoint
   let contractName = 'Unknown';
+  let storageLayout: EtherscanAbiResult['storageLayout'] = null;
   try {
     const srcUrl = buildUrl('getsourcecode');
 
@@ -88,15 +91,31 @@ export async function fetchContractAbi(
     if (srcRes.ok) {
       const srcData = (await srcRes.json()) as {
         status: string;
-        result: Array<{ ContractName?: string }>;
+        result: Array<{ ContractName?: string; StorageLayout?: string }>;
       };
-      if (srcData.status === '1' && srcData.result?.[0]?.ContractName) {
-        contractName = srcData.result[0].ContractName;
+      if (srcData.status === '1' && srcData.result?.[0]) {
+        const row = srcData.result[0];
+        if (row.ContractName) {
+          contractName = row.ContractName;
+        }
+        // StorageLayout is a JSON string when the contract was compiled with --storage-layout
+        if (row.StorageLayout && row.StorageLayout !== '') {
+          try {
+            const parsed = JSON.parse(row.StorageLayout) as {
+              storage?: { label: string; slot: string; type: string; offset: number }[];
+            };
+            if (Array.isArray(parsed.storage) && parsed.storage.length > 0) {
+              storageLayout = { storage: parsed.storage };
+            }
+          } catch {
+            // StorageLayout parsing is best-effort
+          }
+        }
       }
     }
   } catch {
-    // Best effort — contract name is nice-to-have
+    // Best effort — contract name and storage layout are nice-to-have
   }
 
-  return { abi, contractName };
+  return { abi, contractName, storageLayout };
 }

@@ -27,9 +27,10 @@ import { correlationRulesRouter } from './routes/correlation-rules.js';
 
 // Module imports
 import { GitHubModule } from '@sentinel/module-github';
-import { ReleaseChainModule } from '@sentinel/module-release-chain';
+import { RegistryModule } from '@sentinel/module-registry';
 import { ChainModule } from '@sentinel/module-chain';
 import { InfraModule } from '@sentinel/module-infra';
+import { AwsModule } from '@sentinel/module-aws';
 
 // ── BigInt JSON serialization ───────────────────────────────────────────
 (BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function () {
@@ -204,7 +205,7 @@ app.use('/modules/*', async (c, next) => {
   return next();
 });
 
-const modules = [GitHubModule, ReleaseChainModule, ChainModule, InfraModule];
+const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule, AwsModule];
 for (const mod of modules) {
   app.route(`/modules/${mod.id}`, mod.router);
 }

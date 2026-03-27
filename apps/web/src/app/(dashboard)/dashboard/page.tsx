@@ -28,6 +28,30 @@ interface StatsResponse {
   recent: RecentAlert[];
 }
 
+interface RecentEvent {
+  id: string;
+  moduleId: string;
+  eventType: string;
+  externalId: string | null;
+  receivedAt: string;
+}
+
+interface ChainOverviewStats {
+  trackedContracts: number;
+  activeDetections: number;
+  recentAlerts: number;
+  totalEvents: number;
+}
+
+interface ChainOverviewResponse {
+  stats: ChainOverviewStats;
+}
+
+interface EventsResponse {
+  data: RecentEvent[];
+  meta: { total: number };
+}
+
 /* ── severity helpers ──────────────────────────────────────────── */
 
 const severityTag: Record<string, string> = {
@@ -61,6 +85,15 @@ export default function DashboardPage() {
   const showLoading = useDelayedLoading(loading);
   const [error, setError] = useState<string | null>(null);
 
+  const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
+  const [eventsTotal, setEventsTotal] = useState<number>(0);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const showEventsLoading = useDelayedLoading(eventsLoading);
+
+  const [chainStats, setChainStats] = useState<ChainOverviewStats | null>(null);
+  const [chainLoading, setChainLoading] = useState(true);
+  const showChainLoading = useDelayedLoading(chainLoading);
+
   const fetchStats = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -78,9 +111,42 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const fetchChainStats = useCallback(async () => {
+    setChainLoading(true);
+    try {
+      const res = await apiFetch<ChainOverviewResponse>(
+        "/modules/chain/overview",
+        { credentials: "include" },
+      );
+      setChainStats(res.stats);
+    } catch {
+      // non-critical
+    } finally {
+      setChainLoading(false);
+    }
+  }, []);
+
+  const fetchRecentEvents = useCallback(async () => {
+    setEventsLoading(true);
+    try {
+      const res = await apiFetch<EventsResponse>(
+        "/api/events?page=1&limit=10",
+        { credentials: "include" },
+      );
+      setRecentEvents(res.data);
+      setEventsTotal(res.meta.total);
+    } catch {
+      // non-critical — dashboard still works without events
+    } finally {
+      setEventsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchStats();
-  }, [fetchStats]);
+    fetchRecentEvents();
+    fetchChainStats();
+  }, [fetchStats, fetchRecentEvents, fetchChainStats]);
 
   /* ── derived data ──────────────────────────────────────────── */
 
@@ -228,6 +294,118 @@ export default function DashboardPage() {
                   </CardContent>
                 </Card>
               ) : null}
+            </div>
+          </section>
+
+          {/* Chain module status */}
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                $ chain status
+              </p>
+              <Link
+                href="/chain/contracts"
+                className="text-xs text-primary hover:underline"
+              >
+                view contracts {">"}
+              </Link>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 min-h-[104px]">
+              {showChainLoading
+                ? [0, 1, 2, 3].map((i) => (
+                    <Card key={i}>
+                      <CardContent className="p-4 space-y-3 animate-pulse">
+                        <div className="h-3 bg-muted-foreground/20 rounded w-1/3" />
+                        <div className="h-8 bg-muted-foreground/20 rounded w-1/2" />
+                      </CardContent>
+                    </Card>
+                  ))
+                : chainStats
+                  ? [
+                      { key: "TRACKED_CONTRACTS", value: chainStats.trackedContracts },
+                      { key: "CHAIN_DETECTIONS", value: chainStats.activeDetections },
+                      { key: "CHAIN_ALERTS", value: chainStats.recentAlerts },
+                      { key: "CHAIN_EVENTS", value: chainStats.totalEvents },
+                    ].map((s) => (
+                      <Card key={s.key} className="animate-content-ready">
+                        <CardContent className="p-4">
+                          <p className="text-xs text-muted-foreground">{s.key}</p>
+                          <p className="mt-1 text-2xl font-bold text-primary text-glow">
+                            {s.value}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {s.value > 0 ? "[OK]" : "[--]"}
+                          </p>
+                        </CardContent>
+                      </Card>
+                    ))
+                  : null}
+            </div>
+          </section>
+
+          {/* Events summary */}
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                $ events summarise
+              </p>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                {eventsTotal > 0 && (
+                  <span>{eventsTotal} total</span>
+                )}
+                <Link href="/events" className="text-primary hover:underline">
+                  all events {">"}
+                </Link>
+              </div>
+            </div>
+            <div className="min-h-[80px]">
+              {showEventsLoading ? (
+                <Card>
+                  <CardContent className="p-0">
+                    <div className="animate-pulse divide-y divide-border">
+                      {[0, 1, 2, 3].map((i) => (
+                        <div key={i} className="flex gap-3 px-4 py-2">
+                          <div className="h-3 w-16 rounded bg-muted-foreground/20" />
+                          <div className="h-3 w-20 rounded bg-muted-foreground/20" />
+                          <div className="h-3 w-32 rounded bg-muted-foreground/20" />
+                          <div className="ml-auto h-3 w-28 rounded bg-muted-foreground/20" />
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : recentEvents.length > 0 ? (
+                <Card className="animate-content-ready">
+                  <CardContent className="p-0">
+                    <div className="grid grid-cols-[80px_110px_minmax(80px,1fr)_160px] gap-x-3 border-b border-border px-4 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground/60">
+                      <span>module</span>
+                      <span>type</span>
+                      <span>ref</span>
+                      <span>received</span>
+                    </div>
+                    <div className="animate-stagger">
+                      {recentEvents.map((event) => (
+                        <Link
+                          key={event.id}
+                          href="/events"
+                          className="grid grid-cols-[80px_110px_minmax(80px,1fr)_160px] items-center gap-x-3 border-b border-border px-4 py-2 text-xs transition-colors hover:bg-muted/30 last:border-b-0"
+                        >
+                          <span className="text-primary font-mono">[{event.moduleId}]</span>
+                          <span className="text-foreground truncate">{event.eventType}</span>
+                          <span className="text-muted-foreground truncate">{event.externalId ?? "--"}</span>
+                          <span className="text-muted-foreground">{new Date(event.receivedAt).toLocaleString()}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : (
+                !eventsLoading && (
+                  <p className="text-xs text-muted-foreground">
+                    {">"} /var/log/events: empty. no events captured yet.
+                  </p>
+                )
+              )}
             </div>
           </section>
 

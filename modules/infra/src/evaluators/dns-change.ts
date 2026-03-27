@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
+import type { TemplateInput } from '@sentinel/shared/module';
 
 const configSchema = z.object({
   /** Which DNS record types to watch; empty = all */
@@ -12,6 +13,10 @@ export const dnsChangeEvaluator: RuleEvaluator = {
   moduleId: 'infra',
   ruleType: 'infra.dns_change',
   configSchema,
+  uiSchema: [
+    { key: 'watchRecordTypes', label: 'Record types to watch', type: 'string-array', required: false, placeholder: 'A\nAAAA\nMX\nNS\nTXT', help: 'DNS record types to monitor. Leave empty to watch all types.' },
+    { key: 'watchChangeTypes', label: 'Change types to alert on', type: 'string-array', required: false, placeholder: 'added\nmodified\nremoved', help: 'Leave empty to alert on all changes.' },
+  ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
     const { event, rule } = ctx;
