@@ -193,9 +193,12 @@ export default function HostDetailPage() {
   const [scanLoading, setScanLoading] = useState(false);
   const [suppressLoading, setSuppressLoading] = useState<Record<string, boolean>>({});
   const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
   const [editSchedule, setEditSchedule] = useState(false);
   const [scanInterval, setScanInterval] = useState(24);
   const [probeInterval, setProbeInterval] = useState(5);
+  const [cdnOrigins, setCdnOrigins] = useState<Array<{ provider: string; recordType: string; recordValue: string; observedAt: string }>>([]);
+  const [cdnOriginsLoaded, setCdnOriginsLoaded] = useState(false);
   const { toast } = useToast();
 
   // Confirm dialog
@@ -348,6 +351,38 @@ export default function HostDetailPage() {
     }
   }
 
+  async function discoverSubdomains() {
+    setDiscoverLoading(true);
+    try {
+      const res = await apiFetch<{ data: { discovered: number; newHosts: number } }>(
+        `/modules/infra/hosts/${hostId}/discover`,
+        { method: "POST", credentials: "include" },
+      );
+      toast(
+        `Discovered ${res.data.discovered} subdomains (${res.data.newHosts} new)`,
+      );
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to discover subdomains");
+    } finally {
+      setDiscoverLoading(false);
+    }
+  }
+
+  async function fetchCdnOrigins() {
+    if (cdnOriginsLoaded) return;
+    try {
+      const res = await apiFetch<{ data: Array<{ provider: string; recordType: string; recordValue: string; observedAt: string }> }>(
+        `/modules/infra/hosts/${hostId}/cdn-origins`,
+        { credentials: "include" },
+      );
+      setCdnOrigins(res.data);
+    } catch {
+      // silently fail - section will show empty
+    } finally {
+      setCdnOriginsLoaded(true);
+    }
+  }
+
   /* -- section renderer --------------------------------------------- */
 
   function SectionHeader({
@@ -470,6 +505,14 @@ export default function HostDetailPage() {
             onClick={triggerScan}
           >
             {scanLoading ? "> scanning..." : "$ scan now"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={discoverLoading}
+            onClick={discoverSubdomains}
+          >
+            {discoverLoading ? "> discovering..." : "$ discover subdomains"}
           </Button>
           <button
             onClick={removeHost}
@@ -1254,6 +1297,109 @@ export default function HostDetailPage() {
             ) : (
               <p className="text-xs text-muted-foreground">
                 {">"} no scan history available
+              </p>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* ============================================================= */}
+      {/* CDN Origins */}
+      {/* ============================================================= */}
+      <Card>
+        <CardHeader className="pb-0">
+          <SectionHeader
+            id="cdn-origins"
+            title="CDN Origins"
+            command="$ infra cdn --origins"
+          />
+        </CardHeader>
+        {expandedSections.has("cdn-origins") && (
+          <CardContent className="pt-3">
+            {!cdnOriginsLoaded ? (
+              <div>
+                <button
+                  onClick={fetchCdnOrigins}
+                  className="text-xs text-primary hover:underline"
+                >
+                  $ load cdn origins
+                </button>
+              </div>
+            ) : cdnOrigins.length > 0 ? (
+              <div className="space-y-2">
+                {cdnOrigins.map((origin, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 px-2 py-1.5 text-xs border border-transparent hover:border-border hover:bg-muted/30 transition-colors"
+                  >
+                    <span className="text-primary font-mono shrink-0">
+                      [{origin.provider}]
+                    </span>
+                    <span className="text-muted-foreground shrink-0">
+                      {origin.recordType}:
+                    </span>
+                    <span className="text-foreground font-mono">
+                      {origin.recordValue}
+                    </span>
+                    <span className="ml-auto text-muted-foreground shrink-0">
+                      observed {new Date(origin.observedAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {">"} no CDN origins configured or detected
+              </p>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* ============================================================= */}
+      {/* Score History */}
+      {/* ============================================================= */}
+      <Card>
+        <CardHeader className="pb-0">
+          <SectionHeader
+            id="score-history"
+            title="Score History"
+            command="$ infra score --history"
+          />
+        </CardHeader>
+        {expandedSections.has("score-history") && (
+          <CardContent className="pt-3">
+            {(host.scoreHistory ?? []).length > 0 ? (
+              <div className="space-y-1">
+                {(host.scoreHistory ?? []).slice(0, 10).map((point, i) => {
+                  const barWidth = Math.max(1, Math.floor(point.score / 5));
+                  const bar = "\u2593".repeat(barWidth);
+                  return (
+                    <div key={i} className="flex items-center gap-3 text-xs font-mono">
+                      <span className={cn(
+                        "w-8 text-right",
+                        gradeColor[point.grade] ?? "text-muted-foreground",
+                      )}>
+                        {point.score}
+                      </span>
+                      <span className={cn(
+                        gradeColor[point.grade] ?? "text-muted-foreground",
+                      )}>
+                        {bar}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {point.grade}
+                      </span>
+                      <span className="text-muted-foreground ml-auto">
+                        {new Date(point.date).toLocaleDateString()}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {">"} no score history available
               </p>
             )}
           </CardContent>

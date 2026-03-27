@@ -66,6 +66,9 @@ const moduleNav: ModuleNavItem[] = [
     icon: "^",
     children: [
       { title: "hosts", href: "/infra/hosts" },
+      { title: "cdn-providers", href: "/infra/cdn-providers" },
+      { title: "changes", href: "/infra/changes" },
+      { title: "worldview", href: "/infra/worldview" },
     ],
   },
 ];

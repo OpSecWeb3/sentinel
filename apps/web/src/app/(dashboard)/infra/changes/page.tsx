@@ -1,0 +1,321 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+
+import { apiFetch } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+
+/* -- types --------------------------------------------------------- */
+
+interface Change {
+  id: string;
+  hostId: string;
+  hostname: string;
+  type: string;
+  field: string;
+  oldValue: string;
+  newValue: string;
+  severity: string;
+  detectedAt: string;
+}
+
+/* -- helpers -------------------------------------------------------- */
+
+const severityColor: Record<string, string> = {
+  critical: "text-destructive",
+  warning: "text-warning",
+  info: "text-muted-foreground",
+};
+
+const severityTag: Record<string, string> = {
+  critical: "[!!]",
+  warning: "[!]",
+  info: "[~]",
+};
+
+const PAGE_SIZE = 25;
+
+function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+/* -- page ----------------------------------------------------------- */
+
+export default function InfraChangesPage() {
+  const [changes, setChanges] = useState<Change[]>([]);
+  const [loading, setLoading] = useState(true);
+  const showLoading = useDelayedLoading(loading);
+  const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const { toast } = useToast();
+
+  // Filters
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [severityFilter, setSeverityFilter] = useState<string>("all");
+  const [hostSearch, setHostSearch] = useState("");
+
+  const typeOptions = ["all", "dns", "whois", "cert", "infra"];
+  const severityOptions = ["all", "critical", "warning", "info"];
+
+  const fetchChanges = useCallback(
+    async (append = false) => {
+      if (!append) {
+        setLoading(true);
+        setError(null);
+      } else {
+        setLoadingMore(true);
+      }
+
+      try {
+        const params = new URLSearchParams();
+        params.set("limit", String(PAGE_SIZE));
+        params.set("offset", String(append ? offset : 0));
+        if (typeFilter !== "all") params.set("type", typeFilter);
+        if (severityFilter !== "all") params.set("severity", severityFilter);
+
+        const res = await apiFetch<{ data: Change[] }>(
+          `/modules/infra/changes?${params.toString()}`,
+          { credentials: "include" },
+        );
+
+        if (append) {
+          setChanges((prev) => [...prev, ...res.data]);
+        } else {
+          setChanges(res.data);
+        }
+
+        setHasMore(res.data.length === PAGE_SIZE);
+        if (!append) {
+          setOffset(res.data.length);
+        } else {
+          setOffset((prev) => prev + res.data.length);
+        }
+      } catch (err) {
+        if (!append) {
+          setError(err instanceof Error ? err.message : "Failed to load changes");
+        } else {
+          toast("Failed to load more changes.");
+        }
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [typeFilter, severityFilter, offset, toast],
+  );
+
+  // Reset and fetch on filter change
+  useEffect(() => {
+    setOffset(0);
+    setChanges([]);
+    setHasMore(true);
+  }, [typeFilter, severityFilter]);
+
+  useEffect(() => {
+    if (changes.length === 0 && hasMore) {
+      fetchChanges(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typeFilter, severityFilter]);
+
+  // Client-side host search filtering
+  const filteredChanges = hostSearch
+    ? changes.filter((c) =>
+        c.hostname.toLowerCase().includes(hostSearch.toLowerCase()),
+      )
+    : changes;
+
+  /* -- render ------------------------------------------------------- */
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg text-primary text-glow">
+            $ infra changes
+            <span className="ml-1 animate-pulse">_</span>
+          </h1>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {">"} infrastructure change feed
+          </p>
+        </div>
+        <Button asChild variant="outline" size="sm">
+          <Link href="/infra">{"<"} overview</Link>
+        </Button>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-4">
+        {/* Type filter */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-muted-foreground mr-1">type:</span>
+          {typeOptions.map((opt) => (
+            <button
+              key={opt}
+              onClick={() => setTypeFilter(opt)}
+              className={cn(
+                "px-2 py-0.5 text-xs border transition-colors",
+                typeFilter === opt
+                  ? "border-primary text-primary"
+                  : "border-border text-muted-foreground hover:text-foreground",
+              )}
+            >
+              [{opt}]
+            </button>
+          ))}
+        </div>
+
+        {/* Severity filter */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-muted-foreground mr-1">severity:</span>
+          {severityOptions.map((opt) => (
+            <button
+              key={opt}
+              onClick={() => setSeverityFilter(opt)}
+              className={cn(
+                "px-2 py-0.5 text-xs border transition-colors",
+                severityFilter === opt
+                  ? "border-primary text-primary"
+                  : "border-border text-muted-foreground hover:text-foreground",
+              )}
+            >
+              [{opt}]
+            </button>
+          ))}
+        </div>
+
+        {/* Host search */}
+        <div className="flex items-center gap-2 border border-border px-2 py-1 text-xs focus-within:border-primary transition-colors">
+          <span className="text-muted-foreground">{">"}</span>
+          <input
+            type="text"
+            placeholder="filter by hostname..."
+            value={hostSearch}
+            onChange={(e) => setHostSearch(e.target.value)}
+            className="bg-transparent outline-none text-foreground w-40 font-mono"
+          />
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="min-h-[300px]">
+        {showLoading ? (
+          <div className="space-y-2">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-3 py-2">
+                <div className="h-3 w-24 animate-pulse rounded bg-muted" />
+                <div className="h-3 w-32 animate-pulse rounded bg-muted" />
+                <div className="h-3 w-20 animate-pulse rounded bg-muted" />
+                <div className="h-3 w-48 animate-pulse rounded bg-muted" />
+              </div>
+            ))}
+          </div>
+        ) : error ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <p className="text-sm text-destructive">[ERR] {error}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-4"
+                onClick={() => fetchChanges(false)}
+              >
+                $ retry
+              </Button>
+            </CardContent>
+          </Card>
+        ) : filteredChanges.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <p className="text-sm text-muted-foreground">
+                {">"} no changes found
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {hostSearch
+                  ? "try adjusting your hostname filter"
+                  : "no infrastructure changes have been detected yet"}
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-1 animate-content-ready">
+            <p className="text-xs text-muted-foreground px-2">
+              {filteredChanges.length} change{filteredChanges.length !== 1 ? "s" : ""}
+              {hostSearch && " (filtered)"}
+            </p>
+
+            {filteredChanges.map((change) => (
+              <div
+                key={change.id}
+                className="border border-transparent px-3 py-2 text-xs hover:border-border hover:bg-muted/30 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-muted-foreground font-mono shrink-0">
+                    [{formatDateTime(change.detectedAt)}]
+                  </span>
+                  <Link
+                    href={`/infra/hosts/${change.hostId}`}
+                    className="text-foreground hover:text-primary transition-colors font-medium shrink-0"
+                  >
+                    {change.hostname}
+                  </Link>
+                  <span className="text-primary font-mono shrink-0">
+                    [{change.type}]
+                  </span>
+                  <span
+                    className={cn(
+                      "font-mono shrink-0",
+                      severityColor[change.severity] ?? "text-muted-foreground",
+                    )}
+                  >
+                    {severityTag[change.severity] ?? `[${change.severity}]`} {change.severity}
+                  </span>
+                </div>
+                <div className="mt-1 ml-1 flex items-center gap-1">
+                  <span className="text-muted-foreground">{change.field}:</span>
+                  <span className="text-muted-foreground line-through">
+                    {change.oldValue || "(none)"}
+                  </span>
+                  <span className="text-muted-foreground mx-1">{"-->"}</span>
+                  <span className="text-foreground">
+                    {change.newValue || "(removed)"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Load more */}
+      {hasMore && !loading && filteredChanges.length > 0 && (
+        <div className="flex justify-center">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={loadingMore}
+            onClick={() => fetchChanges(true)}
+          >
+            {loadingMore ? "> loading..." : "$ load more"}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}

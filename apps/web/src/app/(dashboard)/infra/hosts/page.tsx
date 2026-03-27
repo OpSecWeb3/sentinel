@@ -81,16 +81,16 @@ function formatDate(iso: string | null): string {
   return d.toLocaleDateString();
 }
 
-function formatCertExpiry(iso: string | null): { text: string; urgent: boolean } {
-  if (!iso) return { text: "--", urgent: false };
+function formatCertExpiry(iso: string | null): { text: string; color: string } {
+  if (!iso) return { text: "no cert", color: "text-muted-foreground" };
   const d = new Date(iso);
   const now = new Date();
   const diffDays = Math.floor((d.getTime() - now.getTime()) / 86_400_000);
-  if (diffDays < 0) return { text: `expired ${Math.abs(diffDays)}d ago`, urgent: true };
-  if (diffDays === 0) return { text: "expires today", urgent: true };
-  if (diffDays <= 7) return { text: `${diffDays}d left`, urgent: true };
-  if (diffDays <= 30) return { text: `${diffDays}d left`, urgent: false };
-  return { text: d.toLocaleDateString(), urgent: false };
+  if (diffDays < 0) return { text: `expired ${Math.abs(diffDays)}d ago`, color: "text-destructive" };
+  if (diffDays === 0) return { text: "expires today", color: "text-destructive" };
+  if (diffDays <= 7) return { text: `${diffDays}d left`, color: "text-destructive" };
+  if (diffDays <= 30) return { text: `${diffDays}d left`, color: "text-warning" };
+  return { text: `${diffDays}d left`, color: "text-primary" };
 }
 
 function isValidHostname(hostname: string): boolean {
@@ -160,9 +160,9 @@ export default function InfraHostsPage() {
       const params = new URLSearchParams();
       params.set("page", String(page));
       params.set("limit", String(PAGE_SIZE));
-      if (debouncedSearch) params.set("search", debouncedSearch);
       params.set("sort", sortField);
-      params.set("order", sortDir);
+      params.set("dir", sortDir);
+      if (debouncedSearch) params.set("q", encodeURIComponent(debouncedSearch));
 
       const res = await apiFetch<HostsResponse>(
         `/modules/infra/hosts?${params.toString()}`,
@@ -256,6 +256,28 @@ export default function InfraHostsPage() {
       toast("Failed to remove host.");
     } finally {
       setActionLoading((prev) => ({ ...prev, [host.id]: false }));
+    }
+  }
+
+  async function discoverHost(host: Host) {
+    setActionLoading((prev) => ({ ...prev, [`discover-${host.id}`]: true }));
+    try {
+      const res = await apiFetch<{ data: { discovered: number; newHosts: number } }>(
+        `/modules/infra/hosts/${host.id}/discover`,
+        { method: "POST", credentials: "include" },
+      );
+      toast(
+        `Discovered ${res.data.discovered} subdomains (${res.data.newHosts} new)`,
+      );
+      if (res.data.newHosts > 0) fetchHosts();
+    } catch (err) {
+      toast(
+        err instanceof Error
+          ? `Discovery failed: ${err.message}`
+          : "Failed to discover subdomains",
+      );
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [`discover-${host.id}`]: false }));
     }
   }
 
@@ -453,6 +475,7 @@ export default function InfraHostsPage() {
               {hosts.map((host) => {
                 const busy = actionLoading[host.id] ?? false;
                 const scanBusy = actionLoading[`scan-${host.id}`] ?? false;
+                const discoverBusy = actionLoading[`discover-${host.id}`] ?? false;
                 const cert = formatCertExpiry(host.certExpiry);
 
                 return (
@@ -500,12 +523,7 @@ export default function InfraHostsPage() {
                     </span>
 
                     {/* Cert expiry */}
-                    <span
-                      className={cn(
-                        "text-xs",
-                        cert.urgent ? "text-destructive" : "text-muted-foreground",
-                      )}
-                    >
+                    <span className={cn("text-xs", cert.color)}>
                       {cert.text}
                     </span>
 
@@ -527,6 +545,13 @@ export default function InfraHostsPage() {
                         className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
                       >
                         {scanBusy ? "..." : "[scan]"}
+                      </button>
+                      <button
+                        disabled={discoverBusy}
+                        onClick={() => discoverHost(host)}
+                        className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                      >
+                        {discoverBusy ? "..." : "[discover]"}
                       </button>
                       <Link
                         href={`/infra/hosts/${host.id}`}
