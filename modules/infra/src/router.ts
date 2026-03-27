@@ -330,7 +330,7 @@ infraRouter.get('/hosts/:id', async (c) => {
       scoreDeductions,
       scoreHistory: scoreHistory.map((s) => ({ date: s.recordedAt.toISOString(), score: s.score, grade: s.grade ?? scoreToGrade(s.score) })),
       recentScans: recentScans.map((s) => ({ id: s.id, status: s.status, startedAt: s.startedAt.toISOString(), completedAt: s.completedAt?.toISOString() ?? null, steps: [] })),
-      schedule: schedule ? { scanIntervalHours: Math.round(schedule.intervalMinutes / 60), probeIntervalMinutes: schedule.probeIntervalMinutes } : null,
+      schedule: schedule ? { enabled: schedule.enabled, scanIntervalHours: Math.round(schedule.intervalMinutes / 60), probeEnabled: schedule.probeEnabled, probeIntervalMinutes: schedule.probeIntervalMinutes } : null,
     },
   });
 });
@@ -550,9 +550,10 @@ infraRouter.put('/hosts/:id/schedule', async (c) => {
   if (!orgId) return c.json({ error: 'Organisation required' }, 403);
 
   const body = z.object({
+    enabled: z.boolean().optional().default(true),
     scanIntervalHours: z.number().int().min(1).max(168).default(24),
-    probeIntervalMinutes: z.number().int().min(1).max(60).default(5),
     probeEnabled: z.boolean().optional().default(true),
+    probeIntervalMinutes: z.number().int().min(1).max(60).default(5),
   }).parse(await c.req.json());
 
   const db = getDb();
@@ -562,22 +563,24 @@ infraRouter.put('/hosts/:id/schedule', async (c) => {
 
   await db.insert(infraScanSchedules)
     .values({
-      hostId, enabled: true,
+      hostId,
+      enabled: body.enabled,
       intervalMinutes: body.scanIntervalHours * 60,
-      probeIntervalMinutes: body.probeIntervalMinutes,
       probeEnabled: body.probeEnabled,
+      probeIntervalMinutes: body.probeIntervalMinutes,
       nextRunAt: new Date(),
     })
     .onConflictDoUpdate({
       target: infraScanSchedules.hostId,
       set: {
+        enabled: body.enabled,
         intervalMinutes: body.scanIntervalHours * 60,
-        probeIntervalMinutes: body.probeIntervalMinutes,
         probeEnabled: body.probeEnabled,
+        probeIntervalMinutes: body.probeIntervalMinutes,
       },
     });
 
-  return c.json({ data: { scanIntervalHours: body.scanIntervalHours, probeIntervalMinutes: body.probeIntervalMinutes } });
+  return c.json({ data: { enabled: body.enabled, scanIntervalHours: body.scanIntervalHours, probeEnabled: body.probeEnabled, probeIntervalMinutes: body.probeIntervalMinutes } });
 });
 
 // ---------------------------------------------------------------------------

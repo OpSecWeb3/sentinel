@@ -22,6 +22,12 @@ interface Template {
   rules?: unknown[];
 }
 
+interface Host {
+  id: string;
+  hostname: string;
+  status: string;
+}
+
 /* -- helpers -------------------------------------------------------- */
 
 const severityBadgeVariant: Record<string, "destructive" | "warning" | "default" | "secondary"> = {
@@ -30,6 +36,88 @@ const severityBadgeVariant: Record<string, "destructive" | "warning" | "default"
   medium: "default",
   low: "secondary",
 };
+
+/* -- host picker modal --------------------------------------------- */
+
+function HostPickerModal({
+  template,
+  hosts,
+  hostsLoading,
+  onConfirm,
+  onCancel,
+}: {
+  template: Template;
+  hosts: Host[];
+  hostsLoading: boolean;
+  onConfirm: (hostIds: string[]) => void;
+  onCancel: () => void;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-xl space-y-4">
+        <div>
+          <h2 className="text-sm font-mono text-primary">$ enable detection template</h2>
+          <p className="mt-1 text-xs text-muted-foreground">{template.name}</p>
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground mb-2">
+            {">"} select hosts to scope this detection to (leave all unchecked = org-wide):
+          </p>
+          {hostsLoading ? (
+            <p className="text-xs text-muted-foreground animate-pulse">loading hosts...</p>
+          ) : hosts.length === 0 ? (
+            <p className="text-xs text-muted-foreground">[no hosts found — detection will be org-wide]</p>
+          ) : (
+            <div className="max-h-52 overflow-y-auto space-y-1 rounded border border-border p-2">
+              {hosts.map((h) => (
+                <button
+                  key={h.id}
+                  onClick={() => toggle(h.id)}
+                  className={cn(
+                    "w-full flex items-center justify-between px-2 py-1.5 rounded text-xs font-mono transition-colors text-left",
+                    selected.has(h.id)
+                      ? "bg-primary/10 text-primary border border-primary/30"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/30",
+                  )}
+                >
+                  <span>{h.hostname}</span>
+                  <span className={cn("text-[10px]", h.status === "active" ? "text-primary" : "text-muted-foreground")}>
+                    [{h.status}]
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          {selected.size > 0 && (
+            <p className="text-[10px] text-muted-foreground pt-1">
+              {selected.size} host{selected.size !== 1 ? "s" : ""} selected
+            </p>
+          )}
+        </div>
+
+        <div className="flex gap-2 pt-1">
+          <Button size="sm" onClick={() => onConfirm([...selected])}>
+            $ create detection
+          </Button>
+          <Button variant="outline" size="sm" onClick={onCancel}>
+            [cancel]
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* -- page ----------------------------------------------------------- */
 
@@ -40,6 +128,11 @@ export default function InfraTemplatesPage() {
   const [enableLoading, setEnableLoading] = useState<Record<string, boolean>>({});
   const [enabledTemplates, setEnabledTemplates] = useState<Set<string>>(new Set());
   const { toasts, toast, dismiss } = useToast();
+
+  // Host picker state
+  const [pickerTemplate, setPickerTemplate] = useState<Template | null>(null);
+  const [hosts, setHosts] = useState<Host[]>([]);
+  const [hostsLoading, setHostsLoading] = useState(false);
 
   const fetchTemplates = useCallback(async () => {
     setLoading(true);
@@ -58,15 +151,34 @@ export default function InfraTemplatesPage() {
     fetchTemplates();
   }, [fetchTemplates]);
 
-  async function enableTemplate(template: Template) {
+  async function openPicker(template: Template) {
+    setPickerTemplate(template);
+    if (hosts.length === 0) {
+      setHostsLoading(true);
+      try {
+        const res = await apiGet<{ data: Host[] }>("/modules/infra/hosts?limit=100");
+        setHosts(res.data ?? []);
+      } catch {
+        // non-fatal; picker will show empty state
+      } finally {
+        setHostsLoading(false);
+      }
+    }
+  }
+
+  async function confirmEnable(template: Template, hostIds: string[]) {
+    setPickerTemplate(null);
     setEnableLoading((prev) => ({ ...prev, [template.slug]: true }));
     try {
       await apiPost("/api/detections/from-template", {
         templateSlug: template.slug,
         moduleId: "infra",
+        // Pass selected host IDs in overrides so evaluators can filter by host
+        overrides: hostIds.length > 0 ? { hostIds } : {},
       });
       setEnabledTemplates((prev) => new Set(prev).add(template.slug));
-      toast(`Detection created from "${template.name}"`, "success");
+      const scope = hostIds.length > 0 ? ` → ${hostIds.length} host${hostIds.length !== 1 ? "s" : ""}` : " → org-wide";
+      toast(`Detection created from "${template.name}"${scope}`, "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to enable template");
     } finally {
@@ -77,6 +189,16 @@ export default function InfraTemplatesPage() {
   return (
     <div className="space-y-6">
       <ToastContainer toasts={toasts} dismiss={dismiss} />
+
+      {pickerTemplate && (
+        <HostPickerModal
+          template={pickerTemplate}
+          hosts={hosts}
+          hostsLoading={hostsLoading}
+          onConfirm={(ids) => confirmEnable(pickerTemplate, ids)}
+          onCancel={() => setPickerTemplate(null)}
+        />
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -143,13 +265,13 @@ export default function InfraTemplatesPage() {
                     </div>
                     <button
                       disabled={busy || enabled}
-                      onClick={() => enableTemplate(template)}
+                      onClick={() => openPicker(template)}
                       className={cn(
                         "text-xs font-mono transition-colors disabled:opacity-50 text-left",
                         enabled ? "text-primary" : "text-muted-foreground hover:text-primary",
                       )}
                     >
-                      {busy ? "..." : enabled ? "[enabled]" : "[enable]"}
+                      {busy ? "..." : enabled ? "[enabled]" : "[enable →]"}
                     </button>
                   </CardContent>
                 </Card>

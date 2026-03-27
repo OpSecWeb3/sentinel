@@ -106,7 +106,9 @@ interface ScoreHistoryPoint {
 }
 
 interface ScanSchedule {
+  enabled: boolean;
   scanIntervalHours: number;
+  probeEnabled: boolean;
   probeIntervalMinutes: number;
 }
 
@@ -195,7 +197,9 @@ export default function HostDetailPage() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [discoverLoading, setDiscoverLoading] = useState(false);
   const [editSchedule, setEditSchedule] = useState(false);
+  const [scanEnabled, setScanEnabled] = useState(true);
   const [scanInterval, setScanInterval] = useState(24);
+  const [probeEnabled, setProbeEnabled] = useState(true);
   const [probeInterval, setProbeInterval] = useState(5);
   const [cdnOrigins, setCdnOrigins] = useState<Array<{ provider: string; recordType: string; recordValue: string; observedAt: string }>>([]);
   const [cdnOriginsLoaded, setCdnOriginsLoaded] = useState(false);
@@ -246,7 +250,9 @@ export default function HostDetailPage() {
         { credentials: "include" },
       );
       setHost(res.data);
+      setScanEnabled(res.data.schedule?.enabled ?? true);
       setScanInterval(res.data.schedule?.scanIntervalHours ?? 24);
+      setProbeEnabled(res.data.schedule?.probeEnabled ?? true);
       setProbeInterval(res.data.schedule?.probeIntervalMinutes ?? 5);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load host");
@@ -320,7 +326,9 @@ export default function HostDetailPage() {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          enabled: scanEnabled,
           scanIntervalHours: scanInterval,
+          probeEnabled,
           probeIntervalMinutes: probeInterval,
         }),
       });
@@ -1420,8 +1428,23 @@ export default function HostDetailPage() {
         {expandedSections.has("schedule") && (
           <CardContent className="pt-3">
             {editSchedule ? (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-4">
+                {/* Master scan toggle */}
+                <div className="flex items-center justify-between rounded border border-border px-3 py-2">
+                  <span className="text-xs text-muted-foreground">--scanning</span>
+                  <button
+                    onClick={() => setScanEnabled((v) => !v)}
+                    className={cn(
+                      "text-xs font-mono transition-colors",
+                      scanEnabled ? "text-primary" : "text-muted-foreground",
+                    )}
+                  >
+                    [{scanEnabled ? "enabled" : "disabled"}]
+                  </button>
+                </div>
+
+                {/* Intervals (only editable when scanning is on) */}
+                <div className={cn("grid grid-cols-2 gap-4", !scanEnabled && "opacity-40 pointer-events-none")}>
                   <div>
                     <label className="block text-xs text-muted-foreground mb-1">
                       --scan-interval (hours)
@@ -1433,9 +1456,7 @@ export default function HostDetailPage() {
                         min={1}
                         max={168}
                         value={scanInterval}
-                        onChange={(e) =>
-                          setScanInterval(parseInt(e.target.value) || 1)
-                        }
+                        onChange={(e) => setScanInterval(parseInt(e.target.value) || 1)}
                         className="w-full bg-transparent outline-none font-mono"
                       />
                     </div>
@@ -1451,20 +1472,29 @@ export default function HostDetailPage() {
                         min={1}
                         max={60}
                         value={probeInterval}
-                        onChange={(e) =>
-                          setProbeInterval(parseInt(e.target.value) || 1)
-                        }
+                        onChange={(e) => setProbeInterval(parseInt(e.target.value) || 1)}
                         className="w-full bg-transparent outline-none font-mono"
                       />
                     </div>
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    disabled={scheduleLoading}
-                    onClick={saveSchedule}
+
+                {/* Uptime probe toggle */}
+                <div className={cn("flex items-center justify-between rounded border border-border px-3 py-2", !scanEnabled && "opacity-40 pointer-events-none")}>
+                  <span className="text-xs text-muted-foreground">--uptime-probe</span>
+                  <button
+                    onClick={() => setProbeEnabled((v) => !v)}
+                    className={cn(
+                      "text-xs font-mono transition-colors",
+                      probeEnabled ? "text-primary" : "text-muted-foreground",
+                    )}
                   >
+                    [{probeEnabled ? "enabled" : "disabled"}]
+                  </button>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button size="sm" disabled={scheduleLoading} onClick={saveSchedule}>
                     {scheduleLoading ? "> saving..." : "$ save"}
                   </Button>
                   <Button
@@ -1472,7 +1502,9 @@ export default function HostDetailPage() {
                     size="sm"
                     onClick={() => {
                       setEditSchedule(false);
+                      setScanEnabled(host.schedule?.enabled ?? true);
                       setScanInterval(host.schedule?.scanIntervalHours ?? 24);
+                      setProbeEnabled(host.schedule?.probeEnabled ?? true);
                       setProbeInterval(host.schedule?.probeIntervalMinutes ?? 5);
                     }}
                   >
@@ -1482,19 +1514,21 @@ export default function HostDetailPage() {
               </div>
             ) : (
               <div className="flex items-center justify-between">
-                <div className="text-xs space-y-1">
+                <div className="text-xs space-y-1 font-mono">
                   <p>
-                    <span className="text-muted-foreground">full scan: </span>
-                    <span className="text-foreground">
-                      every {host.schedule?.scanIntervalHours ?? 24}h
+                    <span className="text-muted-foreground">scanning:    </span>
+                    <span className={host.schedule?.enabled === false ? "text-muted-foreground" : "text-primary"}>
+                      {host.schedule?.enabled === false ? "disabled" : "enabled"}
                     </span>
                   </p>
                   <p>
-                    <span className="text-muted-foreground">
-                      uptime probe:{" "}
-                    </span>
-                    <span className="text-foreground">
-                      every {host.schedule?.probeIntervalMinutes ?? 5}m
+                    <span className="text-muted-foreground">full scan:   </span>
+                    <span className="text-foreground">every {host.schedule?.scanIntervalHours ?? 24}h</span>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">uptime probe:</span>
+                    <span className={cn("ml-1", host.schedule?.probeEnabled === false ? "text-muted-foreground" : "text-foreground")}>
+                      {host.schedule?.probeEnabled === false ? "disabled" : `every ${host.schedule?.probeIntervalMinutes ?? 5}m`}
                     </span>
                   </p>
                 </div>

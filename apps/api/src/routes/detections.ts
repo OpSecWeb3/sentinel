@@ -155,7 +155,7 @@ router.get('/', requireScope('api:read'), validate('query', listQuerySchema), as
       ruleCount: sql<number>`(
         SELECT count(*)::int FROM rules
         WHERE rules.detection_id = ${detections.id}
-          AND rules.status = 'active'
+          AND rules.status != 'disabled'
       )`.as('rule_count'),
     })
       .from(detections)
