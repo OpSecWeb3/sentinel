@@ -43,6 +43,13 @@
       "when": 1743292800000,
       "tag": "0009_aws_org_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1743379200000,
+      "tag": "0010_user_login_lockout",
+      "breakpoints": true
     }
   ]
 }
