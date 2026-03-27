@@ -37,6 +37,20 @@ interface NotifyKeyStatus {
   lastUsedAt?: string | null;
 }
 
+interface SlackStatus {
+  connected: boolean;
+  teamId?: string;
+  teamName?: string;
+  installedAt?: string;
+}
+
+interface WebhookConfig {
+  webhookUrl: string;
+  npmWebhookUrl: string;
+  hasSecret: boolean;
+  secretPrefix: string | null;
+}
+
 /* ── page ────────────────────────────────────────────────────── */
 
 export default function SettingsPage() {
@@ -44,7 +58,7 @@ export default function SettingsPage() {
 
   // Section toggle
   const [section, setSection] = useState<
-    "api-keys" | "invite" | "members" | "notify-key"
+    "api-keys" | "invite" | "members" | "notify-key" | "slack" | "webhook"
   >("api-keys");
 
   // API Keys
@@ -67,6 +81,18 @@ export default function SettingsPage() {
     useState<NotifyKeyStatus | null>(null);
   const [notifyKeyLoading, setNotifyKeyLoading] = useState(false);
   const [notifyKeyResult, setNotifyKeyResult] = useState<string | null>(null);
+
+  // Slack
+  const [slackStatus, setSlackStatus] = useState<SlackStatus | null>(null);
+  const [slackLoading, setSlackLoading] = useState(false);
+
+  // Webhook config
+  const [webhookConfig, setWebhookConfig] = useState<WebhookConfig | null>(
+    null,
+  );
+  const [webhookConfigLoading, setWebhookConfigLoading] = useState(false);
+  const [rotateLoading, setRotateLoading] = useState(false);
+  const [newSecret, setNewSecret] = useState<string | null>(null);
 
   // Confirm dialog
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -136,11 +162,49 @@ export default function SettingsPage() {
     }
   }, []);
 
+  /* ── fetch Slack status ─────────────────────────────────────── */
+
+  const fetchSlackStatus = useCallback(async () => {
+    setSlackLoading(true);
+    try {
+      const res = await apiFetch<SlackStatus>("/integrations/slack", {
+        credentials: "include",
+      });
+      setSlackStatus(res);
+    } catch {
+      setSlackStatus({ connected: false });
+    } finally {
+      setSlackLoading(false);
+    }
+  }, []);
+
+  /* ── fetch webhook config ───────────────────────────────────── */
+
+  const fetchWebhookConfig = useCallback(async () => {
+    setWebhookConfigLoading(true);
+    try {
+      const res = await apiFetch<WebhookConfig>(
+        "/modules/release-chain/webhook-config",
+        { credentials: "include" },
+      );
+      setWebhookConfig(res);
+    } catch {
+      toast("Failed to load webhook configuration.");
+    } finally {
+      setWebhookConfigLoading(false);
+    }
+  }, [toast]);
+
   useEffect(() => {
     fetchApiKeys();
     fetchMembers();
     fetchNotifyKeyStatus();
   }, [fetchApiKeys, fetchMembers, fetchNotifyKeyStatus]);
+
+  useEffect(() => {
+    if (section === "slack") fetchSlackStatus();
+    if (section === "webhook") fetchWebhookConfig();
+  }, [section, fetchSlackStatus, fetchWebhookConfig]);
 
   /* ── create API key ────────────────────────────────────────── */
 
@@ -280,6 +344,70 @@ export default function SettingsPage() {
     }
   }
 
+  /* ── Slack connect / disconnect ────────────────────────────── */
+
+  async function connectSlack() {
+    try {
+      const res = await apiFetch<{ url: string }>("/integrations/slack/install", {
+        credentials: "include",
+      });
+      window.location.href = res.url;
+    } catch (err) {
+      toast(
+        err instanceof Error
+          ? `Failed: ${err.message}`
+          : "Failed to start Slack OAuth flow",
+      );
+    }
+  }
+
+  async function disconnectSlack() {
+    const confirmed = await confirm(
+      "Disconnect Slack",
+      "This will remove the Slack integration. Alert notifications to Slack channels will stop working.",
+    );
+    if (!confirmed) return;
+    try {
+      await apiFetch("/integrations/slack", {
+        method: "DELETE",
+        credentials: "include",
+      });
+      setSlackStatus({ connected: false });
+      toast("Slack disconnected.");
+    } catch {
+      toast("Failed to disconnect Slack.");
+    }
+  }
+
+  /* ── rotate webhook secret ──────────────────────────────────── */
+
+  async function rotateWebhookSecret() {
+    const confirmed = await confirm(
+      "Rotate Webhook Secret",
+      "Rotating the secret will immediately invalidate the current one. You must update the secret in Docker Hub and npm webhook settings.",
+    );
+    if (!confirmed) return;
+    setRotateLoading(true);
+    setNewSecret(null);
+    try {
+      const res = await apiFetch<{ secret: string; secretPrefix: string }>(
+        "/modules/release-chain/webhook-config/rotate",
+        { method: "POST", credentials: "include" },
+      );
+      setNewSecret(res.secret);
+      fetchWebhookConfig();
+      toast("Webhook secret rotated.");
+    } catch (err) {
+      toast(
+        err instanceof Error
+          ? `Failed: ${err.message}`
+          : "Failed to rotate webhook secret",
+      );
+    } finally {
+      setRotateLoading(false);
+    }
+  }
+
   /* ── change member role ────────────────────────────────────── */
 
   async function changeRole(member: Member, newRole: string) {
@@ -330,6 +458,8 @@ export default function SettingsPage() {
             { key: "invite", label: "invite" },
             { key: "members", label: "members" },
             { key: "notify-key", label: "notify-key" },
+            { key: "slack", label: "slack" },
+            { key: "webhook", label: "webhooks" },
           ] as const
         ).map(({ key, label }) => (
           <button
@@ -647,6 +777,189 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* ── Slack Section ─────────────────────────────────────── */}
+      {section === "slack" && (
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            $ integrations slack status
+          </p>
+
+          <Card>
+            <CardContent className="p-4 space-y-3">
+              <p className="text-xs text-muted-foreground">
+                {">"} slack must be connected for alert notifications to reach
+                your channels.
+              </p>
+
+              {slackLoading ? (
+                <p className="text-xs text-muted-foreground">loading...</p>
+              ) : slackStatus?.connected ? (
+                <>
+                  <div className="text-xs">
+                    <span className="text-muted-foreground">status: </span>
+                    <span className="text-primary">[connected]</span>
+                    {slackStatus.teamName && (
+                      <span className="ml-3 text-muted-foreground">
+                        workspace: {slackStatus.teamName}
+                      </span>
+                    )}
+                    {slackStatus.installedAt && (
+                      <span className="ml-3 text-muted-foreground">
+                        connected{" "}
+                        {new Date(slackStatus.installedAt).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={disconnectSlack}
+                    className="text-destructive"
+                  >
+                    $ disconnect
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div className="text-xs">
+                    <span className="text-muted-foreground">status: </span>
+                    <span className="text-muted-foreground">[not connected]</span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={connectSlack}
+                  >
+                    $ connect slack
+                  </Button>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Webhook Section ───────────────────────────────────── */}
+      {section === "webhook" && (
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            $ release-chain webhook-config
+          </p>
+
+          {webhookConfigLoading ? (
+            <div className="animate-pulse space-y-2">
+              {[0, 1].map((i) => (
+                <div
+                  key={i}
+                  className="h-12 rounded bg-muted-foreground/10"
+                />
+              ))}
+            </div>
+          ) : webhookConfig ? (
+            <>
+              <Card>
+                <CardContent className="p-4 space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    {">"} configure these URLs in Docker Hub and npm webhook
+                    settings along with the shared secret.
+                  </p>
+
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      --docker-webhook-url
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 break-all rounded border border-border bg-background px-3 py-2 font-mono text-xs text-primary">
+                        {webhookConfig.webhookUrl}
+                      </code>
+                      <button
+                        onClick={() =>
+                          navigator.clipboard
+                            .writeText(webhookConfig.webhookUrl)
+                            .then(() => toast("Copied to clipboard."))
+                        }
+                        className="text-xs text-muted-foreground/60 hover:text-foreground transition-colors shrink-0"
+                      >
+                        [copy]
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      --npm-webhook-url
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 break-all rounded border border-border bg-background px-3 py-2 font-mono text-xs text-primary">
+                        {webhookConfig.npmWebhookUrl}
+                      </code>
+                      <button
+                        onClick={() =>
+                          navigator.clipboard
+                            .writeText(webhookConfig.npmWebhookUrl)
+                            .then(() => toast("Copied to clipboard."))
+                        }
+                        className="text-xs text-muted-foreground/60 hover:text-foreground transition-colors shrink-0"
+                      >
+                        [copy]
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="text-xs">
+                    <span className="text-muted-foreground">
+                      --webhook-secret:{" "}
+                    </span>
+                    <span
+                      className={
+                        webhookConfig.hasSecret
+                          ? "text-primary"
+                          : "text-muted-foreground"
+                      }
+                    >
+                      {webhookConfig.hasSecret ? "[configured]" : "[not set]"}
+                    </span>
+                    {webhookConfig.secretPrefix && (
+                      <span className="ml-3 text-muted-foreground">
+                        prefix: {webhookConfig.secretPrefix}
+                      </span>
+                    )}
+                  </div>
+
+                  {newSecret && (
+                    <div className="border border-border bg-background p-3">
+                      <p className="mb-1 text-xs text-warning">
+                        [!] save this secret — it will never be shown again.
+                      </p>
+                      <p className="break-all font-mono text-xs text-primary text-glow">
+                        {newSecret}
+                      </p>
+                    </div>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={rotateWebhookSecret}
+                    disabled={rotateLoading}
+                  >
+                    {rotateLoading
+                      ? "..."
+                      : webhookConfig.hasSecret
+                        ? "$ rotate secret"
+                        : "$ generate secret"}
+                  </Button>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {">"} failed to load webhook configuration.
+            </p>
+          )}
         </div>
       )}
     </div>

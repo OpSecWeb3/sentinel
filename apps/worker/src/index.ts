@@ -12,6 +12,7 @@ import { alertDispatchHandler, setModuleFormatters } from './handlers/alert-disp
 import { dataRetentionHandler, DEFAULT_RETENTION_POLICIES } from './handlers/data-retention.js';
 import { createCorrelationHandler } from './handlers/correlation-evaluate.js';
 import { createCorrelationExpiryHandler } from './handlers/correlation-expiry.js';
+import { pollSweepHandler } from './handlers/poll-sweep.js';
 
 // Module imports
 import { GitHubModule } from '@sentinel/module-github';
@@ -73,6 +74,7 @@ async function main() {
     createCorrelationExpiryHandler(redis),
     alertDispatchHandler,
     dataRetentionHandler,
+    pollSweepHandler,
   ];
 
   const moduleHandlers = modules.flatMap((m) => m.jobHandlers);
@@ -124,6 +126,13 @@ async function main() {
     'chain.rpc-usage.flush',
     {},
     { repeat: { every: 300_000 }, jobId: 'rpc-usage-flush' },
+  );
+
+  // ── Schedule release-chain artifact poll sweep every 60 seconds ─────
+  await moduleJobsQueue.add(
+    'release-chain.poll-sweep',
+    {},
+    { repeat: { every: 60_000 }, jobId: 'release-chain-poll-sweep' },
   );
 
   // ── Graceful shutdown ───────────────────────────────────────────────

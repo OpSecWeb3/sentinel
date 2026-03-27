@@ -12,7 +12,7 @@ import { getDb } from '@sentinel/db';
 import { organizations } from '@sentinel/db/schema/core';
 import { rcArtifacts, rcArtifactVersions, rcArtifactEvents } from '@sentinel/db/schema/release-chain';
 import { eq, and, desc } from '@sentinel/db';
-import { decrypt } from '@sentinel/shared/crypto';
+import { encrypt, decrypt } from '@sentinel/shared/crypto';
 import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
 import type { AppEnv, AuthContext } from '@sentinel/shared/hono-types';
 import { searchNpmScope } from './npm-registry.js';
@@ -839,4 +839,74 @@ releaseChainRouter.get('/templates', (c) => {
     ruleCount: Array.isArray(t.rules) ? t.rules.length : 0,
   }));
   return c.json({ data });
+});
+
+// ---------------------------------------------------------------------------
+// GET /modules/release-chain/webhook-config
+// Returns webhook URLs and secret status for the authenticated org.
+// ---------------------------------------------------------------------------
+
+releaseChainRouter.get('/webhook-config', async (c) => {
+  const orgId = c.get('orgId');
+  if (!orgId) return c.json({ error: 'Organisation required' }, 401);
+
+  // Derive origin from the incoming request URL (protocol + host)
+  const reqUrl = new URL(c.req.url);
+  const origin = process.env.API_URL ?? `${reqUrl.protocol}//${reqUrl.host}`;
+
+  const webhookUrl = `${origin}/modules/release-chain/webhooks/docker`;
+  const npmWebhookUrl = `${origin}/modules/release-chain/webhooks/npm`;
+
+  const db = getDb();
+  const [org] = await db
+    .select({ webhookSecretEncrypted: organizations.webhookSecretEncrypted })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+
+  if (!org) return c.json({ error: 'Organisation not found' }, 404);
+
+  let hasSecret = false;
+  let secretPrefix: string | null = null;
+
+  if (org.webhookSecretEncrypted) {
+    try {
+      const plaintext = decrypt(org.webhookSecretEncrypted);
+      hasSecret = true;
+      secretPrefix = plaintext.slice(0, 8) + '...';
+    } catch (err) {
+      log.warn({ err, orgId }, 'Failed to decrypt webhook secret for status check');
+    }
+  }
+
+  return c.json({ webhookUrl, npmWebhookUrl, hasSecret, secretPrefix });
+});
+
+// ---------------------------------------------------------------------------
+// POST /modules/release-chain/webhook-config/rotate
+// Generates a new webhook secret for the org (admin only).
+// Returns the plaintext secret exactly once — never stored in plaintext.
+// ---------------------------------------------------------------------------
+
+releaseChainRouter.post('/webhook-config/rotate', async (c) => {
+  const orgId = c.get('orgId');
+  const role = c.get('role');
+
+  if (!orgId) return c.json({ error: 'Organisation required' }, 401);
+  if (role !== 'admin') return c.json({ error: 'Admin role required' }, 403);
+
+  const rawSecret = 'whsec_' + crypto.randomBytes(32).toString('hex');
+  const encrypted = encrypt(rawSecret);
+
+  const db = getDb();
+  await db
+    .update(organizations)
+    .set({ webhookSecretEncrypted: encrypted })
+    .where(eq(organizations.id, orgId));
+
+  const secretPrefix = rawSecret.slice(0, 8) + '...';
+
+  log.info({ orgId }, 'Webhook secret rotated');
+
+  return c.json({ secret: rawSecret, secretPrefix });
 });

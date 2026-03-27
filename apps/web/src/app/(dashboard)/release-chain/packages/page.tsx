@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -25,11 +26,22 @@ interface MonitoredPackage {
   latestVersion?: string | null;
   provenanceStatus?: string;
   jobId?: string;
+  githubRepo?: string | null;
+  enabled?: boolean;
 }
 
 interface PackagesResponse {
   data: MonitoredPackage[];
   message?: string;
+}
+
+interface NpmImportResult {
+  data: {
+    imported: number;
+    skipped: number;
+    total: number;
+    packages: string[];
+  };
 }
 
 /* -- helpers --------------------------------------------------------- */
@@ -62,6 +74,271 @@ function provenanceBadge(status: string | undefined) {
   }
 }
 
+/* -- edit panel ------------------------------------------------------ */
+
+interface EditPanelProps {
+  pkg: MonitoredPackage;
+  onClose: () => void;
+  onSaved: (updated: MonitoredPackage) => void;
+}
+
+function EditPanel({ pkg, onClose, onSaved }: EditPanelProps) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+
+  const [tagWatch, setTagWatch] = useState(
+    (pkg.tagPatterns ?? []).join(", "),
+  );
+  const [tagIgnore, setTagIgnore] = useState(
+    (pkg.ignorePatterns ?? []).join(", "),
+  );
+  const [pollInterval, setPollInterval] = useState(
+    String(pkg.pollIntervalSeconds ?? 300),
+  );
+  const [githubRepo, setGithubRepo] = useState(pkg.githubRepo ?? "");
+  const [enabled, setEnabled] = useState(pkg.enabled !== false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pkg.id) return;
+    setSaving(true);
+    try {
+      const res = await apiFetch<{ data: MonitoredPackage }>(
+        `/modules/release-chain/packages/${pkg.id}`,
+        {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tagWatchPatterns: tagWatch
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            tagIgnorePatterns: tagIgnore
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            pollIntervalSeconds: Number(pollInterval),
+            githubRepo: githubRepo.trim() || null,
+            enabled,
+          }),
+        },
+      );
+      onSaved(res.data);
+      toast(`Saved changes for ${pkg.name}.`);
+      onClose();
+    } catch (err) {
+      toast(
+        err instanceof Error ? `Failed: ${err.message}` : "Failed to save",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="col-span-full border-t border-border bg-muted/20 px-3 py-3">
+      <p className="mb-3 text-xs text-muted-foreground">
+        $ release-chain packages edit --id {pkg.id ?? pkg.name}
+      </p>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              --tag-watch (comma-separated)
+            </label>
+            <Input
+              value={tagWatch}
+              onChange={(e) => setTagWatch(e.target.value)}
+              placeholder="*, latest"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              --tag-ignore (comma-separated)
+            </label>
+            <Input
+              value={tagIgnore}
+              onChange={(e) => setTagIgnore(e.target.value)}
+              placeholder="*-rc, *-beta"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              --poll-interval (seconds, min 60)
+            </label>
+            <Input
+              type="number"
+              min={60}
+              value={pollInterval}
+              onChange={(e) => setPollInterval(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              --github-repo (e.g. org/repo)
+            </label>
+            <Input
+              value={githubRepo}
+              onChange={(e) => setGithubRepo(e.target.value)}
+              placeholder="org/repo"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 text-xs">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              className="h-3 w-3"
+            />
+            <span className="text-muted-foreground">--enabled</span>
+          </label>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button type="submit" size="sm" disabled={saving}>
+            {saving ? "> saving..." : "$ save changes"}
+          </Button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            [cancel]
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/* -- npm import modal ------------------------------------------------ */
+
+interface NpmImportModalProps {
+  onClose: () => void;
+  onImported: () => void;
+}
+
+function NpmImportModal({ onClose, onImported }: NpmImportModalProps) {
+  const { toast } = useToast();
+  const [scope, setScope] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<NpmImportResult["data"] | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setImporting(true);
+    try {
+      const normalized = scope.trim().startsWith("@")
+        ? scope.trim()
+        : `@${scope.trim()}`;
+      const res = await apiFetch<NpmImportResult>(
+        "/modules/release-chain/npm-orgs/import",
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scope: normalized }),
+        },
+      );
+      setResult(res.data);
+      toast(
+        `Import complete: ${res.data.imported} created, ${res.data.skipped} skipped.`,
+      );
+      onImported();
+    } catch (err) {
+      toast(
+        err instanceof Error ? `Failed: ${err.message}` : "Import failed",
+      );
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+      <Card className="w-full max-w-md">
+        <CardContent className="p-5">
+          <p className="mb-1 text-xs text-muted-foreground">
+            $ release-chain npm-orgs import
+          </p>
+          <h2 className="mb-4 text-sm font-medium text-foreground">
+            Import npm scope
+          </h2>
+
+          {result ? (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                {">"} import complete
+              </p>
+              <div className="rounded border border-border bg-muted/30 px-3 py-2 text-xs font-mono">
+                <p className="text-primary">
+                  created: {result.imported}
+                </p>
+                <p className="text-muted-foreground">
+                  skipped: {result.skipped}
+                </p>
+                <p className="text-muted-foreground">
+                  total found: {result.total}
+                </p>
+              </div>
+              {result.packages.length > 0 && (
+                <div className="max-h-40 overflow-y-auto rounded border border-border bg-muted/20 px-3 py-2">
+                  {result.packages.map((name) => (
+                    <p key={name} className="text-xs text-muted-foreground font-mono">
+                      + {name}
+                    </p>
+                  ))}
+                </div>
+              )}
+              <Button onClick={onClose} size="sm">
+                [close]
+              </Button>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-3">
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">
+                  --scope (e.g. @myorg or myorg)
+                </label>
+                <Input
+                  placeholder="@myorg"
+                  value={scope}
+                  onChange={(e) => setScope(e.target.value)}
+                  required
+                  autoFocus
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Imports all public packages under this scope from the npm
+                  registry
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button type="submit" size="sm" disabled={importing}>
+                  {importing ? "> importing..." : "$ import scope"}
+                </Button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  [cancel]
+                </button>
+              </div>
+            </form>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 /* -- page ------------------------------------------------------------ */
 
 export default function PackagesPage() {
@@ -78,6 +355,12 @@ export default function PackagesPage() {
   const [createScope, setCreateScope] = useState("npmjs");
   const [createPollInterval, setCreatePollInterval] = useState("300");
   const [createLoading, setCreateLoading] = useState(false);
+
+  // Edit panel
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  // npm import modal
+  const [showImport, setShowImport] = useState(false);
 
   // Confirm dialog
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -211,10 +494,27 @@ export default function PackagesPage() {
     }
   }
 
+  /* -- edit saved ---------------------------------------------------- */
+
+  function handleEditSaved(updated: MonitoredPackage) {
+    setPackages((prev) =>
+      prev.map((p) =>
+        p.id && p.id === updated.id ? { ...p, ...updated } : p,
+      ),
+    );
+  }
+
   /* -- render -------------------------------------------------------- */
 
   return (
     <div className="space-y-6">
+      {showImport && (
+        <NpmImportModal
+          onClose={() => setShowImport(false)}
+          onImported={fetchPackages}
+        />
+      )}
+
       <ConfirmDialog
         open={confirmOpen}
         title={confirmTitle}
@@ -233,9 +533,17 @@ export default function PackagesPage() {
             {">"} monitored npm packages
           </p>
         </div>
-        <Button onClick={() => setShowCreate(!showCreate)}>
-          {showCreate ? "[cancel]" : "+ Add Package"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setShowImport(true)}
+          >
+            Import npm scope
+          </Button>
+          <Button onClick={() => setShowCreate(!showCreate)}>
+            {showCreate ? "[cancel]" : "+ Add Package"}
+          </Button>
+        </div>
       </div>
 
       {/* Create form */}
@@ -369,48 +677,81 @@ export default function PackagesPage() {
             {packages.map((pkg) => {
               const pollBusy = actionLoading[`poll-${pkg.name}`] ?? false;
               const removeBusy = actionLoading[`remove-${pkg.name}`] ?? false;
+              const isEditing = editingId === (pkg.id ?? pkg.name);
 
               return (
-                <div
-                  key={pkg.name}
-                  className="group grid grid-cols-[2fr_100px_80px_100px_120px_1fr] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30"
-                >
-                  <span className="truncate font-medium text-foreground group-hover:text-primary transition-colors">
-                    {pkg.name}
-                  </span>
-
-                  <span className="text-xs text-muted-foreground font-mono">
-                    {pkg.latestVersion ?? "--"}
-                  </span>
-
-                  <span className="text-xs text-muted-foreground">
-                    {pkg.registry}
-                  </span>
-
-                  <span className="text-xs text-muted-foreground">
-                    {formatDate(pkg.lastEvent ?? pkg.lastPolledAt)}
-                  </span>
-
-                  <span className="text-xs">
-                    {provenanceBadge(pkg.provenanceStatus)}
-                  </span>
-
-                  <span className="flex items-center justify-end gap-2 text-xs">
-                    <button
-                      disabled={pollBusy}
-                      onClick={() => pollNow(pkg)}
-                      className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                <div key={pkg.name}>
+                  <div className="group grid grid-cols-[2fr_100px_80px_100px_120px_1fr] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30">
+                    <Link
+                      href={`/release-chain/packages/${pkg.id ?? pkg.name}`}
+                      className="truncate font-medium text-foreground group-hover:text-primary transition-colors"
                     >
-                      {pollBusy ? "..." : "[poll]"}
-                    </button>
-                    <button
-                      disabled={removeBusy}
-                      onClick={() => removePackage(pkg)}
-                      className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                    >
-                      {removeBusy ? "..." : "[remove]"}
-                    </button>
-                  </span>
+                      {pkg.name}
+                    </Link>
+
+                    <span className="text-xs text-muted-foreground font-mono">
+                      {pkg.latestVersion ?? "--"}
+                    </span>
+
+                    <span className="text-xs text-muted-foreground">
+                      {pkg.registry}
+                    </span>
+
+                    <span className="text-xs text-muted-foreground">
+                      {formatDate(pkg.lastEvent ?? pkg.lastPolledAt)}
+                    </span>
+
+                    <span className="text-xs">
+                      {provenanceBadge(pkg.provenanceStatus)}
+                    </span>
+
+                    <span className="flex items-center justify-end gap-2 text-xs">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingId(
+                            isEditing ? null : (pkg.id ?? pkg.name),
+                          );
+                        }}
+                        className={cn(
+                          "transition-colors",
+                          isEditing
+                            ? "text-primary"
+                            : "text-muted-foreground hover:text-primary",
+                        )}
+                      >
+                        [edit]
+                      </button>
+                      <button
+                        disabled={pollBusy}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          pollNow(pkg);
+                        }}
+                        className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                      >
+                        {pollBusy ? "..." : "[poll]"}
+                      </button>
+                      <button
+                        disabled={removeBusy}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removePackage(pkg);
+                        }}
+                        className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+                      >
+                        {removeBusy ? "..." : "[remove]"}
+                      </button>
+                    </span>
+                  </div>
+
+                  {isEditing && (
+                    <EditPanel
+                      pkg={pkg}
+                      onClose={() => setEditingId(null)}
+                      onSaved={handleEditSaved}
+                    />
+                  )}
                 </div>
               );
             })}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -25,6 +26,8 @@ interface MonitoredImage {
   verificationStatus?: string;
   tagCount?: number;
   jobId?: string;
+  githubRepo?: string | null;
+  enabled?: boolean;
 }
 
 interface ImagesResponse {
@@ -62,6 +65,150 @@ function verificationBadge(status: string | undefined) {
   }
 }
 
+/* -- edit panel ------------------------------------------------------ */
+
+interface EditPanelProps {
+  image: MonitoredImage;
+  onClose: () => void;
+  onSaved: (updated: MonitoredImage) => void;
+}
+
+function EditPanel({ image, onClose, onSaved }: EditPanelProps) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+
+  const [tagWatch, setTagWatch] = useState(
+    (image.tagPatterns ?? []).join(", "),
+  );
+  const [tagIgnore, setTagIgnore] = useState(
+    (image.ignorePatterns ?? []).join(", "),
+  );
+  const [pollInterval, setPollInterval] = useState(
+    String(image.pollIntervalSeconds ?? 300),
+  );
+  const [githubRepo, setGithubRepo] = useState(image.githubRepo ?? "");
+  const [enabled, setEnabled] = useState(image.enabled !== false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!image.id) return;
+    setSaving(true);
+    try {
+      const res = await apiFetch<{ data: MonitoredImage }>(
+        `/modules/release-chain/images/${image.id}`,
+        {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tagWatchPatterns: tagWatch
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            tagIgnorePatterns: tagIgnore
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+            pollIntervalSeconds: Number(pollInterval),
+            githubRepo: githubRepo.trim() || null,
+            enabled,
+          }),
+        },
+      );
+      onSaved(res.data);
+      toast(`Saved changes for ${image.name}.`);
+      onClose();
+    } catch (err) {
+      toast(
+        err instanceof Error ? `Failed: ${err.message}` : "Failed to save",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="col-span-full border-t border-border bg-muted/20 px-3 py-3">
+      <p className="mb-3 text-xs text-muted-foreground">
+        $ release-chain images edit --id {image.id ?? image.name}
+      </p>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              --tag-watch (comma-separated)
+            </label>
+            <Input
+              value={tagWatch}
+              onChange={(e) => setTagWatch(e.target.value)}
+              placeholder="*, v*, latest"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              --tag-ignore (comma-separated)
+            </label>
+            <Input
+              value={tagIgnore}
+              onChange={(e) => setTagIgnore(e.target.value)}
+              placeholder="*-rc, *-alpha"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              --poll-interval (seconds, min 60)
+            </label>
+            <Input
+              type="number"
+              min={60}
+              value={pollInterval}
+              onChange={(e) => setPollInterval(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              --github-repo (e.g. org/repo)
+            </label>
+            <Input
+              value={githubRepo}
+              onChange={(e) => setGithubRepo(e.target.value)}
+              placeholder="org/repo"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 text-xs">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              className="h-3 w-3"
+            />
+            <span className="text-muted-foreground">--enabled</span>
+          </label>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button type="submit" size="sm" disabled={saving}>
+            {saving ? "> saving..." : "$ save changes"}
+          </Button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            [cancel]
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 /* -- page ------------------------------------------------------------ */
 
 export default function ImagesPage() {
@@ -79,6 +226,9 @@ export default function ImagesPage() {
   const [createRegistry, setCreateRegistry] = useState("docker_hub");
   const [createPollInterval, setCreatePollInterval] = useState("300");
   const [createLoading, setCreateLoading] = useState(false);
+
+  // Edit panel
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Confirm dialog
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -216,6 +366,16 @@ export default function ImagesPage() {
     } finally {
       setActionLoading((prev) => ({ ...prev, [key]: false }));
     }
+  }
+
+  /* -- edit saved ---------------------------------------------------- */
+
+  function handleEditSaved(updated: MonitoredImage) {
+    setImages((prev) =>
+      prev.map((img) =>
+        img.id && img.id === updated.id ? { ...img, ...updated } : img,
+      ),
+    );
   }
 
   /* -- render -------------------------------------------------------- */
@@ -387,48 +547,81 @@ export default function ImagesPage() {
             {images.map((image) => {
               const pollBusy = actionLoading[`poll-${image.name}`] ?? false;
               const removeBusy = actionLoading[`remove-${image.name}`] ?? false;
+              const isEditing = editingId === (image.id ?? image.name);
 
               return (
-                <div
-                  key={image.name}
-                  className="group grid grid-cols-[2fr_80px_80px_100px_100px_1fr] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30"
-                >
-                  <span className="truncate font-medium text-foreground group-hover:text-primary transition-colors">
-                    {image.name}
-                  </span>
-
-                  <span className="text-xs text-muted-foreground">
-                    {image.tagCount ?? image.tagPatterns.length}
-                  </span>
-
-                  <span className="text-xs text-muted-foreground">
-                    {image.registry}
-                  </span>
-
-                  <span className="text-xs text-muted-foreground">
-                    {formatDate(image.lastEvent ?? image.lastPolledAt)}
-                  </span>
-
-                  <span className="text-xs">
-                    {verificationBadge(image.verificationStatus)}
-                  </span>
-
-                  <span className="flex items-center justify-end gap-2 text-xs">
-                    <button
-                      disabled={pollBusy}
-                      onClick={() => pollNow(image)}
-                      className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                <div key={image.name}>
+                  <div className="group grid grid-cols-[2fr_80px_80px_100px_100px_1fr] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30">
+                    <Link
+                      href={`/release-chain/images/${image.id ?? image.name}`}
+                      className="truncate font-medium text-foreground group-hover:text-primary transition-colors"
                     >
-                      {pollBusy ? "..." : "[poll]"}
-                    </button>
-                    <button
-                      disabled={removeBusy}
-                      onClick={() => removeImage(image)}
-                      className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                    >
-                      {removeBusy ? "..." : "[remove]"}
-                    </button>
-                  </span>
+                      {image.name}
+                    </Link>
+
+                    <span className="text-xs text-muted-foreground">
+                      {image.tagCount ?? image.tagPatterns.length}
+                    </span>
+
+                    <span className="text-xs text-muted-foreground">
+                      {image.registry}
+                    </span>
+
+                    <span className="text-xs text-muted-foreground">
+                      {formatDate(image.lastEvent ?? image.lastPolledAt)}
+                    </span>
+
+                    <span className="text-xs">
+                      {verificationBadge(image.verificationStatus)}
+                    </span>
+
+                    <span className="flex items-center justify-end gap-2 text-xs">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingId(
+                            isEditing ? null : (image.id ?? image.name),
+                          );
+                        }}
+                        className={cn(
+                          "transition-colors",
+                          isEditing
+                            ? "text-primary"
+                            : "text-muted-foreground hover:text-primary",
+                        )}
+                      >
+                        [edit]
+                      </button>
+                      <button
+                        disabled={pollBusy}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          pollNow(image);
+                        }}
+                        className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                      >
+                        {pollBusy ? "..." : "[poll]"}
+                      </button>
+                      <button
+                        disabled={removeBusy}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeImage(image);
+                        }}
+                        className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+                      >
+                        {removeBusy ? "..." : "[remove]"}
+                      </button>
+                    </span>
+                  </div>
+
+                  {isEditing && (
+                    <EditPanel
+                      image={image}
+                      onClose={() => setEditingId(null)}
+                      onSaved={handleEditSaved}
+                    />
+                  )}
                 </div>
               );
             })}
