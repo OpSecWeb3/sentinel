@@ -176,11 +176,8 @@ export default function ContractDetailPage() {
   }
 
   const traits = Array.isArray(contract.traits) ? contract.traits as string[] : [];
-  const storageSlots = Array.isArray(
-    (contract.storageLayout as any)?.storage,
-  )
-    ? (contract.storageLayout as any).storage as { label: string; slot: string; type: string }[]
-    : [];
+  const storageLayout = contract.storageLayout as { storage?: { label: string; slot: string; type: string }[] } | null;
+  const storageSlots = Array.isArray(storageLayout?.storage) ? storageLayout.storage as { label: string; slot: string; type: string }[] : [];
 
   const explorerBase = contract.explorerUrl;
 

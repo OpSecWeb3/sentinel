@@ -244,7 +244,7 @@ export default function RegistryOverviewPage() {
             </div>
 
             <div>
-              <p className="text-xs text-muted-foreground mb-1">3. Enable the "Require CI Attribution" detection template:</p>
+              <p className="text-xs text-muted-foreground mb-1">3. Enable the &quot;Require CI Attribution&quot; detection template:</p>
               <Button asChild variant="outline" size="sm">
                 <Link href="/registry/templates">$ browse templates</Link>
               </Button>
