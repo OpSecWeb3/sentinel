@@ -10,6 +10,7 @@
   "dependencies": {
     "@sentinel/shared": "workspace:*",
     "@sentinel/db": "workspace:*",
+    "@aws-sdk/client-cloudfront": "^3.0.0",
     "bullmq": "^5.34.0",
     "hono": "^4.7.0",
     "ioredis": "^5.4.2",
