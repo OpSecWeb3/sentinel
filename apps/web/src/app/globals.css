@@ -1,0 +1,176 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 9%;
+    --primary: 142 71% 45%;
+    --primary-foreground: 0 0% 2%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+    --accent: 0 0% 96%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 2%;
+    --warning: 48 96% 53%;
+    --warning-foreground: 0 0% 2%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 142 71% 45%;
+    --radius: 0.25rem;
+  }
+
+  .dark {
+    --background: 0 0% 3%;
+    --foreground: 0 0% 85%;
+    --card: 0 0% 5%;
+    --card-foreground: 0 0% 85%;
+    --popover: 0 0% 5%;
+    --popover-foreground: 0 0% 85%;
+    --primary: 142 71% 45%;
+    --primary-foreground: 0 0% 2%;
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 0 0% 85%;
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 50%;
+    --accent: 0 0% 12%;
+    --accent-foreground: 0 0% 85%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 2%;
+    --warning: 48 96% 53%;
+    --warning-foreground: 0 0% 2%;
+    --border: 0 0% 14%;
+    --input: 0 0% 14%;
+    --ring: 142 71% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Terminal cursor blink for active elements */
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  .cursor-blink {
+    animation: blink 1s step-end infinite;
+  }
+
+  .caret-primary {
+    caret-color: hsl(var(--primary));
+  }
+
+  /* Scanline overlay effect - subtle */
+  .scanlines::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.03) 2px,
+      rgba(0, 0, 0, 0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 1;
+  }
+}
+
+@layer utilities {
+  .text-glow {
+    text-shadow: 0 0 8px hsl(var(--primary) / 0.4);
+  }
+
+  .text-glow-strong {
+    text-shadow: 0 0 12px hsl(var(--primary) / 0.6), 0 0 24px hsl(var(--primary) / 0.2);
+  }
+
+  @keyframes animate-in-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes animate-in-zoom {
+    from { transform: scale(0.95); }
+    to { transform: scale(1); }
+  }
+  .animate-in {
+    animation: animate-in-fade 100ms ease-out, animate-in-zoom 100ms ease-out;
+  }
+
+  /* Smooth content fade-in */
+  @keyframes content-ready {
+    from { opacity: 0; transform: translateY(2px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-content-ready {
+    animation: content-ready 200ms ease-out both;
+  }
+
+  /* Stagger children fade-in for lists/grids */
+  .animate-stagger > * {
+    animation: content-ready 200ms ease-out both;
+  }
+  .animate-stagger > *:nth-child(1) { animation-delay: 0ms; }
+  .animate-stagger > *:nth-child(2) { animation-delay: 40ms; }
+  .animate-stagger > *:nth-child(3) { animation-delay: 80ms; }
+  .animate-stagger > *:nth-child(4) { animation-delay: 120ms; }
+  .animate-stagger > *:nth-child(5) { animation-delay: 160ms; }
+  .animate-stagger > *:nth-child(n+6) { animation-delay: 200ms; }
+
+  /* Fade-in-up for scroll-reveal sections */
+  @keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(24px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-in-up {
+    animation: fade-in-up 600ms ease-out both;
+  }
+
+  /* Pulse glow for CTA buttons */
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 8px hsl(var(--primary) / 0.3); }
+    50% { box-shadow: 0 0 20px hsl(var(--primary) / 0.5), 0 0 40px hsl(var(--primary) / 0.15); }
+  }
+  .animate-pulse-glow {
+    animation: pulse-glow 3s ease-in-out infinite;
+  }
+
+  /* Typing cursor */
+  @keyframes typing-cursor {
+    0%, 100% { border-right-color: hsl(var(--primary)); }
+    50% { border-right-color: transparent; }
+  }
+  .typing-cursor {
+    border-right: 2px solid hsl(var(--primary));
+    animation: typing-cursor 1s step-end infinite;
+  }
+
+  /* Gradient text utility */
+  .text-gradient-primary {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(142 71% 60%));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}

@@ -1,0 +1,24 @@
+node_modules
+**/node_modules
+**/dist
+**/.turbo
+
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+
+*.md
+LICENSE
+
+.vscode
+.idea
+*.swp
+*.swo
+
+docker-compose.yml
+docker-compose.*.yml
+
+# Next.js build cache
+apps/web/.next

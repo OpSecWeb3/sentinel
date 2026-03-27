@@ -1,0 +1,3 @@
+{
+  "/(dashboard)/chain/rpc/page": "app/(dashboard)/chain/rpc/page.js"
+}

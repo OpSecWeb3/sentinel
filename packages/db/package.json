@@ -1,0 +1,31 @@
+{
+  "name": "@sentinel/db",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./schema/core": "./schema/core.ts",
+    "./schema/github": "./schema/github.ts",
+    "./schema/release-chain": "./schema/release-chain.ts",
+    "./schema/infra": "./schema/infra.ts",
+    "./schema/chain": "./schema/chain.ts",
+    "./schema/correlation": "./schema/correlation.ts"
+  },
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "migrate": "drizzle-kit migrate",
+    "studio": "drizzle-kit studio",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.38.0",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.30.0",
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  }
+}

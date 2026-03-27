@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentinel Design System</title>
+<style>
+/* ─── Tokens ────────────────────────────────────────────────────── */
+:root {
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(0 0% 9%);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(0 0% 9%);
+  --popover: hsl(0 0% 100%);
+  --primary: hsl(142 71% 45%);
+  --primary-foreground: hsl(0 0% 2%);
+  --secondary: hsl(0 0% 96%);
+  --secondary-foreground: hsl(0 0% 9%);
+  --muted: hsl(0 0% 96%);
+  --muted-foreground: hsl(0 0% 45%);
+  --accent: hsl(0 0% 96%);
+  --accent-foreground: hsl(0 0% 9%);
+  --destructive: hsl(0 84% 60%);
+  --destructive-foreground: hsl(0 0% 98%);
+  --success: hsl(142 71% 45%);
+  --warning: hsl(48 96% 53%);
+  --border: hsl(0 0% 90%);
+  --input: hsl(0 0% 90%);
+  --ring: hsl(142 71% 45%);
+  --radius: 0.25rem;
+}
+.dark {
+  --background: hsl(0 0% 3%);
+  --foreground: hsl(0 0% 85%);
+  --card: hsl(0 0% 5%);
+  --card-foreground: hsl(0 0% 85%);
+  --popover: hsl(0 0% 5%);
+  --primary: hsl(142 71% 45%);
+  --primary-foreground: hsl(0 0% 2%);
+  --secondary: hsl(0 0% 10%);
+  --secondary-foreground: hsl(0 0% 85%);
+  --muted: hsl(0 0% 10%);
+  --muted-foreground: hsl(0 0% 50%);
+  --accent: hsl(0 0% 12%);
+  --accent-foreground: hsl(0 0% 85%);
+  --destructive: hsl(0 72% 51%);
+  --destructive-foreground: hsl(0 0% 98%);
+  --success: hsl(142 71% 45%);
+  --warning: hsl(48 96% 53%);
+  --border: hsl(0 0% 14%);
+  --input: hsl(0 0% 14%);
+  --ring: hsl(142 71% 45%);
+}
+
+/* ─── Reset & Base ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', ui-monospace, monospace;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 1.5;
+  transition: background 200ms, color 200ms;
+}
+a { color: var(--primary); text-decoration: none; }
+
+/* ─── Layout ────────────────────────────────────────────────────── */
+.container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+.header {
+  border-bottom: 1px solid var(--border);
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky; top: 0; z-index: 50;
+  background: var(--background);
+}
+.header-logo {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.logo-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 8px hsl(142 71% 45% / 0.6);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 4px hsl(142 71% 45% / 0.4); }
+  50% { box-shadow: 0 0 12px hsl(142 71% 45% / 0.8); }
+}
+.nav { display: flex; gap: 4px; }
+.nav-link {
+  padding: 4px 12px; font-size: 12px; border-radius: 2px;
+  color: var(--muted-foreground); cursor: pointer; border: none;
+  background: transparent; font-family: inherit;
+  transition: color 150ms, background 150ms;
+}
+.nav-link:hover, .nav-link.active {
+  color: var(--foreground); background: var(--secondary);
+}
+.nav-link.active { color: var(--primary); }
+.theme-toggle {
+  padding: 6px 14px; font-size: 12px; font-family: inherit;
+  border: 1px solid var(--border); border-radius: 2px;
+  background: transparent; color: var(--foreground);
+  cursor: pointer; transition: border-color 150ms;
+}
+.theme-toggle:hover { border-color: var(--primary); color: var(--primary); }
+
+.section {
+  padding: 48px 0;
+  border-bottom: 1px solid var(--border);
+}
+.section:last-child { border-bottom: none; }
+.section-header {
+  display: flex; align-items: baseline; gap: 12px;
+  margin-bottom: 32px;
+}
+.section-title {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted-foreground);
+}
+.section-divider {
+  flex: 1; height: 1px; background: var(--border);
+}
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+
+/* ─── Color Swatches ────────────────────────────────────────────── */
+.swatch-group { display: flex; flex-direction: column; gap: 8px; }
+.swatch-group-label {
+  font-size: 11px; color: var(--muted-foreground); letter-spacing: 0.05em;
+  text-transform: uppercase; margin-bottom: 4px;
+}
+.swatch {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.swatch-color {
+  width: 32px; height: 32px; border-radius: 2px;
+  flex-shrink: 0; border: 1px solid var(--border);
+}
+.swatch-info { flex: 1; }
+.swatch-name { font-size: 12px; font-weight: 500; }
+.swatch-value { font-size: 11px; color: var(--muted-foreground); }
+
+/* ─── Typography ────────────────────────────────────────────────── */
+.type-row {
+  display: flex; align-items: baseline; gap: 24px;
+  padding: 12px 0; border-bottom: 1px solid var(--border);
+}
+.type-row:first-child { border-top: 1px solid var(--border); }
+.type-label { width: 120px; font-size: 11px; color: var(--muted-foreground); flex-shrink: 0; }
+.type-sample { flex: 1; }
+.type-meta { font-size: 11px; color: var(--muted-foreground); white-space: nowrap; }
+
+/* ─── Spacing ───────────────────────────────────────────────────── */
+.spacing-row {
+  display: flex; align-items: center; gap: 16px;
+  padding: 8px 0;
+}
+.spacing-bar-wrap { flex: 1; }
+.spacing-bar {
+  height: 24px; background: hsl(142 71% 45% / 0.15);
+  border: 1px solid hsl(142 71% 45% / 0.3);
+  border-radius: 1px;
+  position: relative;
+}
+.spacing-bar::after {
+  content: attr(data-label);
+  position: absolute; left: 8px; top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px; color: var(--primary);
+}
+.spacing-label { width: 60px; font-size: 12px; color: var(--muted-foreground); }
+.spacing-px { width: 50px; font-size: 12px; text-align: right; color: var(--muted-foreground); }
+
+/* ─── Radius ────────────────────────────────────────────────────── */
+.radius-demo {
+  padding: 32px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border);
+  flex-direction: column; gap: 8px;
+}
+.radius-box {
+  width: 80px; height: 48px;
+  background: var(--secondary);
+  border: 1px solid var(--border);
+}
+.radius-label { font-size: 11px; color: var(--muted-foreground); }
+
+/* ─── Buttons ───────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 6px; font-family: inherit; font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: all 150ms ease-out;
+  white-space: nowrap; border: 1px solid transparent;
+}
+.btn-default {
+  background: var(--primary); color: var(--primary-foreground);
+  border-color: var(--primary); padding: 8px 16px; border-radius: 2px;
+}
+.btn-default:hover { background: hsl(142 71% 45% / 0.8); }
+.btn-outline {
+  background: transparent; color: var(--foreground);
+  border-color: var(--border); padding: 8px 16px; border-radius: 2px;
+}
+.btn-outline:hover { background: var(--muted); }
+.btn-ghost {
+  background: transparent; color: var(--foreground);
+  border-color: transparent; padding: 8px 16px; border-radius: 2px;
+}
+.btn-ghost:hover { background: var(--accent); }
+.btn-destructive {
+  background: var(--destructive); color: var(--destructive-foreground);
+  border-color: var(--destructive); padding: 8px 16px; border-radius: 2px;
+}
+.btn-destructive:hover { background: hsl(0 84% 60% / 0.8); }
+.btn-sm { padding: 4px 12px; font-size: 12px; }
+.btn-lg { padding: 12px 24px; font-size: 14px; }
+.btn-icon { padding: 8px; border-radius: 2px; }
+.btn-cta {
+  background: var(--primary); color: var(--primary-foreground);
+  border-color: var(--primary); padding: 10px 24px; border-radius: 2px;
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(142 71% 45% / 0.3), 0 0 8px 0 hsl(142 71% 45% / 0.15); }
+  50% { box-shadow: 0 0 0 4px hsl(142 71% 45% / 0.1), 0 0 16px 4px hsl(142 71% 45% / 0.1); }
+}
+.btn-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* ─── Badges ────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: inherit; font-size: 11px; font-weight: 500;
+  padding: 2px 8px; border-radius: 9999px; border: 1px solid transparent;
+}
+.badge-default { background: var(--primary); color: var(--primary-foreground); }
+.badge-secondary { background: var(--secondary); color: var(--secondary-foreground); border-color: var(--border); }
+.badge-outline { background: transparent; color: var(--foreground); border-color: var(--border); }
+.badge-destructive { background: var(--destructive); color: var(--destructive-foreground); }
+.badge-success { background: var(--success); color: var(--primary-foreground); }
+.badge-warning { background: var(--warning); color: hsl(0 0% 2%); }
+.badge-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+/* ─── Card ──────────────────────────────────────────────────────── */
+.card {
+  background: var(--card); color: var(--card-foreground);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.card-header { padding: 16px; border-bottom: 1px solid var(--border); }
+.card-title { font-size: 13px; font-weight: 600; letter-spacing: 0.05em; }
+.card-desc { font-size: 12px; color: var(--muted-foreground); margin-top: 4px; }
+.card-body { padding: 16px; }
+.card-footer {
+  padding: 12px 16px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12px; color: var(--muted-foreground);
+}
+
+/* ─── Inputs ────────────────────────────────────────────────────── */
+.input-wrap {
+  display: flex; align-items: center;
+  border: 1px solid var(--border); border-radius: 2px;
+  padding: 0 12px; transition: border-color 150ms;
+  background: var(--background);
+}
+.input-wrap:focus-within { border-color: var(--primary); }
+.input-wrap input {
+  background: transparent; border: none; outline: none;
+  font-family: inherit; font-size: 13px; color: var(--foreground);
+  padding: 8px 0; width: 100%;
+  caret-color: var(--primary);
+}
+.input-wrap input::placeholder { color: var(--muted-foreground); }
+.input-icon { color: var(--muted-foreground); font-size: 13px; margin-right: 8px; }
+
+/* ─── Nav Tabs ──────────────────────────────────────────────────── */
+.tabs { display: flex; border-bottom: 1px solid var(--border); gap: 0; overflow-x: auto; }
+.tab {
+  padding: 8px 16px; font-size: 12px; font-family: inherit;
+  background: transparent; border: none; cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--muted-foreground); white-space: nowrap;
+  transition: color 150ms, border-color 150ms;
+}
+.tab:hover { color: var(--foreground); }
+.tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+/* ─── Table ─────────────────────────────────────────────────────── */
+.table-wrap { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead { background: var(--secondary); }
+th {
+  padding: 8px 12px; text-align: left; font-size: 11px;
+  color: var(--muted-foreground); font-weight: 500;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+td {
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+  color: var(--foreground);
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--accent); }
+.mono { font-family: inherit; color: var(--muted-foreground); font-size: 11px; }
+
+/* ─── Alert / Status Row ─────────────────────────────────────────── */
+.alert-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; border: 1px solid var(--border);
+  border-radius: 2px; margin-bottom: 8px;
+  font-size: 12px;
+}
+.alert-row.critical { border-left: 3px solid var(--destructive); }
+.alert-row.warning  { border-left: 3px solid var(--warning); }
+.alert-row.ok       { border-left: 3px solid var(--success); }
+.alert-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+}
+.dot-critical { background: var(--destructive); }
+.dot-warning  { background: var(--warning); }
+.dot-ok       { background: var(--success); box-shadow: 0 0 6px hsl(142 71% 45% / 0.5); }
+.alert-content { flex: 1; }
+.alert-title { font-weight: 500; }
+.alert-meta { color: var(--muted-foreground); margin-top: 2px; }
+.alert-time { color: var(--muted-foreground); font-size: 11px; white-space: nowrap; }
+
+/* ─── Filter Chips ───────────────────────────────────────────────── */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; font-size: 11px; font-family: inherit;
+  border: 1px solid var(--border); border-radius: 2px;
+  cursor: pointer; transition: all 150ms; background: transparent;
+  color: var(--muted-foreground);
+}
+.chip:hover { border-color: hsl(142 71% 45% / 0.3); color: var(--foreground); }
+.chip.active {
+  border-color: hsl(142 71% 45% / 0.5);
+  background: hsl(142 71% 45% / 0.05); color: var(--primary);
+}
+.chip-group { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ─── Animations Preview ─────────────────────────────────────────── */
+.anim-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.anim-card {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 24px 16px; text-align: center;
+}
+.anim-label { font-size: 11px; color: var(--muted-foreground); margin-top: 16px; }
+.anim-name { font-size: 12px; font-weight: 600; margin-top: 4px; }
+.blink { animation: blink 1s step-end infinite; }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+.cursor { display: inline-block; width: 8px; height: 16px; background: var(--primary); }
+.fade-demo { opacity: 0; animation: fade-in 0.6s ease-out forwards; }
+@keyframes fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.stagger-demo { display: flex; flex-direction: column; gap: 4px; }
+.stagger-demo > div {
+  height: 6px; background: var(--primary); opacity: 0; border-radius: 1px;
+  animation: fade-in 0.4s ease-out forwards;
+}
+.stagger-demo > div:nth-child(1) { animation-delay: 0ms; }
+.stagger-demo > div:nth-child(2) { animation-delay: 80ms; }
+.stagger-demo > div:nth-child(3) { animation-delay: 160ms; }
+.stagger-demo > div:nth-child(4) { animation-delay: 240ms; }
+.glow-text { color: var(--primary); text-shadow: 0 0 8px hsl(142 71% 45% / 0.5); font-size: 24px; font-weight: bold; }
+
+/* ─── Effects Preview ────────────────────────────────────────────── */
+.effect-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.effect-card {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 32px 24px; text-align: center; position: relative; overflow: hidden;
+}
+.effect-scanlines::after {
+  content: '';
+  position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px, transparent 2px,
+    rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px
+  );
+}
+.text-gradient {
+  background: linear-gradient(135deg, hsl(142 71% 45%), hsl(142 71% 65%));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text; font-size: 28px; font-weight: bold;
+}
+
+/* ─── Token Table ────────────────────────────────────────────────── */
+.token-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.token-table th {
+  text-align: left; padding: 8px 12px; font-size: 11px;
+  color: var(--muted-foreground); font-weight: 500;
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.token-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.token-table tr:last-child td { border-bottom: none; }
+code {
+  font-family: inherit; font-size: 11px; color: var(--primary);
+  background: hsl(142 71% 45% / 0.08); padding: 2px 6px; border-radius: 2px;
+}
+
+/* ─── Section Pages ──────────────────────────────────────────────── */
+.page { display: none; }
+.page.active { display: block; }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-logo">
+    <div class="logo-dot"></div>
+    sentinel / design system
+  </div>
+  <nav class="nav">
+    <button class="nav-link active" onclick="showPage('colors')">Colors</button>
+    <button class="nav-link" onclick="showPage('typography')">Type</button>
+    <button class="nav-link" onclick="showPage('spacing')">Spacing</button>
+    <button class="nav-link" onclick="showPage('components')">Components</button>
+    <button class="nav-link" onclick="showPage('patterns')">Patterns</button>
+    <button class="nav-link" onclick="showPage('effects')">Effects</button>
+    <button class="nav-link" onclick="showPage('tokens')">Tokens</button>
+  </nav>
+  <button class="theme-toggle" onclick="toggleTheme()">toggle dark</button>
+</header>
+
+<div class="container">
+
+<!-- ══ COLORS ══════════════════════════════════════════════════════ -->
+<div class="page active" id="page-colors">
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Color / Semantic</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="grid-2">
+      <div class="swatch-group">
+        <div class="swatch-group-label">Brand</div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: hsl(142 71% 45%)"></div>
+          <div class="swatch-info">
+            <div class="swatch-name">--primary</div>
+            <div class="swatch-value">hsl(142 71% 45%) · Brand green · CTAs, active states, success</div>
+          </div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: hsl(142 71% 60%)"></div>
+          <div class="swatch-info">
+            <div class="swatch-name">primary / bright</div>
+            <div class="swatch-value">hsl(142 71% 60%) · Gradient terminus, glow highlights</div>
+          </div>
+        </div>
+      </div>
+      <div class="swatch-group">
+        <div class="swatch-group-label">Status</div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: hsl(0 84% 60%)"></div>
+          <div class="swatch-info">
+            <div class="swatch-name">--destructive</div>
+            <div class="swatch-value">hsl(0 84% 60%) · Critical alerts, delete actions</div>
+          </div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: hsl(48 96% 53%)"></div>
+          <div class="swatch-info">
+            <div class="swatch-name">--warning</div>
+            <div class="swatch-value">hsl(48 96% 53%) · Degraded state, non-critical alerts</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Color / Neutrals (dark mode)</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="grid-4">
+      <div class="swatch" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+        <div class="swatch-color" style="background: hsl(0 0% 3%); width: 100%; height: 48px; border: 1px solid hsl(0 0% 14%);"></div>
+        <div><div class="swatch-name">background</div><div class="swatch-value">3%</div></div>
+      </div>
+      <div class="swatch" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+        <div class="swatch-color" style="background: hsl(0 0% 5%); width: 100%; height: 48px; border: 1px solid hsl(0 0% 14%);"></div>
+        <div><div class="swatch-name">card</div><div class="swatch-value">5%</div></div>
+      </div>
+      <div class="swatch" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+        <div class="swatch-color" style="background: hsl(0 0% 10%); width: 100%; height: 48px; border: 1px solid hsl(0 0% 14%);"></div>
+        <div><div class="swatch-name">muted</div><div class="swatch-value">10%</div></div>
+      </div>
+      <div class="swatch" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+        <div class="swatch-color" style="background: hsl(0 0% 14%); width: 100%; height: 48px; border: 1px solid hsl(0 0% 20%);"></div>
+        <div><div class="swatch-name">border</div><div class="swatch-value">14%</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TYPOGRAPHY ══════════════════════════════════════════════════ -->
+<div class="page" id="page-typography">
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Typography / Scale</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">text-xl / bold</div>
+      <div class="type-sample" style="font-size: 20px; font-weight: 700;">Security Event Dashboard</div>
+      <div class="type-meta">20px · 700 · Page titles only</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">text-sm / semibold</div>
+      <div class="type-sample" style="font-size: 14px; font-weight: 600; letter-spacing: 0.05em;">CARD TITLE · COLUMN HEADER</div>
+      <div class="type-meta">14px · 600 · tracking-wider</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">text-sm / medium</div>
+      <div class="type-sample" style="font-size: 14px; font-weight: 500;">Primary body text — event descriptions, table rows, inputs</div>
+      <div class="type-meta">14px · 500 · Primary content</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">text-xs / medium</div>
+      <div class="type-sample" style="font-size: 12px; font-weight: 500;">Filter labels · metadata · badges · timestamps</div>
+      <div class="type-meta">12px · 500 · Dense UI</div>
+    </div>
+    <div class="type-row">
+      <div class="type-label">text-xs / muted</div>
+      <div class="type-sample" style="font-size: 12px; font-weight: 500; color: var(--muted-foreground);">Repository: aztecprotocol/aztec · 2m ago · 142 events</div>
+      <div class="type-meta">12px · muted-foreground</div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Typography / Font Stack</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="card" style="padding: 24px;">
+      <div style="font-size: 13px; color: var(--muted-foreground); margin-bottom: 12px;">font-family</div>
+      <div style="font-size: 15px; line-height: 2;">'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', ui-monospace, SFMono-Regular, monospace</div>
+      <div style="font-size: 12px; color: var(--muted-foreground); margin-top: 16px; line-height: 1.8;">
+        Single font stack across all UI text. Monospace ensures column alignment in tables — critical for log timestamps, counts, and hashes.
+        JetBrains Mono has superior legibility at 12px compared to system-monospace fallbacks.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SPACING ══════════════════════════════════════════════════════ -->
+<div class="page" id="page-spacing">
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Spacing / Scale (4px base)</span>
+      <div class="section-divider"></div>
+    </div>
+    <div style="max-width: 600px;">
+      <div class="spacing-row">
+        <div class="spacing-label">space-1</div>
+        <div class="spacing-bar-wrap"><div class="spacing-bar" style="width: 4px;" data-label=""></div></div>
+        <div class="spacing-px">4px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="spacing-label">space-1.5</div>
+        <div class="spacing-bar-wrap"><div class="spacing-bar" style="width: 6px;" data-label=""></div></div>
+        <div class="spacing-px">6px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="spacing-label">space-2</div>
+        <div class="spacing-bar-wrap"><div class="spacing-bar" style="width: 8px;" data-label=""></div></div>
+        <div class="spacing-px">8px · icon gap</div>
+      </div>
+      <div class="spacing-row">
+        <div class="spacing-label">space-2.5</div>
+        <div class="spacing-bar-wrap"><div class="spacing-bar" style="width: 10px;" data-label=""></div></div>
+        <div class="spacing-px">10px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="spacing-label">space-3</div>
+        <div class="spacing-bar-wrap"><div class="spacing-bar" style="width: 12px;" data-label=""></div></div>
+        <div class="spacing-px">12px · compact</div>
+      </div>
+      <div class="spacing-row">
+        <div class="spacing-label">space-4</div>
+        <div class="spacing-bar-wrap"><div class="spacing-bar" style="width: 16px;" data-label=""></div></div>
+        <div class="spacing-px">16px · standard</div>
+      </div>
+      <div class="spacing-row">
+        <div class="spacing-label">space-5</div>
+        <div class="spacing-bar-wrap"><div class="spacing-bar" style="width: 20px;" data-label=""></div></div>
+        <div class="spacing-px">20px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="spacing-label">space-6</div>
+        <div class="spacing-bar-wrap"><div class="spacing-bar" style="width: 24px;" data-label=""></div></div>
+        <div class="spacing-px">24px · page-level</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Border Radius</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="grid-4">
+      <div class="radius-demo">
+        <div class="radius-box" style="border-radius: 0;"></div>
+        <div class="radius-label">sm · 0px</div>
+        <div class="anim-name">Inputs</div>
+      </div>
+      <div class="radius-demo">
+        <div class="radius-box" style="border-radius: 2px;"></div>
+        <div class="radius-label">md · 2px</div>
+        <div class="anim-name">Dropdowns</div>
+      </div>
+      <div class="radius-demo">
+        <div class="radius-box" style="border-radius: 4px;"></div>
+        <div class="radius-label">lg · 4px</div>
+        <div class="anim-name">Cards</div>
+      </div>
+      <div class="radius-demo">
+        <div class="radius-box" style="border-radius: 9999px; height: 28px;"></div>
+        <div class="radius-label">full · pill</div>
+        <div class="anim-name">Badges only</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ COMPONENTS ══════════════════════════════════════════════════ -->
+<div class="page" id="page-components">
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Buttons</span>
+      <div class="section-divider"></div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+      <div>
+        <div class="swatch-group-label" style="margin-bottom: 8px;">Variants</div>
+        <div class="btn-group">
+          <button class="btn btn-default">Default</button>
+          <button class="btn btn-outline">Outline</button>
+          <button class="btn btn-ghost">Ghost</button>
+          <button class="btn btn-destructive">Destructive</button>
+        </div>
+      </div>
+      <div>
+        <div class="swatch-group-label" style="margin-bottom: 8px;">Sizes</div>
+        <div class="btn-group">
+          <button class="btn btn-default btn-sm">Small</button>
+          <button class="btn btn-default">Default</button>
+          <button class="btn btn-default btn-lg">Large</button>
+        </div>
+      </div>
+      <div>
+        <div class="swatch-group-label" style="margin-bottom: 8px;">CTA (pulse-glow)</div>
+        <div class="btn-group">
+          <button class="btn btn-cta">Configure Alert</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Badges</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="badge-group">
+      <span class="badge badge-default">active</span>
+      <span class="badge badge-secondary">secondary</span>
+      <span class="badge badge-outline">outline</span>
+      <span class="badge badge-destructive">critical</span>
+      <span class="badge badge-success">cleared</span>
+      <span class="badge badge-warning">degraded</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Inputs</span>
+      <div class="section-divider"></div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 12px; max-width: 480px;">
+      <div class="input-wrap">
+        <span class="input-icon">⌕</span>
+        <input type="text" placeholder="Search events…">
+      </div>
+      <div class="input-wrap">
+        <input type="text" placeholder="Repository name or URL">
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Nav Tabs</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="tabs">
+      <button class="tab active">Overview</button>
+      <button class="tab">Events</button>
+      <button class="tab">Detections</button>
+      <button class="tab">Members</button>
+      <button class="tab">Settings</button>
+    </div>
+    <div style="padding: 16px 0; font-size: 12px; color: var(--muted-foreground);">Tab content renders here</div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Card</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">RECENT DETECTIONS</div>
+          <div class="card-desc">Events matching your detection rules</div>
+        </div>
+        <div class="card-body">
+          <div style="font-size: 12px; color: var(--muted-foreground); line-height: 1.8;">
+            3 new detections in the last 24h<br>
+            2 critical · 1 warning
+          </div>
+        </div>
+        <div class="card-footer">
+          <span>Last updated 2m ago</span>
+          <button class="btn btn-ghost btn-sm">View all</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">ALERT CHANNELS</div>
+          <div class="card-desc">Configured notification destinations</div>
+        </div>
+        <div class="card-body">
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
+              <span>Slack · #security-alerts</span>
+              <span class="badge badge-success">active</span>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
+              <span>PagerDuty · P1</span>
+              <span class="badge badge-secondary">paused</span>
+            </div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <span>2 of 3 active</span>
+          <button class="btn btn-outline btn-sm">Configure</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Filter Chips</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="chip-group">
+      <button class="chip active">All severity</button>
+      <button class="chip">Critical</button>
+      <button class="chip">Warning</button>
+      <button class="chip">Info</button>
+      <button class="chip">Module: GitHub</button>
+      <button class="chip">Module: Infra</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ PATTERNS ════════════════════════════════════════════════════ -->
+<div class="page" id="page-patterns">
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Alert / Event List</span>
+      <div class="section-divider"></div>
+    </div>
+    <div>
+      <div class="alert-row critical">
+        <div class="alert-dot dot-critical"></div>
+        <div class="alert-content">
+          <div class="alert-title">Branch protection disabled on main</div>
+          <div class="alert-meta">aztecprotocol/aztec · pushed by @dev-user · rule: branch-protection-required</div>
+        </div>
+        <span class="badge badge-destructive">critical</span>
+        <div class="alert-time">2m ago</div>
+      </div>
+      <div class="alert-row warning">
+        <div class="alert-dot dot-warning"></div>
+        <div class="alert-content">
+          <div class="alert-title">Force push to release branch</div>
+          <div class="alert-meta">org/repo · pushed by @ci-bot · 3 commits overwritten</div>
+        </div>
+        <span class="badge badge-warning">warning</span>
+        <div class="alert-time">18m ago</div>
+      </div>
+      <div class="alert-row ok">
+        <div class="alert-dot dot-ok"></div>
+        <div class="alert-content">
+          <div class="alert-title">New deploy key added</div>
+          <div class="alert-meta">org/infra · added by @admin · key: deploy-prod-01</div>
+        </div>
+        <span class="badge badge-success">cleared</span>
+        <div class="alert-time">1h ago</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Data Table</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Event</th>
+            <th>Repository</th>
+            <th>Actor</th>
+            <th>Severity</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>branch_protection.disabled</td>
+            <td class="mono">aztecprotocol/aztec</td>
+            <td class="mono">@dev-user</td>
+            <td><span class="badge badge-destructive">critical</span></td>
+            <td class="mono">2026-03-27 09:42</td>
+          </tr>
+          <tr>
+            <td>force_push</td>
+            <td class="mono">org/repo</td>
+            <td class="mono">@ci-bot</td>
+            <td><span class="badge badge-warning">warning</span></td>
+            <td class="mono">2026-03-27 09:24</td>
+          </tr>
+          <tr>
+            <td>deploy_key.created</td>
+            <td class="mono">org/infra</td>
+            <td class="mono">@admin</td>
+            <td><span class="badge badge-secondary">info</span></td>
+            <td class="mono">2026-03-27 08:39</td>
+          </tr>
+          <tr>
+            <td>member.added</td>
+            <td class="mono">org/sentinel</td>
+            <td class="mono">@owner</td>
+            <td><span class="badge badge-outline">low</span></td>
+            <td class="mono">2026-03-27 08:01</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══ EFFECTS ═════════════════════════════════════════════════════ -->
+<div class="page" id="page-effects">
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Animations</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="anim-grid">
+      <div class="anim-card">
+        <span class="cursor blink"></span>
+        <div class="anim-label">cursor-blink · 1s step-end</div>
+        <div class="anim-name">Terminal Cursor</div>
+      </div>
+      <div class="anim-card">
+        <div class="stagger-demo">
+          <div style="width: 100%;"></div>
+          <div style="width: 85%;"></div>
+          <div style="width: 70%;"></div>
+          <div style="width: 55%;"></div>
+        </div>
+        <div class="anim-label">animate-stagger · 40ms cascade</div>
+        <div class="anim-name">List Entry</div>
+      </div>
+      <div class="anim-card">
+        <button class="btn btn-cta">Acknowledge</button>
+        <div class="anim-label">pulse-glow · 3s ease-in-out ∞</div>
+        <div class="anim-name">Primary CTA</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Glow & Text Effects</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="effect-grid">
+      <div class="effect-card">
+        <div class="glow-text">SENTINEL</div>
+        <div class="anim-label" style="margin-top: 12px;">text-glow · 0 0 8px primary/0.5</div>
+        <div class="anim-name">Status headings, live indicators</div>
+      </div>
+      <div class="effect-card">
+        <div class="text-gradient" style="font-size: 28px; font-weight: bold;">SENTINEL</div>
+        <div class="anim-label" style="margin-top: 12px;">text-gradient-primary · green to bright-green</div>
+        <div class="anim-name">Hero / marketing only</div>
+      </div>
+      <div class="effect-card effect-scanlines">
+        <div style="font-size: 13px; color: var(--primary); font-weight: 600;">◆ SYSTEM ACTIVE</div>
+        <div style="font-size: 12px; color: var(--muted-foreground); margin-top: 8px;">monitoring 4 repositories</div>
+        <div class="anim-label" style="margin-top: 16px;">scanlines overlay · 3% opacity</div>
+        <div class="anim-name">Terminal / output areas</div>
+      </div>
+      <div class="effect-card">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 8px hsl(142 71% 45% / 0.6); animation: pulse-dot 2s ease-in-out infinite;"></div>
+          <span style="font-size: 13px; font-weight: 600; color: var(--primary);">LIVE</span>
+        </div>
+        <div class="anim-label" style="margin-top: 16px;">dot + glow-shadow · 2s pulse</div>
+        <div class="anim-name">Live feed indicator</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Shadows</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="grid-3">
+      <div style="padding: 24px; border: 1px solid var(--border); border-radius: 2px; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.2);">
+        <div class="anim-name" style="margin-bottom: 4px;">dropdown</div>
+        <div class="radius-label">shadow-lg shadow-black/20</div>
+      </div>
+      <div style="padding: 24px; border: 1px solid var(--border); border-radius: 2px; box-shadow: 0 0 8px hsl(142 71% 45% / 0.4);">
+        <div class="anim-name" style="margin-bottom: 4px;">glow-sm</div>
+        <div class="radius-label">0 0 8px primary/0.4</div>
+      </div>
+      <div style="padding: 24px; border: 1px solid hsl(142 71% 45% / 0.3); border-radius: 2px; box-shadow: 0 0 12px hsl(142 71% 45% / 0.6), 0 0 24px hsl(142 71% 45% / 0.2);">
+        <div class="anim-name" style="margin-bottom: 4px;">glow-md</div>
+        <div class="radius-label">dual-layer primary glow</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TOKENS ══════════════════════════════════════════════════════ -->
+<div class="page" id="page-tokens">
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">CSS Custom Properties</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="table-wrap">
+      <table class="token-table">
+        <thead>
+          <tr><th>Token</th><th>Light</th><th>Dark</th><th>Use</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>--background</code></td><td>hsl(0 0% 100%)</td><td>hsl(0 0% 3%)</td><td>Page background</td></tr>
+          <tr><td><code>--foreground</code></td><td>hsl(0 0% 9%)</td><td>hsl(0 0% 85%)</td><td>Primary text</td></tr>
+          <tr><td><code>--card</code></td><td>hsl(0 0% 100%)</td><td>hsl(0 0% 5%)</td><td>Card surfaces</td></tr>
+          <tr><td><code>--primary</code></td><td colspan="2" style="text-align:center;">hsl(142 71% 45%)</td><td>Brand green — CTAs, active states</td></tr>
+          <tr><td><code>--secondary</code></td><td>hsl(0 0% 96%)</td><td>hsl(0 0% 10%)</td><td>Subtle background fills</td></tr>
+          <tr><td><code>--muted</code></td><td>hsl(0 0% 96%)</td><td>hsl(0 0% 10%)</td><td>Inactive / disabled bg</td></tr>
+          <tr><td><code>--muted-foreground</code></td><td>hsl(0 0% 45%)</td><td>hsl(0 0% 50%)</td><td>Metadata, secondary labels</td></tr>
+          <tr><td><code>--accent</code></td><td>hsl(0 0% 96%)</td><td>hsl(0 0% 12%)</td><td>Hover fills on ghost elements</td></tr>
+          <tr><td><code>--destructive</code></td><td>hsl(0 84% 60%)</td><td>hsl(0 72% 51%)</td><td>Critical alerts, delete</td></tr>
+          <tr><td><code>--success</code></td><td colspan="2" style="text-align:center;">hsl(142 71% 45%)</td><td>Cleared / healthy state</td></tr>
+          <tr><td><code>--warning</code></td><td colspan="2" style="text-align:center;">hsl(48 96% 53%)</td><td>Degraded / non-critical</td></tr>
+          <tr><td><code>--border</code></td><td>hsl(0 0% 90%)</td><td>hsl(0 0% 14%)</td><td>All structural dividers</td></tr>
+          <tr><td><code>--input</code></td><td>hsl(0 0% 90%)</td><td>hsl(0 0% 14%)</td><td>Input borders (same as border)</td></tr>
+          <tr><td><code>--ring</code></td><td colspan="2" style="text-align:center;">hsl(142 71% 45%)</td><td>Focus ring color</td></tr>
+          <tr><td><code>--radius</code></td><td colspan="2" style="text-align:center;">0.25rem (4px)</td><td>Base border radius</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Animation Tokens</span>
+      <div class="section-divider"></div>
+    </div>
+    <div class="table-wrap">
+      <table class="token-table">
+        <thead>
+          <tr><th>Name</th><th>Duration</th><th>Easing</th><th>Use</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>fast</td><td>100ms</td><td>ease-out</td><td>Dropdowns, popovers</td></tr>
+          <tr><td>normal</td><td>150ms</td><td>ease-out</td><td>Color/opacity hover transitions</td></tr>
+          <tr><td>medium</td><td>200ms</td><td>ease-out</td><td>Content entry (content-ready)</td></tr>
+          <tr><td>slow</td><td>600ms</td><td>ease-out</td><td>Scroll-reveal (fade-in-up)</td></tr>
+          <tr><td>ambient</td><td>1–3s</td><td>ease-in-out / step-end</td><td>Blink, pulse-glow</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+</div><!-- /container -->
+
+<script>
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function toggleTheme() {
+  document.documentElement.classList.toggle('dark');
+}
+
+// Tab interactivity
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', function() {
+    this.closest('.tabs').querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    this.classList.add('active');
+  });
+});
+
+// Chip interactivity
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.addEventListener('click', function() {
+    this.classList.toggle('active');
+  });
+});
+
+// Re-trigger stagger animations on tab switch
+document.querySelectorAll('.nav-link').forEach(link => {
+  link.addEventListener('click', function() {
+    document.querySelectorAll('.stagger-demo > div, .fade-demo').forEach(el => {
+      el.style.animation = 'none';
+      el.offsetHeight; // reflow
+      el.style.animation = '';
+    });
+  });
+});
+</script>
+</body>
+</html>

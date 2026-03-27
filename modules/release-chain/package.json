@@ -1,0 +1,26 @@
+{
+  "name": "@sentinel/module-release-chain",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sentinel/shared": "workspace:*",
+    "@sentinel/db": "workspace:*",
+    "bullmq": "^5.34.0",
+    "hono": "^4.7.0",
+    "ioredis": "^5.4.2",
+    "zod": "^3.24.0",
+    "minimatch": "^10.0.0",
+    "@sigstore/verify": "^2.1.0",
+    "@sigstore/bundle": "^3.1.0",
+    "@sigstore/protobuf-specs": "^0.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  }
+}

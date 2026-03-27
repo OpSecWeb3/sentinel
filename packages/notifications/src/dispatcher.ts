@@ -1,0 +1,110 @@
+/**
+ * Alert dispatch — routes an alert to its configured notification channels.
+ * Tracks per-channel success/failure. Ported from ChainAlert.
+ */
+import { decrypt } from '@sentinel/shared/crypto';
+import { logger as rootLogger, type Logger } from '@sentinel/shared/logger';
+import { sendSlackMessage, type SlackAlertPayload } from './slack.js';
+import { sendEmailNotification } from './email.js';
+import { sendWebhookNotification } from './webhook.js';
+
+export interface NotificationResult {
+  channelId: string;
+  type: string;
+  status: 'sent' | 'failed';
+  error?: string;
+  statusCode?: number;
+  responseTimeMs?: number;
+}
+
+export interface ChannelRow {
+  id: string;
+  type: string;
+  config: Record<string, unknown>;
+}
+
+/**
+ * Dispatch an alert payload to a list of notification channels.
+ * Returns per-channel results. Throws only if ALL channels fail.
+ */
+export async function dispatchAlert(
+  channels: ChannelRow[],
+  alert: SlackAlertPayload,
+  slackBotToken?: string | null,
+  slackChannelId?: string | null,
+  formatBlocks?: (alert: SlackAlertPayload) => object[],
+  log?: Logger,
+): Promise<NotificationResult[]> {
+  const _log = log ?? rootLogger.child({ component: 'dispatcher' });
+  const results: NotificationResult[] = [];
+
+  // Direct Slack (bot token + channel ID from detection config)
+  if (slackBotToken && slackChannelId) {
+    const start = performance.now();
+    try {
+      await sendSlackMessage(slackBotToken, slackChannelId, alert, formatBlocks);
+      const elapsed = Math.round(performance.now() - start);
+      results.push({ channelId: slackChannelId, type: 'slack', status: 'sent', responseTimeMs: elapsed });
+    } catch (err) {
+      const elapsed = Math.round(performance.now() - start);
+      results.push({
+        channelId: slackChannelId,
+        type: 'slack',
+        status: 'failed',
+        error: err instanceof Error ? err.message : String(err),
+        responseTimeMs: elapsed,
+      });
+    }
+  }
+
+  // Configured channels
+  for (const channel of channels) {
+    const start = performance.now();
+    try {
+      switch (channel.type) {
+        case 'email': {
+          const recipients = (
+            channel.config.recipients ?? (channel.config.to ? [channel.config.to] : [])
+          ) as string[];
+          if (!recipients.length) throw new Error('Email channel missing recipients');
+          await sendEmailNotification(recipients, alert);
+          break;
+        }
+        case 'webhook': {
+          const url = channel.config.url as string;
+          const encryptedSecret = channel.config.secret as string;
+          if (!url || !encryptedSecret) throw new Error('Webhook channel missing url or secret');
+          const secret = decrypt(encryptedSecret);
+          await sendWebhookNotification(
+            { url, secret, headers: channel.config.headers as Record<string, string> },
+            { alert },
+          );
+          break;
+        }
+        default:
+          _log.warn({ channelType: channel.type, channelId: channel.id }, 'Unknown channel type');
+          continue;
+      }
+      const elapsed = Math.round(performance.now() - start);
+      results.push({ channelId: channel.id, type: channel.type, status: 'sent', responseTimeMs: elapsed });
+    } catch (err) {
+      const elapsed = Math.round(performance.now() - start);
+      results.push({
+        channelId: channel.id,
+        type: channel.type,
+        status: 'failed',
+        error: err instanceof Error ? err.message : String(err),
+        responseTimeMs: elapsed,
+      });
+    }
+  }
+
+  // Throw if ALL channels failed (triggers BullMQ retry)
+  const allFailed = results.length > 0 && results.every((r) => r.status === 'failed');
+  if (allFailed) {
+    const errors = results.map((r) => `${r.type}: ${r.error}`).join('; ');
+    throw new Error(`All notification channels failed: ${errors}`);
+  }
+
+  return results;
+}

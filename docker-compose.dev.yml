@@ -1,0 +1,84 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sentinel-postgres
+    environment:
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: sentinel
+      POSTGRES_DB: sentinel
+    ports:
+      - "5434:5432"
+    volumes:
+      - sentinel-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: sentinel-redis
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: sentinel-api
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql://sentinel:sentinel@postgres:5432/sentinel
+      - REDIS_URL=redis://redis:6379
+      - PORT=4000
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - full
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: sentinel-worker
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql://sentinel:sentinel@postgres:5432/sentinel
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - full
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: sentinel-web
+    env_file: .env
+    environment:
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    profiles:
+      - full
+
+volumes:
+  sentinel-pgdata:

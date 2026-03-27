@@ -1,0 +1,3 @@
+{
+  "/(dashboard)/chain/page": "app/(dashboard)/chain/page.js"
+}

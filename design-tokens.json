@@ -1,0 +1,200 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "meta": {
+    "name": "Sentinel Design System",
+    "version": "1.0.0",
+    "aesthetic": "terminal-security",
+    "description": "Developer-first security monitoring UI. Monospace throughout, precision-tuned for dense information display."
+  },
+
+  "color": {
+    "primitive": {
+      "green": {
+        "400": { "value": "hsl(142, 71%, 60%)", "comment": "Bright accent green" },
+        "500": { "value": "hsl(142, 71%, 45%)", "comment": "Brand primary — alert clear / success" },
+        "500-dim": { "value": "hsl(142, 71%, 45%, 0.1)", "comment": "Primary tint for backgrounds" },
+        "500-glow": { "value": "hsl(142, 71%, 45%, 0.4)", "comment": "Text glow, focus ring halo" }
+      },
+      "red": {
+        "500": { "value": "hsl(0, 84%, 60%)", "comment": "Destructive / critical alert" },
+        "500-dark": { "value": "hsl(0, 72%, 51%)", "comment": "Destructive on dark backgrounds" }
+      },
+      "amber": {
+        "400": { "value": "hsl(48, 96%, 53%)", "comment": "Warning / degraded state" }
+      },
+      "neutral": {
+        "0":   { "value": "hsl(0, 0%, 100%)" },
+        "2":   { "value": "hsl(0, 0%, 98%)" },
+        "3":   { "value": "hsl(0, 0%, 96%)" },
+        "5":   { "value": "hsl(0, 0%, 5%)" },
+        "9":   { "value": "hsl(0, 0%, 9%)" },
+        "10":  { "value": "hsl(0, 0%, 10%)" },
+        "12":  { "value": "hsl(0, 0%, 12%)" },
+        "14":  { "value": "hsl(0, 0%, 14%)" },
+        "45":  { "value": "hsl(0, 0%, 45%)" },
+        "50":  { "value": "hsl(0, 0%, 50%)" },
+        "85":  { "value": "hsl(0, 0%, 85%)" },
+        "90":  { "value": "hsl(0, 0%, 90%)" }
+      }
+    },
+
+    "semantic": {
+      "light": {
+        "background":          { "value": "{color.primitive.neutral.0}",  "css": "--background" },
+        "foreground":          { "value": "{color.primitive.neutral.9}",  "css": "--foreground" },
+        "card":                { "value": "{color.primitive.neutral.0}",  "css": "--card" },
+        "card-foreground":     { "value": "{color.primitive.neutral.9}",  "css": "--card-foreground" },
+        "popover":             { "value": "{color.primitive.neutral.0}",  "css": "--popover" },
+        "popover-foreground":  { "value": "{color.primitive.neutral.9}",  "css": "--popover-foreground" },
+        "primary":             { "value": "{color.primitive.green.500}",  "css": "--primary" },
+        "primary-foreground":  { "value": "hsl(0, 0%, 2%)",              "css": "--primary-foreground" },
+        "secondary":           { "value": "{color.primitive.neutral.3}",  "css": "--secondary" },
+        "secondary-foreground":{ "value": "{color.primitive.neutral.9}",  "css": "--secondary-foreground" },
+        "muted":               { "value": "{color.primitive.neutral.3}",  "css": "--muted" },
+        "muted-foreground":    { "value": "{color.primitive.neutral.45}", "css": "--muted-foreground" },
+        "accent":              { "value": "{color.primitive.neutral.3}",  "css": "--accent" },
+        "accent-foreground":   { "value": "{color.primitive.neutral.9}",  "css": "--accent-foreground" },
+        "destructive":         { "value": "{color.primitive.red.500}",    "css": "--destructive" },
+        "destructive-foreground": { "value": "{color.primitive.neutral.2}", "css": "--destructive-foreground" },
+        "success":             { "value": "{color.primitive.green.500}",  "css": "--success" },
+        "success-foreground":  { "value": "hsl(0, 0%, 2%)",              "css": "--success-foreground" },
+        "warning":             { "value": "{color.primitive.amber.400}",  "css": "--warning" },
+        "warning-foreground":  { "value": "hsl(0, 0%, 2%)",              "css": "--warning-foreground" },
+        "border":              { "value": "{color.primitive.neutral.90}", "css": "--border" },
+        "input":               { "value": "{color.primitive.neutral.90}", "css": "--input" },
+        "ring":                { "value": "{color.primitive.green.500}",  "css": "--ring" }
+      },
+      "dark": {
+        "background":          { "value": "hsl(0, 0%, 3%)",              "css": "--background" },
+        "foreground":          { "value": "{color.primitive.neutral.85}", "css": "--foreground" },
+        "card":                { "value": "{color.primitive.neutral.5}",  "css": "--card" },
+        "card-foreground":     { "value": "{color.primitive.neutral.85}", "css": "--card-foreground" },
+        "popover":             { "value": "{color.primitive.neutral.5}",  "css": "--popover" },
+        "popover-foreground":  { "value": "{color.primitive.neutral.85}", "css": "--popover-foreground" },
+        "primary":             { "value": "{color.primitive.green.500}",  "css": "--primary" },
+        "primary-foreground":  { "value": "hsl(0, 0%, 2%)",              "css": "--primary-foreground" },
+        "secondary":           { "value": "{color.primitive.neutral.10}", "css": "--secondary" },
+        "secondary-foreground":{ "value": "{color.primitive.neutral.85}", "css": "--secondary-foreground" },
+        "muted":               { "value": "{color.primitive.neutral.10}", "css": "--muted" },
+        "muted-foreground":    { "value": "{color.primitive.neutral.50}", "css": "--muted-foreground" },
+        "accent":              { "value": "{color.primitive.neutral.12}", "css": "--accent" },
+        "accent-foreground":   { "value": "{color.primitive.neutral.85}", "css": "--accent-foreground" },
+        "destructive":         { "value": "{color.primitive.red.500-dark}", "css": "--destructive" },
+        "destructive-foreground": { "value": "{color.primitive.neutral.2}", "css": "--destructive-foreground" },
+        "success":             { "value": "{color.primitive.green.500}",  "css": "--success" },
+        "success-foreground":  { "value": "hsl(0, 0%, 2%)",              "css": "--success-foreground" },
+        "warning":             { "value": "{color.primitive.amber.400}",  "css": "--warning" },
+        "warning-foreground":  { "value": "hsl(0, 0%, 2%)",              "css": "--warning-foreground" },
+        "border":              { "value": "{color.primitive.neutral.14}", "css": "--border" },
+        "input":               { "value": "{color.primitive.neutral.14}", "css": "--input" },
+        "ring":                { "value": "{color.primitive.green.500}",  "css": "--ring" }
+      }
+    }
+  },
+
+  "typography": {
+    "fontFamily": {
+      "mono": {
+        "value": "'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', ui-monospace, SFMono-Regular, monospace",
+        "comment": "Single font stack — used for all UI text. Terminal aesthetic."
+      }
+    },
+    "fontSize": {
+      "xs":  { "value": "0.75rem",   "lineHeight": "1rem",    "comment": "Badges, labels, captions, metadata" },
+      "sm":  { "value": "0.875rem",  "lineHeight": "1.25rem", "comment": "Primary content size — body, table rows, inputs" },
+      "base":{ "value": "1rem",      "lineHeight": "1.5rem",  "comment": "Rarely used — most content is sm or xs" },
+      "xl":  { "value": "1.25rem",   "lineHeight": "1.75rem", "comment": "Section headlines, page titles" }
+    },
+    "fontWeight": {
+      "medium":   { "value": "500", "comment": "Default text weight" },
+      "semibold": { "value": "600", "comment": "Card titles, column headers" },
+      "bold":     { "value": "700", "comment": "Page-level headings" }
+    },
+    "letterSpacing": {
+      "normal":  { "value": "0em" },
+      "wider":   { "value": "0.05em", "comment": "Card titles, section labels — adds formality/precision" }
+    }
+  },
+
+  "spacing": {
+    "1":   { "value": "0.25rem",  "px": "4px" },
+    "1.5": { "value": "0.375rem", "px": "6px" },
+    "2":   { "value": "0.5rem",   "px": "8px",  "comment": "Tight gaps, icon-to-label" },
+    "2.5": { "value": "0.625rem", "px": "10px" },
+    "3":   { "value": "0.75rem",  "px": "12px", "comment": "Component inner padding (compact)" },
+    "4":   { "value": "1rem",     "px": "16px", "comment": "Standard section padding, card body" },
+    "5":   { "value": "1.25rem",  "px": "20px" },
+    "6":   { "value": "1.5rem",   "px": "24px", "comment": "Card header padding, page-level spacing" }
+  },
+
+  "borderRadius": {
+    "sm":   { "value": "0px",    "comment": "Sharp corners — most interactive elements stay square" },
+    "md":   { "value": "2px",    "comment": "Slight softening — inputs, dropdowns" },
+    "lg":   { "value": "4px",    "comment": "Base radius — cards, modals" },
+    "full": { "value": "9999px", "comment": "Pills — badges only" }
+  },
+
+  "shadow": {
+    "dropdown": {
+      "value": "0 10px 15px -3px rgb(0 0 0 / 0.2), 0 4px 6px -4px rgb(0 0 0 / 0.2)",
+      "comment": "Popovers, dropdowns, command palettes"
+    },
+    "glow-sm": {
+      "value": "0 0 8px hsl(142, 71%, 45%, 0.4)",
+      "comment": "Text glow on primary elements"
+    },
+    "glow-md": {
+      "value": "0 0 12px hsl(142, 71%, 45%, 0.6), 0 0 24px hsl(142, 71%, 45%, 0.2)",
+      "comment": "Strong emphasis glow"
+    },
+    "pulse-ring": {
+      "value": "0 0 0 0 hsl(142, 71%, 45%, 0.3), 0 0 16px 2px hsl(142, 71%, 45%, 0.15)",
+      "comment": "Animated glow on primary CTAs"
+    }
+  },
+
+  "breakpoint": {
+    "sm":  { "value": "640px" },
+    "md":  { "value": "768px" },
+    "lg":  { "value": "1024px" },
+    "xl":  { "value": "1280px" },
+    "2xl": { "value": "1536px" }
+  },
+
+  "animation": {
+    "duration": {
+      "fast":    { "value": "100ms" },
+      "normal":  { "value": "150ms", "comment": "Default for color/opacity transitions" },
+      "medium":  { "value": "200ms", "comment": "Content entry animations" },
+      "slow":    { "value": "600ms", "comment": "Fade-in-up scroll reveals" },
+      "ambient": { "value": "3000ms","comment": "Pulse-glow, blink effects" }
+    },
+    "easing": {
+      "default":  { "value": "ease-out",     "comment": "All entry animations" },
+      "ambient":  { "value": "ease-in-out",  "comment": "Pulsing / looping effects" },
+      "step":     { "value": "step-end",     "comment": "Terminal cursor blink" }
+    },
+    "keyframe": {
+      "blink":        "0%,100% { opacity: 1 } 50% { opacity: 0 }",
+      "fade-in":      "from { opacity: 0 } to { opacity: 1 }",
+      "zoom-in":      "from { transform: scale(0.95) } to { transform: scale(1) }",
+      "fade-in-up":   "from { opacity: 0; transform: translateY(24px) } to { opacity: 1; transform: translateY(0) }",
+      "content-ready":"from { opacity: 0; transform: translateY(2px) } to { opacity: 1; transform: translateY(0) }",
+      "pulse-glow":   "0%,100% { box-shadow: 0 0 0 0 hsl(142,71%,45%,0.3) } 50% { box-shadow: 0 0 16px 4px hsl(142,71%,45%,0.15) }"
+    }
+  },
+
+  "effect": {
+    "scanlines": {
+      "description": "Subtle terminal scanline overlay via ::after pseudo-element",
+      "css": "background: repeating-linear-gradient(to bottom, transparent 0px, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px)"
+    },
+    "text-glow": {
+      "sm":   "text-shadow: 0 0 8px hsl(142, 71%, 45%, 0.4)",
+      "lg":   "text-shadow: 0 0 12px hsl(142, 71%, 45%, 0.6), 0 0 24px hsl(142, 71%, 45%, 0.2)"
+    },
+    "gradient-text": {
+      "primary": "background: linear-gradient(135deg, hsl(142,71%,45%), hsl(142,71%,60%)); -webkit-background-clip: text; color: transparent"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "sentinel",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev:api": "pnpm --filter @sentinel/api dev",
+    "dev:worker": "pnpm --filter @sentinel/worker dev",
+    "dev:web": "pnpm --filter @sentinel/web dev",
+    "build": "pnpm -r build",
+    "db:generate": "pnpm --filter @sentinel/db generate",
+    "db:migrate": "pnpm --filter @sentinel/db migrate",
+    "db:studio": "pnpm --filter @sentinel/db studio",
+    "test": "vitest run",
+    "test:unit": "vitest run --project packages/shared",
+    "test:integration": "vitest run --project apps/api",
+    "test:watch": "vitest watch",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "@vitest/coverage-v8": "^3.0.0"
+  }
+}

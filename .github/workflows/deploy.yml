@@ -1,0 +1,132 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Fetch secrets from SSM and build .env
+        run: |
+          fetch_param() {
+            local name="$1"
+            local default="${2:-}"
+            local value
+            value=$(aws ssm get-parameter --name "$name" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null) || value="$default"
+            echo "$value"
+          }
+
+          # Required secrets
+          DATABASE_URL=$(fetch_param /sentinel/production/DATABASE_URL)
+          SESSION_SECRET=$(fetch_param /sentinel/production/SESSION_SECRET)
+          ENCRYPTION_KEY=$(fetch_param /sentinel/production/ENCRYPTION_KEY)
+          ALLOWED_ORIGINS=$(fetch_param /sentinel/production/ALLOWED_ORIGINS)
+          REDIS_PASSWORD=$(fetch_param /shared/production/REDIS_PASSWORD)
+
+          # Optional secrets
+          SLACK_CLIENT_ID=$(fetch_param /sentinel/production/SLACK_CLIENT_ID)
+          SLACK_CLIENT_SECRET=$(fetch_param /sentinel/production/SLACK_CLIENT_SECRET)
+          GITHUB_APP_ID=$(fetch_param /sentinel/production/GITHUB_APP_ID)
+          GITHUB_APP_PRIVATE_KEY=$(fetch_param /sentinel/production/GITHUB_APP_PRIVATE_KEY)
+          GITHUB_APP_WEBHOOK_SECRET=$(fetch_param /sentinel/production/GITHUB_APP_WEBHOOK_SECRET)
+          GITHUB_APP_CLIENT_ID=$(fetch_param /sentinel/production/GITHUB_APP_CLIENT_ID)
+          GITHUB_APP_CLIENT_SECRET=$(fetch_param /sentinel/production/GITHUB_APP_CLIENT_SECRET)
+          SMTP_URL=$(fetch_param /sentinel/production/SMTP_URL)
+          SMTP_FROM=$(fetch_param /sentinel/production/SMTP_FROM "alerts@sentinel.dev")
+
+          cat > /tmp/sentinel.env << 'ENVEOF'
+          NODE_ENV=production
+          PORT=4100
+          ENVEOF
+
+          # Append secrets (using printf to handle multi-line values like PEM keys)
+          {
+            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+            printf 'REDIS_URL=redis://:%s@redis:6379\n' "$REDIS_PASSWORD"
+            printf 'SESSION_SECRET=%s\n' "$SESSION_SECRET"
+            printf 'ENCRYPTION_KEY=%s\n' "$ENCRYPTION_KEY"
+            printf 'ALLOWED_ORIGINS=%s\n' "$ALLOWED_ORIGINS"
+            printf 'SLACK_CLIENT_ID=%s\n' "$SLACK_CLIENT_ID"
+            printf 'SLACK_CLIENT_SECRET=%s\n' "$SLACK_CLIENT_SECRET"
+            printf 'GITHUB_APP_ID=%s\n' "$GITHUB_APP_ID"
+            printf 'GITHUB_APP_PRIVATE_KEY=%s\n' "$GITHUB_APP_PRIVATE_KEY"
+            printf 'GITHUB_APP_WEBHOOK_SECRET=%s\n' "$GITHUB_APP_WEBHOOK_SECRET"
+            printf 'GITHUB_APP_CLIENT_ID=%s\n' "$GITHUB_APP_CLIENT_ID"
+            printf 'GITHUB_APP_CLIENT_SECRET=%s\n' "$GITHUB_APP_CLIENT_SECRET"
+            printf 'SMTP_URL=%s\n' "$SMTP_URL"
+            printf 'SMTP_FROM=%s\n' "$SMTP_FROM"
+          } >> /tmp/sentinel.env
+
+          # Strip leading whitespace from heredoc lines
+          sed -i 's/^[[:space:]]*//' /tmp/sentinel.env
+
+      - name: Ensure repo is cloned on server
+        uses: appleboy/ssh-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GH_APP_TOKEN }}
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          envs: GH_TOKEN
+          script: |
+            if [ ! -d /opt/sentinel/.git ]; then
+              sudo mkdir -p /opt/sentinel
+              sudo chown $USER:$USER /opt/sentinel
+              git clone "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" /opt/sentinel
+            fi
+
+      - name: Copy .env to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          source: /tmp/sentinel.env
+          target: /opt/sentinel/.env
+
+      - name: Deploy to Hetzner
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            cd /opt/sentinel
+            bash scripts/deploy.sh
+
+      - name: Collect logs on failure
+        if: failure()
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            cd /opt/sentinel
+            docker compose -f docker-compose.prod.yml logs --tail=100
