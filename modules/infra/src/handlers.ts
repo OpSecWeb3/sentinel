@@ -81,6 +81,17 @@ function createScanCallbacks(): ScanCallbacks {
       return rows;
     },
 
+    async getProxyStatus(hostId: string): Promise<{ isProxied: boolean; provider: string | null }> {
+      const [host] = await db
+        .select({ orgId: infraHosts.orgId })
+        .from(infraHosts)
+        .where(eq(infraHosts.id, hostId))
+        .limit(1);
+      if (!host) return { isProxied: false, provider: null };
+      const { detectProxyStatus } = await import('./scanner/cdn/proxy-detection.js');
+      return detectProxyStatus(hostId, host.orgId);
+    },
+
     async saveScanResult(result: ScanResult): Promise<void> {
       // Create scan event
       const [scanEvent] = await db

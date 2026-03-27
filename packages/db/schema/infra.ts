@@ -408,3 +408,45 @@ export const infraHttpHeaderChecks = pgTable('infra_http_header_checks', {
 }, (t) => [
   index('idx_infra_http_headers_host').on(t.hostId),
 ]);
+
+// ---------------------------------------------------------------------------
+// CDN provider configurations — org's CDN API credentials for origin monitoring
+// ---------------------------------------------------------------------------
+
+export const infraCdnProviderConfigs = pgTable('infra_cdn_provider_configs', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+
+  provider: text('provider').notNull(),              // 'cloudflare' | 'cloudfront'
+  displayName: text('display_name').notNull(),
+  hostPattern: text('host_pattern'),                 // comma-separated globs, NULL = catch-all
+  encryptedCredentials: text('encrypted_credentials').notNull(),  // AES-GCM encrypted JSON
+  isValid: boolean('is_valid').notNull().default(false),
+  lastValidatedAt: timestamp('last_validated_at', { withTimezone: true }),
+
+  createdAt,
+  updatedAt,
+}, (t) => [
+  uniqueIndex('uq_infra_cdn_provider_pattern').on(t.orgId, t.provider, t.hostPattern),
+  index('idx_infra_cdn_provider_org').on(t.orgId),
+]);
+
+// ---------------------------------------------------------------------------
+// CDN origin records — real origin IPs fetched via CDN provider APIs
+// ---------------------------------------------------------------------------
+
+export const infraCdnOriginRecords = pgTable('infra_cdn_origin_records', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  hostId: uuid('host_id').notNull().references(() => infraHosts.id, { onDelete: 'cascade' }),
+
+  provider: text('provider').notNull(),              // 'cloudflare' | 'cloudfront'
+  recordType: text('record_type').notNull(),         // 'ORIGIN_A' | 'ORIGIN_AAAA' | 'ORIGIN_CNAME'
+  recordValue: text('record_value').notNull(),
+
+  observedAt: timestamp('observed_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt,
+  updatedAt,
+}, (t) => [
+  uniqueIndex('uq_infra_cdn_origin_host_type_value').on(t.hostId, t.recordType, t.recordValue),
+  index('idx_infra_cdn_origin_host').on(t.hostId),
+]);
