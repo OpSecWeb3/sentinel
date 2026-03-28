@@ -16,6 +16,7 @@ import {
 } from '../helpers/setup.js';
 import { RuleEngine } from '@sentinel/shared/rule-engine';
 import type { NormalizedEvent } from '@sentinel/shared/rules';
+import { z } from 'zod';
 
 function makeEvent(orgId: string, overrides: Partial<NormalizedEvent> = {}): NormalizedEvent {
   return {
@@ -31,9 +32,22 @@ function makeEvent(orgId: string, overrides: Partial<NormalizedEvent> = {}): Nor
   };
 }
 
-// A simple evaluator that always matches
+// A simple evaluator that always matches and returns a proper AlertCandidate
 const alwaysMatchEvaluator = {
-  evaluate: () => ({ match: true, title: 'Matched', description: 'test' }),
+  moduleId: 'infra',
+  ruleType: 'infra.cert_expiry',
+  configSchema: z.object({}).passthrough(),
+  evaluate: (ctx: any) => ({
+    orgId: ctx.event.orgId,
+    detectionId: ctx.rule.detectionId,
+    ruleId: ctx.rule.id,
+    eventId: ctx.event.id,
+    severity: 'high',
+    title: 'Matched',
+    description: 'test',
+    triggerType: 'immediate',
+    triggerData: {},
+  }),
 };
 
 describe('Chunk 043 — Host scope filtering', () => {
@@ -62,7 +76,7 @@ describe('Chunk 043 — Host scope filtering', () => {
       config: { daysThreshold: 30 },
     });
 
-    const evaluators = new Map([['infra.cert_expiry', alwaysMatchEvaluator]]);
+    const evaluators = new Map([['infra:infra.cert_expiry', alwaysMatchEvaluator]]);
     const engine = new RuleEngine({ evaluators, redis, db, logger: console as any });
 
     const result = await engine.evaluate(makeEvent(org.id, {
@@ -87,7 +101,7 @@ describe('Chunk 043 — Host scope filtering', () => {
       config: { daysThreshold: 30 },
     });
 
-    const evaluators = new Map([['infra.cert_expiry', alwaysMatchEvaluator]]);
+    const evaluators = new Map([['infra:infra.cert_expiry', alwaysMatchEvaluator]]);
     const engine = new RuleEngine({ evaluators, redis, db, logger: console as any });
 
     // Event with matching host
@@ -127,7 +141,7 @@ describe('Chunk 043 — Host scope filtering', () => {
       config: { daysThreshold: 30 },
     });
 
-    const evaluators = new Map([['infra.cert_expiry', alwaysMatchEvaluator]]);
+    const evaluators = new Map([['infra:infra.cert_expiry', alwaysMatchEvaluator]]);
     const engine = new RuleEngine({ evaluators, redis, db, logger: console as any });
 
     const stagingResult = await engine.evaluate(makeEvent(org.id, {
@@ -161,7 +175,7 @@ describe('Chunk 044 — Resource filter (include/exclude globs)', () => {
       config: { alertOn: 'publicized' }, // no resourceFilter
     });
 
-    const evaluators = new Map([['github.repo_visibility', alwaysMatchEvaluator]]);
+    const evaluators = new Map([['github:github.repo_visibility', alwaysMatchEvaluator]]);
     const engine = new RuleEngine({ evaluators, redis, db, logger: console as any });
 
     const result = await engine.evaluate(makeEvent(org.id, {
@@ -188,7 +202,7 @@ describe('Chunk 044 — Resource filter (include/exclude globs)', () => {
       },
     });
 
-    const evaluators = new Map([['github.repo_visibility', alwaysMatchEvaluator]]);
+    const evaluators = new Map([['github:github.repo_visibility', alwaysMatchEvaluator]]);
     const engine = new RuleEngine({ evaluators, redis, db, logger: console as any });
 
     const matchResult = await engine.evaluate(makeEvent(org.id, {
@@ -222,7 +236,7 @@ describe('Chunk 044 — Resource filter (include/exclude globs)', () => {
       },
     });
 
-    const evaluators = new Map([['github.repo_visibility', alwaysMatchEvaluator]]);
+    const evaluators = new Map([['github:github.repo_visibility', alwaysMatchEvaluator]]);
     const engine = new RuleEngine({ evaluators, redis, db, logger: console as any });
 
     const excludedResult = await engine.evaluate(makeEvent(org.id, {
