@@ -111,7 +111,7 @@ jobs:
         env:
           HOST: ${{ secrets.HETZNER_HOST }}
           USER: ${{ secrets.HETZNER_USER }}
-          GH_TOKEN: ${{ secrets.GH_APP_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           ssh -i ~/.ssh/deploy_key ${USER}@${HOST} "
@@ -132,7 +132,7 @@ jobs:
         env:
           HOST: ${{ secrets.HETZNER_HOST }}
           USER: ${{ secrets.HETZNER_USER }}
-          GH_TOKEN: ${{ secrets.GH_APP_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           ssh -i ~/.ssh/deploy_key ${USER}@${HOST} "
