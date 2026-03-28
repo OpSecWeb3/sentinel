@@ -475,7 +475,7 @@ describe('Org scoping', () => {
 
     // Create org2 directly in DB
     const [org2] = await sql`
-      INSERT INTO organizations (name, slug, invite_secret)
+      INSERT INTO organizations (name, slug, invite_secret_hash)
       VALUES ('Org Two', 'org-two', 'secret-org-2')
       RETURNING id
     `;
@@ -512,7 +512,7 @@ describe('Org scoping', () => {
     // Create org2 user
     const sql = getTestSql();
     const [org2] = await sql`
-      INSERT INTO organizations (name, slug, invite_secret)
+      INSERT INTO organizations (name, slug, invite_secret_hash)
       VALUES ('Org Two', 'org-two', 'secret-org-2')
       RETURNING id
     `;

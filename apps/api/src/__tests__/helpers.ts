@@ -52,6 +52,13 @@ export async function appRequest(
     headers['Cookie'] = opts.cookie;
   }
 
+  // Include CSRF defense header for cookie-authenticated state-changing requests.
+  // The API requires X-Sentinel-Request on all non-GET/HEAD/OPTIONS requests that
+  // carry a session cookie. Tests use session cookies, so we always include it.
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && opts.cookie) {
+    headers['X-Sentinel-Request'] = 'test';
+  }
+
   const init: RequestInit = { method, headers };
 
   if (opts.body) {
