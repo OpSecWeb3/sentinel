@@ -1,6 +1,6 @@
 {
-  "id": "620b5a99-30ef-44cf-b955-5842b48833b7",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "88258675-6d92-4b35-9a5c-9d52287b35fd",
+  "prevId": "620b5a99-30ef-44cf-b955-5842b48833b7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1572,6 +1572,50 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_alerts_event_detection_rule": {
+          "name": "uq_alerts_event_detection_rule",
+          "columns": [
+            {
+              "expression": "event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "detection_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "rule_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "event_id IS NOT NULL AND detection_id IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_alerts_event_correlation": {
+          "name": "uq_alerts_event_correlation",
+          "columns": [
+            {
+              "expression": "event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "trigger_type = 'correlated' AND event_id IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

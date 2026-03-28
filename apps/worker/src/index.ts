@@ -2,7 +2,7 @@ import IORedis from 'ioredis';
 import { env } from '@sentinel/shared/env';
 import { createLogger } from '@sentinel/shared/logger';
 import { initSentry, setupGlobalHandlers } from '@sentinel/shared/sentry';
-import { setSharedConnection, createWorker, getQueue, QUEUE_NAMES, closeAllQueues, type JobHandler } from '@sentinel/shared/queue';
+import { setSharedConnection, setConnectionFactory, createWorker, getQueue, QUEUE_NAMES, closeAllQueues, type JobHandler } from '@sentinel/shared/queue';
 import type { RuleEvaluator } from '@sentinel/shared/rules';
 import { getDb, closeDb } from '@sentinel/db';
 
@@ -48,10 +48,23 @@ async function main() {
     enableReadyCheck: false,
   });
 
+  // Shared connection for Queue instances (producers) and general use.
   setSharedConnection(redis);
 
-  // Init database
-  getDb();
+  // Connection factory for Workers — each Worker gets its own dedicated Redis
+  // connection to avoid head-of-line blocking on the blocking BRPOPLPUSH that
+  // BullMQ workers use. Without this, all workers share one connection and a
+  // slow consumer on one queue can stall job delivery to all other queues.
+  setConnectionFactory(() => new IORedis(config.REDIS_URL, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+  }));
+
+  // Init database — worker processes use a larger pool to support concurrent
+  // BullMQ job processing across all queues (events=15, alerts=15, etc.).
+  // Total concurrency across all workers: EVENTS=15 + ALERTS=15 + MODULE_JOBS=10 + DEFERRED=5 = 45.
+  // Size the pool to match so jobs never block waiting for a connection.
+  getDb(undefined, { maxConnections: 50 });
 
   // ── Register modules ────────────────────────────────────────────────
   const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule, AwsModule];
@@ -100,7 +113,10 @@ async function main() {
   // ── Start workers ───────────────────────────────────────────────────
   const workers: Awaited<ReturnType<typeof createWorker>>[] = [];
   for (const [queueName, handlers] of handlersByQueue) {
-    const concurrency = queueName === QUEUE_NAMES.ALERTS ? 10 : 5;
+    const concurrency =
+      queueName === QUEUE_NAMES.EVENTS ? 15 :
+      queueName === QUEUE_NAMES.ALERTS ? 15 :
+      queueName === QUEUE_NAMES.MODULE_JOBS ? 10 : 5;
     const worker = createWorker(queueName, handlers, { concurrency });
 
     worker.on('completed', (job) => {
@@ -116,59 +132,75 @@ async function main() {
 
   // ── Schedule daily data retention cleanup ───────────────────────────
   const deferredQueue = getQueue(QUEUE_NAMES.DEFERRED);
-  await deferredQueue.add(
-    'platform.data.retention',
-    { policies: [...DEFAULT_RETENTION_POLICIES, ...modules.flatMap(m => m.retentionPolicies ?? [])] },
-    { repeat: { every: 86_400_000 }, jobId: 'daily-retention' },
+
+  // Use upsertJobScheduler to atomically create-or-update repeatable jobs.
+  // This avoids the remove-then-add race that could occur when multiple
+  // replicas start simultaneously during a rolling deploy.
+  await deferredQueue.upsertJobScheduler(
+    'daily-retention',
+    { every: 86_400_000 },
+    {
+      name: 'platform.data.retention',
+      data: { policies: [...DEFAULT_RETENTION_POLICIES, ...modules.flatMap(m => m.retentionPolicies ?? [])] },
+    },
   );
 
   // ── Schedule session garbage collection every hour ─────────────────
-  await deferredQueue.add(
-    'platform.session.cleanup',
-    {},
-    { repeat: { every: 3_600_000 }, jobId: 'session-cleanup' },
+  await deferredQueue.upsertJobScheduler(
+    'session-cleanup',
+    { every: 3_600_000 },
+    { name: 'platform.session.cleanup', data: {} },
   );
 
   // ── Schedule encryption key rotation every 5 minutes ────────────────
-  await deferredQueue.add(
-    'platform.key.rotation',
-    {},
-    { repeat: { every: 300_000 }, jobId: 'key-rotation' },
+  await deferredQueue.upsertJobScheduler(
+    'key-rotation',
+    { every: 300_000 },
+    { name: 'platform.key.rotation', data: {} },
   );
 
   // ── Schedule correlation expiry sweep every 5 minutes ───────────────
-  await deferredQueue.add(
-    'correlation.expiry',
-    {},
-    { repeat: { every: 300_000 }, jobId: 'correlation-expiry-sweep' },
+  await deferredQueue.upsertJobScheduler(
+    'correlation-expiry-sweep',
+    { every: 300_000 },
+    { name: 'correlation.expiry', data: {} },
   );
 
   // ── Schedule RPC usage flush every 5 minutes ────────────────────────
   const moduleJobsQueue = getQueue(QUEUE_NAMES.MODULE_JOBS);
-  await moduleJobsQueue.add(
-    'chain.rpc-usage.flush',
-    {},
-    { repeat: { every: 300_000 }, jobId: 'rpc-usage-flush' },
+  await moduleJobsQueue.upsertJobScheduler(
+    'rpc-usage-flush',
+    { every: 300_000 },
+    { name: 'chain.rpc-usage.flush', data: {} },
   );
 
   // ── Schedule registry artifact poll sweep every 60 seconds ─────
-  await moduleJobsQueue.add(
-    'registry.poll-sweep',
-    {},
-    { repeat: { every: 60_000 }, jobId: 'registry-poll-sweep' },
+  await moduleJobsQueue.upsertJobScheduler(
+    'registry-poll-sweep',
+    { every: 60_000 },
+    { name: 'registry.poll-sweep', data: {} },
   );
 
   // ── Schedule AWS SQS poll sweep every 60 seconds ─────────────────────
-  await moduleJobsQueue.add(
-    'aws.poll-sweep',
-    {},
-    { repeat: { every: 60_000 }, jobId: 'aws-poll-sweep' },
+  await moduleJobsQueue.upsertJobScheduler(
+    'aws-poll-sweep',
+    { every: 60_000 },
+    { name: 'aws.poll-sweep', data: {} },
+  );
+
+  // ── Schedule infra scan/probe loader every 60 seconds ───────────────
+  await moduleJobsQueue.upsertJobScheduler(
+    'infra-schedule-load',
+    { every: 60_000 },
+    { name: 'infra.schedule.load', data: {} },
   );
 
   // ── Graceful shutdown ───────────────────────────────────────────────
   async function shutdown(signal: string) {
     log.info({ signal }, 'Shutting down');
-    await Promise.allSettled(workers.map((w) => w.close()));
+    // closeAllQueues() closes all tracked Workers AND Queues in one pass.
+    // Previously workers were closed here AND inside closeAllQueues(), causing
+    // a double-close that could reject or leave connections dangling.
     await closeAllQueues();
     await redis.quit();
     await closeDb();

@@ -1,3 +1,51 @@
+CREATE TABLE "aws_integrations" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid NOT NULL,
+	"name" text NOT NULL,
+	"account_id" text NOT NULL,
+	"is_org_integration" boolean DEFAULT false NOT NULL,
+	"aws_org_id" text,
+	"role_arn" text,
+	"credentials_encrypted" text,
+	"external_id" text,
+	"sqs_queue_url" text,
+	"sqs_region" text DEFAULT 'us-east-1' NOT NULL,
+	"regions" text[] DEFAULT '{}'::text[] NOT NULL,
+	"enabled" boolean DEFAULT true NOT NULL,
+	"status" text DEFAULT 'active' NOT NULL,
+	"error_message" text,
+	"last_polled_at" timestamp with time zone,
+	"next_poll_at" timestamp with time zone,
+	"poll_interval_seconds" text DEFAULT '60' NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "aws_raw_events" (
+	"id" bigserial PRIMARY KEY NOT NULL,
+	"org_id" uuid NOT NULL,
+	"integration_id" uuid NOT NULL,
+	"cloudtrail_event_id" text NOT NULL,
+	"event_name" text NOT NULL,
+	"event_source" text NOT NULL,
+	"event_version" text,
+	"aws_region" text NOT NULL,
+	"principal_id" text,
+	"user_arn" text,
+	"account_id" text,
+	"user_type" text,
+	"source_ip_address" text,
+	"user_agent" text,
+	"error_code" text,
+	"error_message" text,
+	"resources" jsonb,
+	"raw_payload" jsonb NOT NULL,
+	"event_time" timestamp with time zone NOT NULL,
+	"received_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"promoted" boolean DEFAULT false NOT NULL,
+	"platform_event_id" uuid
+);
+--> statement-breakpoint
 CREATE TABLE "chain_block_cursors" (
 	"network_id" integer PRIMARY KEY NOT NULL,
 	"last_block" bigint NOT NULL,
@@ -24,7 +72,8 @@ CREATE TABLE "chain_contracts" (
 	"implementation" text,
 	"fetched_at" timestamp with time zone,
 	"storage_layout" jsonb,
-	"layout_status" text
+	"layout_status" text,
+	"traits" jsonb DEFAULT '[]'::jsonb NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "chain_detection_templates" (
@@ -151,7 +200,7 @@ CREATE TABLE "audit_log" (
 CREATE TABLE "detections" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"org_id" uuid NOT NULL,
-	"created_by" uuid NOT NULL,
+	"created_by" uuid,
 	"module_id" text NOT NULL,
 	"template_id" text,
 	"name" text NOT NULL,
@@ -192,6 +241,20 @@ CREATE TABLE "notification_channels" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "notification_deliveries" (
+	"id" bigserial PRIMARY KEY NOT NULL,
+	"alert_id" bigint NOT NULL,
+	"channel_id" text NOT NULL,
+	"channel_type" text NOT NULL,
+	"status" text DEFAULT 'pending' NOT NULL,
+	"status_code" integer,
+	"response_time_ms" integer,
+	"error" text,
+	"attempt_count" integer DEFAULT 1 NOT NULL,
+	"sent_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "org_memberships" (
 	"org_id" uuid NOT NULL,
 	"user_id" uuid NOT NULL,
@@ -204,7 +267,8 @@ CREATE TABLE "organizations" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"name" text NOT NULL,
 	"slug" text NOT NULL,
-	"invite_secret" text,
+	"invite_secret_hash" text,
+	"invite_secret_encrypted" text,
 	"webhook_secret_encrypted" text,
 	"notify_key_hash" text,
 	"notify_key_prefix" text,
@@ -224,6 +288,7 @@ CREATE TABLE "rules" (
 	"status" text DEFAULT 'active' NOT NULL,
 	"priority" integer DEFAULT 50 NOT NULL,
 	"action" text DEFAULT 'alert' NOT NULL,
+	"last_triggered_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -251,10 +316,30 @@ CREATE TABLE "users" (
 	"username" text NOT NULL,
 	"email" text NOT NULL,
 	"password_hash" text NOT NULL,
+	"failed_login_attempts" integer DEFAULT 0 NOT NULL,
+	"locked_until" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "users_username_unique" UNIQUE("username"),
 	CONSTRAINT "users_email_unique" UNIQUE("email")
+);
+--> statement-breakpoint
+CREATE TABLE "correlation_rules" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid NOT NULL,
+	"created_by" uuid,
+	"name" text NOT NULL,
+	"description" text,
+	"severity" text DEFAULT 'high' NOT NULL,
+	"status" text DEFAULT 'active' NOT NULL,
+	"config" jsonb NOT NULL,
+	"channel_ids" uuid[] DEFAULT '{}'::uuid[] NOT NULL,
+	"slack_channel_id" text,
+	"slack_channel_name" text,
+	"cooldown_minutes" integer DEFAULT 0 NOT NULL,
+	"last_triggered_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "github_installations" (
@@ -286,6 +371,30 @@ CREATE TABLE "github_repositories" (
 	"fork" boolean DEFAULT false NOT NULL,
 	"status" text DEFAULT 'active' NOT NULL,
 	"last_synced_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "infra_cdn_origin_records" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"host_id" uuid NOT NULL,
+	"provider" text NOT NULL,
+	"record_type" text NOT NULL,
+	"record_value" text NOT NULL,
+	"observed_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "infra_cdn_provider_configs" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid NOT NULL,
+	"provider" text NOT NULL,
+	"display_name" text NOT NULL,
+	"host_pattern" text,
+	"encrypted_credentials" text NOT NULL,
+	"is_valid" boolean DEFAULT false NOT NULL,
+	"last_validated_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -587,6 +696,7 @@ CREATE TABLE "rc_artifacts" (
 	"github_allowed_workflows" jsonb DEFAULT '[]'::jsonb,
 	"webhook_url" text,
 	"metadata" jsonb DEFAULT '{}'::jsonb,
+	"credentials_encrypted" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -646,6 +756,8 @@ CREATE TABLE "rc_verifications" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+ALTER TABLE "aws_integrations" ADD CONSTRAINT "aws_integrations_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "aws_raw_events" ADD CONSTRAINT "aws_raw_events_integration_id_aws_integrations_id_fk" FOREIGN KEY ("integration_id") REFERENCES "public"."aws_integrations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "chain_block_cursors" ADD CONSTRAINT "chain_block_cursors_network_id_chain_networks_id_fk" FOREIGN KEY ("network_id") REFERENCES "public"."chain_networks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "chain_contracts" ADD CONSTRAINT "chain_contracts_network_id_chain_networks_id_fk" FOREIGN KEY ("network_id") REFERENCES "public"."chain_networks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "chain_org_contracts" ADD CONSTRAINT "chain_org_contracts_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -667,15 +779,20 @@ ALTER TABLE "detections" ADD CONSTRAINT "detections_org_id_organizations_id_fk" 
 ALTER TABLE "detections" ADD CONSTRAINT "detections_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "events" ADD CONSTRAINT "events_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notification_channels" ADD CONSTRAINT "notification_channels_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notification_deliveries" ADD CONSTRAINT "notification_deliveries_alert_id_alerts_id_fk" FOREIGN KEY ("alert_id") REFERENCES "public"."alerts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_memberships" ADD CONSTRAINT "org_memberships_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_memberships" ADD CONSTRAINT "org_memberships_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "rules" ADD CONSTRAINT "rules_detection_id_detections_id_fk" FOREIGN KEY ("detection_id") REFERENCES "public"."detections"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "rules" ADD CONSTRAINT "rules_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "slack_installations" ADD CONSTRAINT "slack_installations_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "slack_installations" ADD CONSTRAINT "slack_installations_installed_by_users_id_fk" FOREIGN KEY ("installed_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "correlation_rules" ADD CONSTRAINT "correlation_rules_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "correlation_rules" ADD CONSTRAINT "correlation_rules_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "github_installations" ADD CONSTRAINT "github_installations_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "github_repositories" ADD CONSTRAINT "github_repositories_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "github_repositories" ADD CONSTRAINT "github_repositories_installation_id_github_installations_id_fk" FOREIGN KEY ("installation_id") REFERENCES "public"."github_installations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "infra_cdn_origin_records" ADD CONSTRAINT "infra_cdn_origin_records_host_id_infra_hosts_id_fk" FOREIGN KEY ("host_id") REFERENCES "public"."infra_hosts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "infra_cdn_provider_configs" ADD CONSTRAINT "infra_cdn_provider_configs_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "infra_certificates" ADD CONSTRAINT "infra_certificates_host_id_infra_hosts_id_fk" FOREIGN KEY ("host_id") REFERENCES "public"."infra_hosts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "infra_ct_log_entries" ADD CONSTRAINT "infra_ct_log_entries_host_id_infra_hosts_id_fk" FOREIGN KEY ("host_id") REFERENCES "public"."infra_hosts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "infra_dns_changes" ADD CONSTRAINT "infra_dns_changes_host_id_infra_hosts_id_fk" FOREIGN KEY ("host_id") REFERENCES "public"."infra_hosts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -705,6 +822,13 @@ ALTER TABLE "rc_ci_notifications" ADD CONSTRAINT "rc_ci_notifications_org_id_org
 ALTER TABLE "rc_ci_notifications" ADD CONSTRAINT "rc_ci_notifications_matched_artifact_event_id_rc_artifact_events_id_fk" FOREIGN KEY ("matched_artifact_event_id") REFERENCES "public"."rc_artifact_events"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "rc_verifications" ADD CONSTRAINT "rc_verifications_artifact_id_rc_artifacts_id_fk" FOREIGN KEY ("artifact_id") REFERENCES "public"."rc_artifacts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "rc_verifications" ADD CONSTRAINT "rc_verifications_version_id_rc_artifact_versions_id_fk" FOREIGN KEY ("version_id") REFERENCES "public"."rc_artifact_versions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "idx_aws_integration_org" ON "aws_integrations" USING btree ("org_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_aws_integration_account" ON "aws_integrations" USING btree ("org_id","account_id");--> statement-breakpoint
+CREATE INDEX "idx_aws_raw_org" ON "aws_raw_events" USING btree ("org_id");--> statement-breakpoint
+CREATE INDEX "idx_aws_raw_integration" ON "aws_raw_events" USING btree ("integration_id");--> statement-breakpoint
+CREATE INDEX "idx_aws_raw_received_at" ON "aws_raw_events" USING btree ("received_at");--> statement-breakpoint
+CREATE INDEX "idx_aws_raw_event_name" ON "aws_raw_events" USING btree ("event_name");--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_aws_raw_cloudtrail_id" ON "aws_raw_events" USING btree ("integration_id","cloudtrail_event_id");--> statement-breakpoint
 CREATE INDEX "idx_chain_container_metrics_name_time" ON "chain_container_metrics" USING btree ("container_name","recorded_at");--> statement-breakpoint
 CREATE INDEX "idx_chain_container_metrics_time" ON "chain_container_metrics" USING btree ("recorded_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_chain_contracts_network_address" ON "chain_contracts" USING btree ("network_id","address");--> statement-breakpoint
@@ -714,7 +838,7 @@ CREATE UNIQUE INDEX "uq_chain_org_rpc_configs_org_network" ON "chain_org_rpc_con
 CREATE INDEX "idx_chain_org_rpc_configs_org" ON "chain_org_rpc_configs" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_chain_rpc_usage_org_bucket" ON "chain_rpc_usage_hourly" USING btree ("org_id","bucket");--> statement-breakpoint
 CREATE INDEX "idx_chain_rpc_usage_bucket" ON "chain_rpc_usage_hourly" USING btree ("bucket");--> statement-breakpoint
-CREATE INDEX "idx_chain_snapshots_rule" ON "chain_state_snapshots" USING btree ("rule_id");--> statement-breakpoint
+CREATE INDEX "idx_chain_snapshots_rule_time" ON "chain_state_snapshots" USING btree ("rule_id","polled_at");--> statement-breakpoint
 CREATE INDEX "idx_chain_snapshots_address_slot" ON "chain_state_snapshots" USING btree ("address","slot") WHERE slot IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "idx_chain_snapshots_triggered" ON "chain_state_snapshots" USING btree ("detection_id","polled_at") WHERE triggered = true;--> statement-breakpoint
 CREATE INDEX "idx_alerts_org" ON "alerts" USING btree ("org_id");--> statement-breakpoint
@@ -727,14 +851,23 @@ CREATE INDEX "idx_detections_status" ON "detections" USING btree ("status") WHER
 CREATE INDEX "idx_events_org_module" ON "events" USING btree ("org_id","module_id");--> statement-breakpoint
 CREATE INDEX "idx_events_type" ON "events" USING btree ("event_type");--> statement-breakpoint
 CREATE INDEX "idx_events_external" ON "events" USING btree ("external_id");--> statement-breakpoint
+CREATE INDEX "idx_notif_deliveries_alert" ON "notification_deliveries" USING btree ("alert_id");--> statement-breakpoint
+CREATE INDEX "idx_notif_deliveries_status" ON "notification_deliveries" USING btree ("status");--> statement-breakpoint
+CREATE INDEX "idx_notif_deliveries_created" ON "notification_deliveries" USING btree ("created_at");--> statement-breakpoint
 CREATE INDEX "idx_rules_detection" ON "rules" USING btree ("detection_id");--> statement-breakpoint
 CREATE INDEX "idx_rules_org_module" ON "rules" USING btree ("org_id","module_id") WHERE status = 'active';--> statement-breakpoint
 CREATE INDEX "idx_rules_module_type_active" ON "rules" USING btree ("module_id","rule_type") WHERE status = 'active';--> statement-breakpoint
 CREATE INDEX "idx_sessions_expire" ON "sessions" USING btree ("expire");--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_slack_org" ON "slack_installations" USING btree ("org_id");--> statement-breakpoint
+CREATE INDEX "idx_correlation_rules_org" ON "correlation_rules" USING btree ("org_id");--> statement-breakpoint
+CREATE INDEX "idx_correlation_rules_status" ON "correlation_rules" USING btree ("status") WHERE status = 'active';--> statement-breakpoint
 CREATE INDEX "idx_gh_install_org" ON "github_installations" USING btree ("org_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_gh_repo" ON "github_repositories" USING btree ("installation_id","repo_id");--> statement-breakpoint
 CREATE INDEX "idx_gh_repo_org" ON "github_repositories" USING btree ("org_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_infra_cdn_origin_host_type_value" ON "infra_cdn_origin_records" USING btree ("host_id","record_type","record_value");--> statement-breakpoint
+CREATE INDEX "idx_infra_cdn_origin_host" ON "infra_cdn_origin_records" USING btree ("host_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_infra_cdn_provider_pattern" ON "infra_cdn_provider_configs" USING btree ("org_id","provider","host_pattern");--> statement-breakpoint
+CREATE INDEX "idx_infra_cdn_provider_org" ON "infra_cdn_provider_configs" USING btree ("org_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_infra_certs_host_fingerprint" ON "infra_certificates" USING btree ("host_id","fingerprint");--> statement-breakpoint
 CREATE INDEX "idx_infra_certs_host_expiry" ON "infra_certificates" USING btree ("host_id","not_after");--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_infra_ct_host_crtsh" ON "infra_ct_log_entries" USING btree ("host_id","crt_sh_id");--> statement-breakpoint
