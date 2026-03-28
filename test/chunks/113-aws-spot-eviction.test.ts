@@ -14,7 +14,7 @@ import {
   createTestRule,
 } from '../helpers/setup.js';
 import { RuleEngine } from '@sentinel/shared/rule-engine';
-import { z } from 'zod';
+
 import type { NormalizedEvent } from '@sentinel/shared/rules';
 
 function makeAwsEvent(orgId: string, payload: Record<string, unknown>): NormalizedEvent {
@@ -58,7 +58,7 @@ describe('Chunk 113 — AWS spot eviction evaluator', () => {
 
     const evaluators = new Map();
     evaluators.set('aws:aws.spot_eviction', {
-      configSchema: z.object({}).passthrough(),
+      configSchema: { safeParse: () => ({ success: true, data: {} }) },
       evaluate: (ctx: any) => {
         const instanceId = ctx.event.payload?.instanceId as string;
         if (!ctx.rule.config.watchInstanceIds || ctx.rule.config.watchInstanceIds.length === 0) {
@@ -103,7 +103,7 @@ describe('Chunk 113 — AWS spot eviction evaluator', () => {
 
     const evaluators = new Map();
     evaluators.set('aws:aws.spot_eviction', {
-      configSchema: z.object({}).passthrough(),
+      configSchema: { safeParse: () => ({ success: true, data: {} }) },
       evaluate: (ctx: any) => {
         const instanceId = ctx.event.payload?.instanceId as string;
         if (ctx.rule.config.watchInstanceIds?.includes(instanceId)) {
@@ -141,7 +141,7 @@ describe('Chunk 113 — AWS spot eviction evaluator', () => {
 
     const evaluators = new Map();
     evaluators.set('aws:aws.spot_eviction', {
-      configSchema: z.object({}).passthrough(),
+      configSchema: { safeParse: () => ({ success: true, data: {} }) },
       evaluate: (ctx: any) => {
         if (!ctx.rule.config.watchInstanceIds || ctx.rule.config.watchInstanceIds.length === 0) {
           return {

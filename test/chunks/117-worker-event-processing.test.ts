@@ -17,7 +17,7 @@ import {
   createTestEvent,
 } from '../helpers/setup.js';
 import { RuleEngine } from '@sentinel/shared/rule-engine';
-import { z } from 'zod';
+
 
 describe('Chunk 117 — Worker event processing', () => {
   beforeEach(async () => {
@@ -55,7 +55,7 @@ describe('Chunk 117 — Worker event processing', () => {
     // Build evaluator map (stub)
     const evaluators = new Map();
     evaluators.set('github:github.repo_visibility', {
-      configSchema: z.object({}).passthrough(),
+      configSchema: { safeParse: () => ({ success: true, data: {} }) },
       evaluate: (ctx: any) => {
         if (ctx.event.payload?.action === 'publicized') {
           return {
@@ -113,7 +113,7 @@ describe('Chunk 117 — Worker event processing', () => {
 
     const evaluators = new Map();
     evaluators.set('github:github.repo_visibility', {
-      configSchema: z.object({}).passthrough(),
+      configSchema: { safeParse: () => ({ success: true, data: {} }) },
       evaluate: (ctx: any) => {
         return {
           orgId: ctx.event.orgId,
