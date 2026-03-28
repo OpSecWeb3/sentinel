@@ -98,7 +98,7 @@ describe('Chunk 027 — Events list with filters', () => {
 
     const body = await res.json() as any;
     expect(body.data.length).toBe(2);
-    expect(body.total).toBe(5);
+    expect(body.meta.total).toBe(5);
   });
 
   it('should return empty array when no events match', async () => {

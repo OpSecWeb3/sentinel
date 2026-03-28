@@ -266,6 +266,9 @@ import { timingSafeEqual } from '@sentinel/shared/crypto';
 
 app.get('/metrics', async (c) => {
   const metricsToken = process.env.METRICS_TOKEN;
+  if (!metricsToken && process.env.NODE_ENV === 'production') {
+    return c.json({ error: 'METRICS_TOKEN must be configured in production' }, 403);
+  }
   if (metricsToken) {
     const auth = c.req.header('Authorization');
     const expected = `Bearer ${metricsToken}`;

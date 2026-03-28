@@ -167,10 +167,8 @@ describe('Chunk 006 — First-user registration + org creation', () => {
     const body = await res.json() as any;
 
     const sql = getTestSql();
-    const [org] = await sql`SELECT invite_secret, invite_secret_hash, invite_secret_encrypted FROM organizations WHERE id = ${body.org.id}`;
+    const [org] = await sql`SELECT invite_secret_hash, invite_secret_encrypted FROM organizations WHERE id = ${body.org.id}`;
 
-    // Raw invite_secret column should be null (pre-encryption field)
-    expect(org.invite_secret).toBeNull();
     // Hash and encrypted columns should be set
     expect(org.invite_secret_hash).toBeDefined();
     expect(org.invite_secret_hash).not.toBe(body.inviteSecret);

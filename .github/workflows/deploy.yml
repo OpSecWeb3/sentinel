@@ -101,6 +101,19 @@ ENVEOF
             [ -n "$METRICS_TOKEN" ] && printf 'METRICS_TOKEN=%s\n' "$METRICS_TOKEN"
           } >> /tmp/sentinel.env
 
+          # Validate required SSM parameters before SCP
+          REQUIRED_VARS="DATABASE_URL SESSION_SECRET ENCRYPTION_KEY ALLOWED_ORIGINS NEXT_PUBLIC_API_URL REDIS_PASSWORD"
+          MISSING=""
+          for var in $REQUIRED_VARS; do
+            eval "val=\$$var"
+            if [ -z "$val" ]; then
+              MISSING="$MISSING $var"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::Required SSM parameters are empty:$MISSING"
+            exit 1
+          fi
 
       - name: Setup SSH
         run: |
@@ -128,7 +141,9 @@ ENVEOF
         env:
           HOST: ${{ secrets.HETZNER_HOST }}
           USER: ${{ secrets.HETZNER_USER }}
-        run: scp -i ~/.ssh/deploy_key /tmp/sentinel.env ${USER}@${HOST}:/opt/sentinel/.env
+        run: |
+          scp -i ~/.ssh/deploy_key /tmp/sentinel.env ${USER}@${HOST}:/opt/sentinel/.env
+          ssh -i ~/.ssh/deploy_key ${USER}@${HOST} "chmod 600 /opt/sentinel/.env"
 
       - name: Deploy to Hetzner
         env:

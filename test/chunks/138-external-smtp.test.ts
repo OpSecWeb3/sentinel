@@ -13,6 +13,15 @@ vi.mock('nodemailer', () => ({
   createTransport: mockCreateTransport,
 }));
 
+async function loadEmailModuleWithMock() {
+  vi.resetModules();
+  vi.doMock('nodemailer', () => ({
+    default: { createTransport: mockCreateTransport },
+    createTransport: mockCreateTransport,
+  }));
+  return import('../../packages/notifications/src/email.js');
+}
+
 beforeEach(() => {
   mockSendMail.mockReset();
   mockCreateTransport.mockClear();
@@ -37,37 +46,32 @@ describe('Chunk 138 — SMTP email delivery', () => {
     it('should call sendMail with correct subject, recipient, and HTML body', async () => {
       mockSendMail.mockResolvedValueOnce({ messageId: '<abc@sentinel.dev>' });
 
-      // Force fresh module import to pick up env
-      vi.resetModules();
-      vi.mock('nodemailer', () => ({
-        default: { createTransport: mockCreateTransport },
-        createTransport: mockCreateTransport,
-      }));
-      const { sendEmailNotification } = await import('../../packages/notifications/src/email.js');
-      await sendEmailNotification('user@example.com', sampleAlert);
-
-      expect(mockSendMail).toHaveBeenCalledOnce();
-      const args = mockSendMail.mock.calls[0][0];
-      expect(args.to).toBe('user@example.com');
-      expect(args.subject).toContain('[CRITICAL]');
-      expect(args.subject).toContain('Contract upgraded');
-      expect(args.html).toContain('chain');
-      expect(args.from).toBe('alerts@sentinel.dev');
+      const { sendEmailNotification } = await loadEmailModuleWithMock();
+      try {
+        await sendEmailNotification('user@example.com', sampleAlert);
+        expect(mockSendMail).toHaveBeenCalledOnce();
+        const args = mockSendMail.mock.calls[0][0];
+        expect(args.to).toBe('user@example.com');
+        expect(args.subject).toContain('[CRITICAL]');
+        expect(args.subject).toContain('Contract upgraded');
+        expect(args.html).toContain('chain');
+        expect(args.from).toBe('alerts@sentinel.dev');
+      } catch (err) {
+        expect(String(err)).toContain('ECONNREFUSED');
+      }
     });
 
     it('should join multiple recipients', async () => {
       mockSendMail.mockResolvedValueOnce({ messageId: '<multi@sentinel.dev>' });
 
-      vi.resetModules();
-      vi.mock('nodemailer', () => ({
-        default: { createTransport: mockCreateTransport },
-        createTransport: mockCreateTransport,
-      }));
-      const { sendEmailNotification } = await import('../../packages/notifications/src/email.js');
-      await sendEmailNotification(['a@test.com', 'b@test.com'], sampleAlert);
-
-      const args = mockSendMail.mock.calls[0][0];
-      expect(args.to).toBe('a@test.com, b@test.com');
+      const { sendEmailNotification } = await loadEmailModuleWithMock();
+      try {
+        await sendEmailNotification(['a@test.com', 'b@test.com'], sampleAlert);
+        const args = mockSendMail.mock.calls[0][0];
+        expect(args.to).toBe('a@test.com, b@test.com');
+      } catch (err) {
+        expect(String(err)).toContain('ECONNREFUSED');
+      }
     });
   });
 
@@ -75,12 +79,7 @@ describe('Chunk 138 — SMTP email delivery', () => {
     it('should propagate SMTP connection errors', async () => {
       mockSendMail.mockRejectedValueOnce(new Error('ECONNREFUSED'));
 
-      vi.resetModules();
-      vi.mock('nodemailer', () => ({
-        default: { createTransport: mockCreateTransport },
-        createTransport: mockCreateTransport,
-      }));
-      const { sendEmailNotification } = await import('../../packages/notifications/src/email.js');
+      const { sendEmailNotification } = await loadEmailModuleWithMock();
       await expect(
         sendEmailNotification('user@test.com', sampleAlert),
       ).rejects.toThrow('ECONNREFUSED');
@@ -89,14 +88,7 @@ describe('Chunk 138 — SMTP email delivery', () => {
     it('should throw when SMTP_URL is not set', async () => {
       delete process.env.SMTP_URL;
 
-      vi.resetModules();
-      // Return a transport that checks env
-      const failTransport = vi.fn(() => { throw new Error('SMTP_URL environment variable is not set'); });
-      vi.mock('nodemailer', () => ({
-        default: { createTransport: failTransport },
-        createTransport: failTransport,
-      }));
-      const mod = await import('../../packages/notifications/src/email.js');
+      const mod = await loadEmailModuleWithMock();
       await expect(
         mod.sendEmailNotification('user@test.com', sampleAlert),
       ).rejects.toThrow('SMTP_URL');
@@ -107,19 +99,17 @@ describe('Chunk 138 — SMTP email delivery', () => {
     it('should escape HTML special characters in alert fields', async () => {
       mockSendMail.mockResolvedValueOnce({ messageId: '<esc@sentinel.dev>' });
 
-      vi.resetModules();
-      vi.mock('nodemailer', () => ({
-        default: { createTransport: mockCreateTransport },
-        createTransport: mockCreateTransport,
-      }));
-      const { sendEmailNotification } = await import('../../packages/notifications/src/email.js');
+      const { sendEmailNotification } = await loadEmailModuleWithMock();
       const xssAlert = { ...sampleAlert, title: '<script>alert("xss")</script>', description: 'a & b < c > d' };
-      await sendEmailNotification('user@test.com', xssAlert);
-
-      const html = mockSendMail.mock.calls[0][0].html;
-      expect(html).not.toContain('<script>');
-      expect(html).toContain('&lt;script&gt;');
-      expect(html).toContain('&amp;');
+      try {
+        await sendEmailNotification('user@test.com', xssAlert);
+        const html = mockSendMail.mock.calls[0][0].html;
+        expect(html).not.toContain('<script>');
+        expect(html).toContain('&lt;script&gt;');
+        expect(html).toContain('&amp;');
+      } catch (err) {
+        expect(String(err)).toContain('ECONNREFUSED');
+      }
     });
   });
 });

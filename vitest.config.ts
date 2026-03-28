@@ -10,6 +10,24 @@ export default defineConfig({
     pool: 'forks',
     fileParallelism: false,
     reporters: ['default'],
+    coverage: {
+      provider: 'v8',
+      include: [
+        'packages/*/src/**/*.ts',
+        'modules/*/src/**/*.ts',
+        'apps/*/src/**/*.ts',
+      ],
+      exclude: [
+        '**/*.test.ts', '**/*.spec.ts',
+        '**/__tests__/**', '**/dist/**', '**/node_modules/**',
+      ],
+      thresholds: {
+        lines: 50,
+        functions: 50,
+        branches: 40,
+        statements: 50,
+      },
+    },
     include: [
       'packages/*/src/**/__tests__/**/*.test.ts',
       'modules/*/src/**/__tests__/**/*.test.ts',

@@ -38,13 +38,20 @@ describe('Chunk 119 — Worker correlation evaluation', () => {
       VALUES (gen_random_uuid(), ${org.id}, 'Test Sequence', 'high',
         ${JSON.stringify({
           type: 'sequence',
-          moduleId: 'github',
           steps: [
-            { eventType: 'github.repo_visibility', conditions: [] },
-            { eventType: 'github.push', conditions: [] },
+            {
+              name: 'Visibility Change',
+              eventFilter: { moduleId: 'github', eventType: 'github.repo_visibility', conditions: [] },
+              matchConditions: [],
+            },
+            {
+              name: 'Push',
+              eventFilter: { moduleId: 'github', eventType: 'github.push', conditions: [] },
+              matchConditions: [],
+            },
           ],
           windowMinutes: 10,
-          groupBy: 'payload.repository.full_name',
+          correlationKey: [{ field: 'repository.full_name' }],
         })}::jsonb, 'active')
     `;
 
@@ -69,7 +76,7 @@ describe('Chunk 119 — Worker correlation evaluation', () => {
     });
 
     // First step should not produce alert yet
-    expect(result1.alerts).toHaveLength(0);
+    expect(result1.candidates).toHaveLength(0);
 
     // Second step event
     const event2 = await createTestEvent(org.id, {
@@ -90,6 +97,6 @@ describe('Chunk 119 — Worker correlation evaluation', () => {
     });
 
     // Second step should complete the sequence and produce alert
-    expect(result2.alerts.length).toBeGreaterThanOrEqual(1);
+    expect(result2.candidates.length).toBeGreaterThanOrEqual(1);
   });
 });
