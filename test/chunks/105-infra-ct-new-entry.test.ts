@@ -14,6 +14,7 @@ import {
   createTestRule,
 } from '../helpers/setup.js';
 import { RuleEngine } from '@sentinel/shared/rule-engine';
+import { z } from 'zod';
 import type { NormalizedEvent } from '@sentinel/shared/rules';
 
 function makeCTEvent(orgId: string, payload: Record<string, unknown>): NormalizedEvent {
@@ -53,17 +54,28 @@ describe('Chunk 105 — Infra CT new entry evaluator', () => {
     });
 
     const evaluators = new Map();
-    evaluators.set('infra.ct_new_entry', {
-      evaluate: (ev: NormalizedEvent, config: any) => {
-        const domain = ev.payload?.domain as string;
-        const ignorePatterns = config.ignorePatterns ?? [];
+    evaluators.set('infra:infra.ct_new_entry', {
+      configSchema: z.object({}).passthrough(),
+      evaluate: (ctx: any) => {
+        const domain = ctx.event.payload?.domain as string;
+        const ignorePatterns = ctx.rule.config.ignorePatterns ?? [];
 
         // Check if domain matches any ignore pattern
         for (const pattern of ignorePatterns) {
-          if (domain.includes(pattern)) return { match: false };
+          if (domain.includes(pattern)) return null;
         }
 
-        return { match: true, title: `New CT entry: ${domain}`, description: '' };
+        return {
+          orgId: ctx.event.orgId,
+          detectionId: ctx.rule.detectionId,
+          ruleId: ctx.rule.id,
+          eventId: ctx.event.id,
+          severity: 'high',
+          title: `New CT entry: ${domain}`,
+          description: '',
+          triggerType: 'immediate',
+          triggerData: ctx.event.payload,
+        };
       },
     });
 
@@ -91,16 +103,27 @@ describe('Chunk 105 — Infra CT new entry evaluator', () => {
     });
 
     const evaluators = new Map();
-    evaluators.set('infra.ct_new_entry', {
-      evaluate: (ev: NormalizedEvent, config: any) => {
-        const domain = ev.payload?.domain as string;
-        const ignorePatterns = config.ignorePatterns ?? [];
+    evaluators.set('infra:infra.ct_new_entry', {
+      configSchema: z.object({}).passthrough(),
+      evaluate: (ctx: any) => {
+        const domain = ctx.event.payload?.domain as string;
+        const ignorePatterns = ctx.rule.config.ignorePatterns ?? [];
 
         for (const pattern of ignorePatterns) {
-          if (domain.includes(pattern)) return { match: false };
+          if (domain.includes(pattern)) return null;
         }
 
-        return { match: true, title: `New CT entry: ${domain}`, description: '' };
+        return {
+          orgId: ctx.event.orgId,
+          detectionId: ctx.rule.detectionId,
+          ruleId: ctx.rule.id,
+          eventId: ctx.event.id,
+          severity: 'high',
+          title: `New CT entry: ${domain}`,
+          description: '',
+          triggerType: 'immediate',
+          triggerData: ctx.event.payload,
+        };
       },
     });
 

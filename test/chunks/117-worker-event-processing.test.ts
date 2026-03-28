@@ -17,6 +17,7 @@ import {
   createTestEvent,
 } from '../helpers/setup.js';
 import { RuleEngine } from '@sentinel/shared/rule-engine';
+import { z } from 'zod';
 
 describe('Chunk 117 — Worker event processing', () => {
   beforeEach(async () => {
@@ -53,12 +54,23 @@ describe('Chunk 117 — Worker event processing', () => {
 
     // Build evaluator map (stub)
     const evaluators = new Map();
-    evaluators.set('github.repo_visibility', {
-      evaluate: (ev: any, config: any) => {
-        if (ev.payload?.action === 'publicized') {
-          return { match: true, title: 'Repo made public', description: 'test' };
+    evaluators.set('github:github.repo_visibility', {
+      configSchema: z.object({}).passthrough(),
+      evaluate: (ctx: any) => {
+        if (ctx.event.payload?.action === 'publicized') {
+          return {
+            orgId: ctx.event.orgId,
+            detectionId: ctx.rule.detectionId,
+            ruleId: ctx.rule.id,
+            eventId: ctx.event.id,
+            severity: 'high',
+            title: 'Repo made public',
+            description: 'test',
+            triggerType: 'immediate',
+            triggerData: ctx.event.payload,
+          };
         }
-        return { match: false };
+        return null;
       },
     });
 
@@ -100,8 +112,21 @@ describe('Chunk 117 — Worker event processing', () => {
     });
 
     const evaluators = new Map();
-    evaluators.set('github.repo_visibility', {
-      evaluate: () => ({ match: true, title: 'test', description: 'test' }),
+    evaluators.set('github:github.repo_visibility', {
+      configSchema: z.object({}).passthrough(),
+      evaluate: (ctx: any) => {
+        return {
+          orgId: ctx.event.orgId,
+          detectionId: ctx.rule.detectionId,
+          ruleId: ctx.rule.id,
+          eventId: ctx.event.id,
+          severity: 'high',
+          title: 'test',
+          description: 'test',
+          triggerType: 'immediate',
+          triggerData: ctx.event.payload,
+        };
+      },
     });
 
     const engine = new RuleEngine({ evaluators, redis, db, logger: console as any });
