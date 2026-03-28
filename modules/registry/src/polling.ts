@@ -179,7 +179,7 @@ export async function fetchDockerHubTags(
   }
 
   while (url && pagesUsed < maxPages) {
-    const response = await fetch(url, { headers: fetchHeaders });
+    const response = await fetch(url, { headers: fetchHeaders, signal: AbortSignal.timeout(30_000) });
     if (!response.ok) {
       throw new Error(`Docker Hub API returned ${response.status} for ${repoName}`);
     }
@@ -252,6 +252,7 @@ export async function fetchNpmVersions(
 
   const response = await fetch(`${NPM_REGISTRY_BASE}/${encodeURIComponent(packageName)}`, {
     headers,
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!response.ok) {
@@ -353,6 +354,7 @@ export async function fetchNpmDistTags(
 
   const response = await fetch(`${NPM_REGISTRY_BASE}/${encodeURIComponent(packageName)}`, {
     headers,
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!response.ok) {
@@ -814,6 +816,7 @@ export async function pollArtifact(artifact: MonitoredArtifact): Promise<void> {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: credentials.dockerUsername, password: credentials.dockerToken }),
+            signal: AbortSignal.timeout(30_000),
           });
           if (loginRes.ok) {
             const loginData = (await loginRes.json()) as { token?: string };

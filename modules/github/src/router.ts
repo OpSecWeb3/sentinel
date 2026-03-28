@@ -144,6 +144,22 @@ githubRouter.get('/app/callback', async (c) => {
     return c.redirect(`${webUrl}/settings/github?status=error&reason=expired_state`);
   }
 
+  // Cross-check session user against the HMAC-signed state if a session exists.
+  // The HMAC signature is the primary CSRF protection — the session check is a
+  // secondary defence-in-depth measure.  We do NOT hard-reject when there is no
+  // session because:
+  //   - The HMAC-signed state already prevents forgery (verified above).
+  //   - A legitimate user's session cookie may expire during the ≤10-min GitHub redirect.
+  //   - GitHub Marketplace installs may arrive without an active session.
+  const sessionUserId = c.get('userId');
+  if (sessionUserId && sessionUserId !== userId) {
+    return c.redirect(`${webUrl}/settings/github?status=error&reason=user_mismatch`);
+  }
+  if (!sessionUserId) {
+    const reqLog = c.get('logger');
+    reqLog.warn({ stateUserId: userId, orgId }, 'GitHub OAuth callback: no active session — proceeding on HMAC-signed state');
+  }
+
   // Fetch installation details from GitHub API
   const installationIdNum = Number(installationIdParam);
   if (!Number.isFinite(installationIdNum) || installationIdNum <= 0) {

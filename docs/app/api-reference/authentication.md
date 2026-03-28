@@ -113,7 +113,6 @@ curl -s -c cookies.txt -X POST http://localhost:4000/auth/login \
 | Status | Body | Cause |
 |---|---|---|
 | `401 Unauthorized` | `{"error": "Invalid username or password"}` | Wrong credentials. Response timing is equalized via a dummy bcrypt comparison to prevent user-enumeration. |
-| `403 Forbidden` | `{"error": "No organisation membership found. Ask an admin for an invite.", "needsOrg": true}` | User exists but has no org membership |
 | `423 Locked` | `{"error": "Account temporarily locked. Try again later."}` | Five consecutive failed login attempts trigger a 15-minute lockout |
 | `429 Too Many Requests` | `{"error": "Too many requests, please try again later"}` | Login rate limit exceeded (10 attempts per 15 minutes) |
 

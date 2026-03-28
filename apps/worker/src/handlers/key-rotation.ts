@@ -200,7 +200,6 @@ async function rotateSessions(): Promise<number> {
 export const keyRotationHandler: JobHandler = {
   jobName: 'platform.key.rotation',
   queueName: QUEUE_NAMES.DEFERRED,
-
   async process(_job: Job) {
     let totalRotated = 0;
 

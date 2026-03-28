@@ -56,7 +56,6 @@ export function createCorrelationExpiryHandler(redis: Redis, log?: Logger): JobH
   return {
     jobName: 'correlation.expiry',
     queueName: QUEUE_NAMES.DEFERRED,
-
     async process(job: Job) {
       const db = getDb();
       const alertsQueue = getQueue(QUEUE_NAMES.ALERTS);

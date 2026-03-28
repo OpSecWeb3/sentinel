@@ -14,6 +14,7 @@ import {
   appRequest,
   setupAdmin,
 } from '../../apps/api/src/__tests__/helpers.js';
+import { resetEnvCache } from '@sentinel/shared/env';
 import type { Hono } from 'hono';
 
 let app: Hono<any>;
@@ -26,9 +27,11 @@ beforeAll(async () => {
 beforeEach(async () => {
   await cleanTables();
   resetCounters();
-  // Enable rate limiting for these tests
+  // Enable rate limiting for these tests — must also reset the env cache
+  // since env() caches DISABLE_RATE_LIMIT from first parse.
   origDisableRateLimit = process.env.DISABLE_RATE_LIMIT;
   process.env.DISABLE_RATE_LIMIT = 'false';
+  resetEnvCache();
 });
 
 afterEach(() => {
@@ -38,6 +41,7 @@ afterEach(() => {
   } else {
     delete process.env.DISABLE_RATE_LIMIT;
   }
+  resetEnvCache();
 });
 
 describe('Chunk 013 — Rate limiting', () => {

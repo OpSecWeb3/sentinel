@@ -106,7 +106,7 @@ export async function createSession(
   const sessionData: SessionData = {
     userId: user.id,
     orgId: user.orgId ?? '',
-    role: user.role ?? 'viewer',
+    role: user.role ?? '',
   };
 
   await db.insert(sessions).values({

@@ -57,7 +57,6 @@ const _log = rootLogger.child({ component: 'data-retention' });
 export const dataRetentionHandler: JobHandler = {
   jobName: 'platform.data.retention',
   queueName: QUEUE_NAMES.DEFERRED,
-
   async process(job: Job) {
     const policies = (job.data?.policies as RetentionPolicy[]) ?? DEFAULT_RETENTION_POLICIES;
     const db = getDb();

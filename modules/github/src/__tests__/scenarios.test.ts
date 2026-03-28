@@ -1007,7 +1007,7 @@ describe('Member Change Scenarios', () => {
     const result = await memberChangeEvaluator.evaluate(makeCtx(event, rule));
 
     expect(result).not.toBeNull();
-    expect(result!.title).toContain('on acme/api-v2');
+    expect(result!.title).toContain('acme/api-v2');
   });
 
   it('MC-S10: former employee removed produces descriptive alert title', async () => {

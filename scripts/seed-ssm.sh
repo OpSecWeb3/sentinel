@@ -183,6 +183,8 @@ handle_param "GITHUB_APP_SLUG"     "GitHub App slug (name)"                     
 handle_param "GITHUB_TOKEN"        "GitHub personal access token (registry)"           "GitHub PAT for registry package/image lookups"
 handle_param "SMTP_URL"            "SMTP connection URL"                                "SMTP server URL"
 handle_param "SMTP_FROM"           "SMTP from address"                                  "Email sender address" "alerts@sentinel.dev"
+handle_param "METRICS_TOKEN"       "Prometheus /metrics bearer token (generate a strong random string)" \
+  "Bearer token for the /metrics endpoint — required in production"
 handle_param "SENTRY_DSN"          "Sentry DSN (error tracking)"                       "Sentry DSN for error tracking"
 handle_param "SENTRY_ENVIRONMENT"  "Sentry environment"                                 "Sentry environment name" "production"
 handle_param "ETHERSCAN_API_KEY"   "Etherscan API key (chain module)"                  "Etherscan API key for blockchain data"

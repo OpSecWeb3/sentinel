@@ -19,7 +19,8 @@
     "@sentinel/module-chain": "workspace:*",
     "@sentinel/module-infra": "workspace:*",
     "bullmq": "^5.34.0",
-    "ioredis": "^5.4.2"
+    "ioredis": "^5.4.2",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "tsx": "^4.19.0",

@@ -14,9 +14,9 @@ const envSchema = z.object({
   SESSION_SECRET: z.string().min(32),
 
   // Encryption (64 hex chars = 32 bytes for AES-256)
-  ENCRYPTION_KEY: z.string().length(64),
+  ENCRYPTION_KEY: z.string().regex(/^[0-9a-f]{64}$/i, 'Must be 64 hex characters'),
   // Previous encryption key for key rotation (optional, decrypt-only)
-  ENCRYPTION_KEY_PREV: z.string().length(64).optional(),
+  ENCRYPTION_KEY_PREV: z.string().regex(/^[0-9a-f]{64}$/i, 'Must be 64 hex characters').optional(),
 
   // API base URL (used for OAuth redirect_uri; must not be derived from request headers)
   API_BASE_URL: z.string().url().default('http://localhost:4000'),
@@ -58,6 +58,9 @@ const envSchema = z.object({
   // Disable rate limiting (test/dev only)
   DISABLE_RATE_LIMIT: z.enum(['true', 'false']).default('false'),
 
+  // Prometheus /metrics endpoint bearer token (optional — unauthenticated when unset)
+  METRICS_TOKEN: z.string().optional(),
+
   // Observability (optional)
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   SENTRY_DSN: z.string().url().optional(),
@@ -73,4 +76,9 @@ export function env(): Env {
     _env = envSchema.parse(process.env);
   }
   return _env;
+}
+
+/** Reset the cached env so it is re-parsed from process.env on next call. Test-only. */
+export function resetEnvCache(): void {
+  _env = undefined;
 }

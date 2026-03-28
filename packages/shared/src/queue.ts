@@ -1,5 +1,6 @@
 import { Queue, Worker, FlowProducer, type Processor, type WorkerOptions, type Job } from 'bullmq';
 import type { Redis } from 'ioredis';
+import { jobDuration } from './metrics.js';
 
 // ---------------------------------------------------------------------------
 // Queue names — single source of truth
@@ -116,7 +117,14 @@ export function createWorker(
   const processor: Processor = async (job) => {
     const handler = handlerMap.get(job.name);
     if (!handler) throw new Error(`No handler for job "${job.name}" on queue "${queueName}"`);
-    await handler.process(job);
+
+    const start = performance.now();
+    try {
+      return await handler.process(job);
+    } finally {
+      const durationSec = (performance.now() - start) / 1000;
+      jobDuration.observe({ queue: queueName, jobName: job.name }, durationSec);
+    }
   };
 
   // Each Worker gets its own dedicated Redis connection when a factory is

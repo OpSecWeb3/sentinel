@@ -20,6 +20,9 @@ process.env.REDIS_URL ??= 'redis://localhost:6379';
 process.env.SESSION_SECRET ??= 'test-session-secret-that-is-at-least-32-chars-long!!';
 process.env.ENCRYPTION_KEY ??= '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 process.env.ALLOWED_ORIGINS ??= 'http://localhost:3000';
+process.env.SMTP_FROM ??= 'test@sentinel.dev';
+process.env.SMTP_URL ??= 'smtp://localhost:1025';
+process.env.DISABLE_RATE_LIMIT ??= 'true';
 
 // ---------------------------------------------------------------------------
 // Shared SQL connection for direct DB operations in tests

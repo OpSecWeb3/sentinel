@@ -69,6 +69,7 @@ export async function getInstallationAccessToken(
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
       },
+      signal: AbortSignal.timeout(15_000),
     },
   );
 
@@ -124,6 +125,7 @@ export async function getInstallationDetails(
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
       },
+      signal: AbortSignal.timeout(15_000),
     },
   );
 
@@ -196,6 +198,7 @@ export async function githubApiFetch(
     method: options.method ?? 'GET',
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
+    signal: AbortSignal.timeout(15_000),
   });
 
   // Handle rate limiting (429 explicit, or 403 with exhausted rate limit)

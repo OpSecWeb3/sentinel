@@ -144,6 +144,9 @@ export function evaluateConditions(
   return conditions.every((c) => {
     const actual = getField(payload, c.field);
     if (actual === undefined) return false;
+    // Allow null through for equality checks (null == null should be true),
+    // but reject null for relational operators where comparison is meaningless.
+    if (actual === null && c.operator !== '==' && c.operator !== '!=') return false;
     return compare(actual, c.operator, c.value);
   });
 }

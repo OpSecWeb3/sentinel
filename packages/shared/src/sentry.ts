@@ -57,6 +57,12 @@ export function setupGlobalHandlers(log: Logger): void {
   process.on('unhandledRejection', (reason) => {
     log.fatal({ err: reason }, 'Unhandled promise rejection');
     captureException(reason);
+    if (process.env.NODE_ENV === 'test') return;
+    if (_sentry && _initialized) {
+      _sentry.close(2000).finally(() => process.exit(1));
+    } else {
+      setTimeout(() => process.exit(1), 100);
+    }
   });
 
   process.on('uncaughtException', (err) => {

@@ -204,7 +204,15 @@ async function pushSchema(sql: ReturnType<typeof postgres>): Promise<void> {
 
   for (const file of migrationFiles) {
     const migrationSql = readFileSync(resolve(migrationsDir, file), 'utf-8');
-    await sql.unsafe(migrationSql);
+    // Drizzle Kit uses `--> statement-breakpoint` to delimit statements.
+    // Split on these and execute each statement individually.
+    const statements = migrationSql
+      .split('--> statement-breakpoint')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    for (const stmt of statements) {
+      await sql.unsafe(stmt);
+    }
   }
 }
 

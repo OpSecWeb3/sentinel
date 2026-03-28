@@ -6,7 +6,7 @@ import { env } from '@sentinel/shared/env';
 import { createLogger } from '@sentinel/shared/logger';
 import { initSentry, captureException, setupGlobalHandlers } from '@sentinel/shared/sentry';
 import type { AppEnv } from '@sentinel/shared/hono-types';
-import { getDb, sql } from '@sentinel/db';
+import { getDb, closeDb, sql } from '@sentinel/db';
 import { setSharedConnection } from '@sentinel/shared/queue';
 import { setSharedRedis, getSharedRedis } from './redis.js';
 
@@ -102,6 +102,18 @@ app.use('*', async (c, next) => {
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
   c.header('X-XSS-Protection', '0');
   c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+});
+
+// ── Request metrics ────────────────────────────────────────────────────
+app.use('*', async (c, next) => {
+  const start = performance.now();
+  await next();
+  const durationSec = (performance.now() - start) / 1000;
+  const route = c.req.routePath ?? c.req.path;
+  const method = c.req.method;
+  const status = String(c.res.status);
+  httpRequestDuration.observe({ method, route, status }, durationSec);
+  httpRequestsTotal.inc({ method, route, status });
 });
 
 // ── CSRF defense header for state-changing requests ────────────────────
@@ -250,8 +262,17 @@ app.notFound((c) => c.json({ error: 'Not found' }, 404));
 // ── Prometheus metrics endpoint ─────────────────────────────────────────
 
 import { register as metricsRegistry, httpRequestDuration, httpRequestsTotal } from '@sentinel/shared/metrics';
+import { timingSafeEqual } from '@sentinel/shared/crypto';
 
 app.get('/metrics', async (c) => {
+  const metricsToken = process.env.METRICS_TOKEN;
+  if (metricsToken) {
+    const auth = c.req.header('Authorization');
+    const expected = `Bearer ${metricsToken}`;
+    if (!auth || !timingSafeEqual(auth, expected)) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+  }
   const metrics = await metricsRegistry.metrics();
   return new Response(metrics, {
     headers: { 'Content-Type': metricsRegistry.contentType },
@@ -284,7 +305,26 @@ if (process.env.NODE_ENV !== 'test') {
   }
 
   log.info({ port }, 'Starting Sentinel API');
-  serve({ fetch: app.fetch, port });
+  const server = serve({ fetch: app.fetch, port });
+
+  async function shutdown(signal: string) {
+    log.info({ signal }, 'Shutting down API');
+    // Stop accepting new connections; wait for in-flight requests to finish.
+    server.close(async () => {
+      await closeDb();
+      await getSharedRedis().quit();
+      log.info('API shutdown complete');
+      process.exit(0);
+    });
+    // Force-exit if connections haven't drained within 10 s.
+    setTimeout(() => {
+      log.fatal('Graceful shutdown timeout — forcing exit');
+      process.exit(1);
+    }, 10_000).unref();
+  }
+
+  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+  process.on('SIGINT',  () => { void shutdown('SIGINT'); });
 }
 
 export default app;
