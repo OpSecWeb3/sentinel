@@ -89,6 +89,7 @@ export async function sendWebhookNotification(
       ...(config.headers ?? {}),
     },
     body,
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!res.ok) {

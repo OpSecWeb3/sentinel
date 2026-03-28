@@ -11,10 +11,61 @@ import { sendWebhookNotification } from './webhook.js';
 export interface NotificationResult {
   channelId: string;
   type: string;
-  status: 'sent' | 'failed';
+  status: 'sent' | 'failed' | 'circuit_open';
   error?: string;
   statusCode?: number;
   responseTimeMs?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Per-channel circuit breaker — prevents hammering a flaky channel on every
+// retry while it's down.  Opens after THRESHOLD consecutive failures and
+// resets after RESET_MS.  Kept in-process memory (stateless across restarts).
+// ---------------------------------------------------------------------------
+
+const CIRCUIT_THRESHOLD = 5;
+const CIRCUIT_RESET_MS = 60_000; // 1 minute
+
+interface CircuitState {
+  failures: number;
+  openedAt: number | null;
+}
+
+const circuits = new Map<string, CircuitState>();
+
+function getCircuit(channelId: string): CircuitState {
+  let state = circuits.get(channelId);
+  if (!state) {
+    state = { failures: 0, openedAt: null };
+    circuits.set(channelId, state);
+  }
+  return state;
+}
+
+function isCircuitOpen(channelId: string): boolean {
+  const state = getCircuit(channelId);
+  if (state.openedAt === null) return false;
+  // Allow a probe after the reset window
+  if (Date.now() - state.openedAt >= CIRCUIT_RESET_MS) {
+    state.failures = 0;
+    state.openedAt = null;
+    return false;
+  }
+  return true;
+}
+
+function recordSuccess(channelId: string): void {
+  const state = getCircuit(channelId);
+  state.failures = 0;
+  state.openedAt = null;
+}
+
+function recordFailure(channelId: string): void {
+  const state = getCircuit(channelId);
+  state.failures++;
+  if (state.failures >= CIRCUIT_THRESHOLD) {
+    state.openedAt = Date.now();
+  }
 }
 
 export interface ChannelRow {
@@ -40,25 +91,37 @@ export async function dispatchAlert(
 
   // Direct Slack (bot token + channel ID from detection config)
   if (slackBotToken && slackChannelId) {
-    const start = performance.now();
-    try {
-      await sendSlackMessage(slackBotToken, slackChannelId, alert, formatBlocks);
-      const elapsed = Math.round(performance.now() - start);
-      results.push({ channelId: slackChannelId, type: 'slack', status: 'sent', responseTimeMs: elapsed });
-    } catch (err) {
-      const elapsed = Math.round(performance.now() - start);
-      results.push({
-        channelId: slackChannelId,
-        type: 'slack',
-        status: 'failed',
-        error: err instanceof Error ? err.message : String(err),
-        responseTimeMs: elapsed,
-      });
+    if (isCircuitOpen(slackChannelId)) {
+      _log.warn({ channelId: slackChannelId, type: 'slack' }, 'Circuit breaker open — skipping channel');
+      results.push({ channelId: slackChannelId, type: 'slack', status: 'circuit_open', error: 'Circuit breaker open' });
+    } else {
+      const start = performance.now();
+      try {
+        await sendSlackMessage(slackBotToken, slackChannelId, alert, formatBlocks);
+        const elapsed = Math.round(performance.now() - start);
+        recordSuccess(slackChannelId);
+        results.push({ channelId: slackChannelId, type: 'slack', status: 'sent', responseTimeMs: elapsed });
+      } catch (err) {
+        const elapsed = Math.round(performance.now() - start);
+        recordFailure(slackChannelId);
+        results.push({
+          channelId: slackChannelId,
+          type: 'slack',
+          status: 'failed',
+          error: err instanceof Error ? err.message : String(err),
+          responseTimeMs: elapsed,
+        });
+      }
     }
   }
 
   // Configured channels
   for (const channel of channels) {
+    if (isCircuitOpen(channel.id)) {
+      _log.warn({ channelId: channel.id, type: channel.type }, 'Circuit breaker open — skipping channel');
+      results.push({ channelId: channel.id, type: channel.type, status: 'circuit_open', error: 'Circuit breaker open' });
+      continue;
+    }
     const start = performance.now();
     try {
       switch (channel.type) {
@@ -86,9 +149,11 @@ export async function dispatchAlert(
           continue;
       }
       const elapsed = Math.round(performance.now() - start);
+      recordSuccess(channel.id);
       results.push({ channelId: channel.id, type: channel.type, status: 'sent', responseTimeMs: elapsed });
     } catch (err) {
       const elapsed = Math.round(performance.now() - start);
+      recordFailure(channel.id);
       results.push({
         channelId: channel.id,
         type: channel.type,
@@ -99,8 +164,10 @@ export async function dispatchAlert(
     }
   }
 
-  // Throw if ALL channels failed (triggers BullMQ retry)
-  const allFailed = results.length > 0 && results.every((r) => r.status === 'failed');
+  // Throw if ALL channels failed (triggers BullMQ retry).
+  // Circuit-open channels are treated as failures for this check — if every
+  // channel is either failed or circuit-open, nothing was delivered.
+  const allFailed = results.length > 0 && results.every((r) => r.status !== 'sent');
   if (allFailed) {
     const errors = results.map((r) => `${r.type}: ${r.error}`).join('; ');
     throw new Error(`All notification channels failed: ${errors}`);

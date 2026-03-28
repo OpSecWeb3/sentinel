@@ -81,6 +81,19 @@ integrations.get('/slack/callback', async (c) => {
     return c.redirect(`${webUrl}/settings?slack=error&reason=expired_state`);
   }
 
+  // Defence-in-depth: if the browser sent a valid session cookie (which it
+  // will for same-site Lax GET navigations), verify the logged-in user matches
+  // the one who initiated the OAuth flow. This prevents a link-sharing or
+  // interception scenario where a different logged-in user completes the flow.
+  const sessionUserId = c.get('userId');
+  const sessionOrgId = c.get('orgId');
+  if (sessionUserId && sessionUserId !== userId) {
+    return c.redirect(`${webUrl}/settings?slack=error&reason=session_mismatch`);
+  }
+  if (sessionOrgId && sessionOrgId !== orgId) {
+    return c.redirect(`${webUrl}/settings?slack=error&reason=session_mismatch`);
+  }
+
   // Verify the user from state still exists and belongs to the org.
   // This prevents a revoked/deleted user's OAuth state from being replayed.
   const db = getDb();

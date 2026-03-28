@@ -123,6 +123,7 @@ export const rules = pgTable('rules', {
   updatedAt,
 }, (t) => [
   index('idx_rules_detection').on(t.detectionId),
+  index('idx_rules_org').on(t.orgId),
   index('idx_rules_org_module').on(t.orgId, t.moduleId).where(sql`status = 'active'`),
   index('idx_rules_module_type_active').on(t.moduleId, t.ruleType).where(sql`status = 'active'`),
 ]);

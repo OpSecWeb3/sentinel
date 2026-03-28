@@ -89,6 +89,9 @@ async function main() {
     process.exit(1);
   }
 
+  // Initial heartbeat so Docker healthcheck passes during start_period
+  try { (await import('node:fs')).writeFileSync('/tmp/.worker-heartbeat', ''); } catch { /* best effort */ }
+
   // ── Register modules ────────────────────────────────────────────────
   const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule, AwsModule];
 
@@ -187,8 +190,11 @@ async function main() {
     log.info({ queue: queueName, concurrency, handlers: handlers.map((h) => h.jobName) }, 'Started worker');
   }
 
-  // ── Periodic queue depth reporting ─────────────────────────────────
+  // ── Periodic queue depth reporting & heartbeat ──────────────────────
+  const { writeFileSync } = await import('node:fs');
   setInterval(async () => {
+    // Touch heartbeat file for Docker healthcheck (checks mtime < 60s)
+    try { writeFileSync('/tmp/.worker-heartbeat', ''); } catch { /* best effort */ }
     for (const [queueName] of handlersByQueue) {
       try {
         const q = getQueue(queueName);

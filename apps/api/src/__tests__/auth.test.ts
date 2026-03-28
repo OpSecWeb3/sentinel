@@ -663,8 +663,8 @@ describe('User management', () => {
       cookie: admin.cookie,
       body: { role: 'superadmin' },
     });
-    // Zod parse will throw, caught by the error handler
-    expect(res.status).toBe(500);
+    // Zod validates the role enum and returns a structured 400 error
+    expect(res.status).toBe(400);
   });
 });
 

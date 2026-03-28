@@ -206,13 +206,17 @@ auth.post('/login', authLimiter, async (c) => {
     .where(eq(orgMemberships.userId, user.id))
     .limit(1);
 
-  if (!membership) {
-    // User exists but has no org membership — cannot issue a usable session.
-    return c.json({ error: 'No organisation membership found. Ask an admin for an invite.', needsOrg: true }, 403);
-  }
-
   // Destroy any pre-existing session to prevent session fixation attacks.
   await destroySession(c);
+
+  if (!membership) {
+    // User exists but has no org membership.  Create an org-less session so
+    // the frontend can redirect to /join-org after calling /auth/me.
+    // IMPORTANT: we must NOT return a distinguishable error here — doing so
+    // would let an unauthenticated attacker confirm that an account exists.
+    await createSession(c, { id: user.id });
+    return c.json({ status: 'ok', user: { id: user.id, username: user.username, role: null } });
+  }
 
   await createSession(c, {
     id: user.id,

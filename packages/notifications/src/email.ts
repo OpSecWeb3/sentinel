@@ -3,6 +3,7 @@
  * Ported from ChainAlert with HTML-escaped templates.
  */
 import nodemailer from 'nodemailer';
+import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 import type { SlackAlertPayload } from './slack.js';
 
 let _transporter: nodemailer.Transporter | undefined;
@@ -11,7 +12,23 @@ function getTransporter(): nodemailer.Transporter {
   if (!_transporter) {
     const smtpUrl = process.env.SMTP_URL;
     if (!smtpUrl) throw new Error('SMTP_URL environment variable is not set');
-    _transporter = nodemailer.createTransport(smtpUrl);
+
+    // Parse the URL manually so timeout options are not discarded.
+    // nodemailer's `parseConnectionUrl` silently drops all other properties
+    // when `url` is passed inside the options object.
+    const parsed = new URL(smtpUrl);
+    const opts: SMTPTransport.Options = {
+      host: parsed.hostname,
+      port: Number(parsed.port) || 587,
+      secure: parsed.protocol === 'smtps:' || Number(parsed.port) === 465,
+      ...(parsed.username
+        ? { auth: { user: decodeURIComponent(parsed.username), pass: decodeURIComponent(parsed.password) } }
+        : {}),
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 10_000,
+    };
+    _transporter = nodemailer.createTransport(opts);
   }
   return _transporter;
 }

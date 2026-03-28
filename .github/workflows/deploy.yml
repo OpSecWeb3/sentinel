@@ -66,6 +66,7 @@ jobs:
           SENTRY_ENVIRONMENT=$(fetch_param /sentinel/production/SENTRY_ENVIRONMENT "production")
           ETHERSCAN_API_KEY=$(fetch_param /sentinel/production/ETHERSCAN_API_KEY)
           RPC_ETHEREUM=$(fetch_param /sentinel/production/RPC_ETHEREUM)
+          METRICS_TOKEN=$(fetch_param /sentinel/production/METRICS_TOKEN)
 
           cat > /tmp/sentinel.env << 'ENVEOF'
 NODE_ENV=production
@@ -78,7 +79,7 @@ ENVEOF
             printf 'REDIS_URL=redis://:%s@redis:6379\n' "$REDIS_PASSWORD"
             printf 'SESSION_SECRET=%s\n' "$SESSION_SECRET"
             printf 'ENCRYPTION_KEY=%s\n' "$ENCRYPTION_KEY"
-            printf 'ENCRYPTION_KEY_PREV=%s\n' "$ENCRYPTION_KEY_PREV"
+            [ -n "$ENCRYPTION_KEY_PREV" ] && printf 'ENCRYPTION_KEY_PREV=%s\n' "$ENCRYPTION_KEY_PREV"
             printf 'ALLOWED_ORIGINS=%s\n' "$ALLOWED_ORIGINS"
             printf 'NEXT_PUBLIC_API_URL=%s\n' "$NEXT_PUBLIC_API_URL"
             printf 'API_BASE_URL=%s\n' "$NEXT_PUBLIC_API_URL"
@@ -97,6 +98,7 @@ ENVEOF
             printf 'SENTRY_ENVIRONMENT=%s\n' "$SENTRY_ENVIRONMENT"
             printf 'ETHERSCAN_API_KEY=%s\n' "$ETHERSCAN_API_KEY"
             printf 'RPC_ETHEREUM=%s\n' "$RPC_ETHEREUM"
+            [ -n "$METRICS_TOKEN" ] && printf 'METRICS_TOKEN=%s\n' "$METRICS_TOKEN"
           } >> /tmp/sentinel.env
 
 

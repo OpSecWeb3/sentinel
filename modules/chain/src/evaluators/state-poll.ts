@@ -32,10 +32,11 @@ function recentValuesKey(ruleId: string): string {
 async function getPreviousState(redis: EvalContext['redis'], ruleId: string): Promise<bigint | null> {
   const raw = await redis.get(prevStateKey(ruleId));
   if (raw === null) return null;
-  // Values are always stored as decimal strings by setPreviousState (via bigint.toString()).
-  // Never re-interpret them as hex — a long all-digit decimal like "12345678901" would
-  // otherwise be misread as a hex literal, producing a wildly wrong number (CRIT-10).
-  return BigInt(raw);
+  // Values stored by setPreviousState are decimal strings. But Redis may also
+  // hold raw hex values from external sources (e.g. direct state reads).
+  // Detect unprefixed hex (contains a-f) and add 0x prefix for BigInt().
+  const isUnprefixedHex = !raw.startsWith('0x') && /[a-fA-F]/.test(raw);
+  return BigInt(isUnprefixedHex ? `0x${raw}` : raw);
 }
 
 async function setPreviousState(redis: EvalContext['redis'], ruleId: string, value: bigint): Promise<void> {
@@ -211,11 +212,13 @@ export const statePollEvaluator: RuleEvaluator = {
     };
 
     const raw = payload.value;
-    // BigInt() natively handles both 0x-prefixed hex strings (e.g. "0x1a2b…") and
-    // plain decimal strings.  The old regex `/^[0-9a-fA-F]+$/` incorrectly matched
-    // pure decimal strings (digits are valid hex chars) and prepended "0x", turning
-    // e.g. decimal "12345678901" into hex 0x12345678901 = 78,187,493,121 (CRIT-10).
-    const currentValue = BigInt(raw);
+    // BigInt() natively handles 0x-prefixed hex and plain decimal strings.
+    // Storage slot values from Ethereum nodes often arrive as unprefixed hex
+    // (e.g. "71c7656e…"). Detect these and add the 0x prefix so BigInt() can
+    // parse them. Only treat as hex if the string contains a-f characters
+    // (pure digit strings stay decimal to avoid the CRIT-10 misinterpretation).
+    const isUnprefixedHex = !raw.startsWith('0x') && /[a-fA-F]/.test(raw);
+    const currentValue = BigInt(isUnprefixedHex ? `0x${raw}` : raw);
     const thresholdValue = config.value !== undefined ? BigInt(config.value) : undefined;
 
     // Retrieve previous state value from Redis

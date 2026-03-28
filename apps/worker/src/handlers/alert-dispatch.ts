@@ -2,7 +2,9 @@
  * Alert dispatch handler.
  * Loads the alert + detection channels, dispatches notifications.
  */
+import { UnrecoverableError } from 'bullmq';
 import type { Job } from 'bullmq';
+import { z } from 'zod';
 import { getDb } from '@sentinel/db';
 import { alerts, detections, notificationChannels, slackInstallations, notificationDeliveries } from '@sentinel/db/schema/core';
 import { eq, and, inArray, isNull } from '@sentinel/db';
@@ -11,6 +13,10 @@ import { decrypt } from '@sentinel/shared/crypto';
 import { dispatchAlert, type ChannelRow } from '@sentinel/notifications/dispatcher';
 import type { SlackAlertPayload } from '@sentinel/notifications/slack';
 import type { DetectionModule } from '@sentinel/shared/module';
+
+const AlertDispatchPayload = z.object({
+  alertId: z.string().regex(/^\d+$/, 'alertId must be a numeric string'),
+});
 
 /** Module formatter registry — set by the worker at startup */
 let moduleFormatters: Map<string, DetectionModule['formatSlackBlocks']> | undefined;
@@ -29,7 +35,11 @@ export const alertDispatchHandler: JobHandler = {
   queueName: QUEUE_NAMES.ALERTS,
 
   async process(job: Job) {
-    const { alertId } = job.data as { alertId: string };
+    const parsed = AlertDispatchPayload.safeParse(job.data);
+    if (!parsed.success) {
+      throw new UnrecoverableError(`Invalid alert.dispatch payload: ${parsed.error.message}`);
+    }
+    const { alertId } = parsed.data;
     const db = getDb();
 
     // Load alert

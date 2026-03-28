@@ -3,7 +3,9 @@
  * Takes a normalized event, runs it through the CorrelationEngine,
  * creates correlated alerts, and enqueues notification dispatch.
  */
+import { UnrecoverableError } from 'bullmq';
 import type { Job } from 'bullmq';
+import { z } from 'zod';
 import { getDb, eq, and, sql } from '@sentinel/db';
 import { events, alerts } from '@sentinel/db/schema/core';
 import { correlationRules } from '@sentinel/db/schema/correlation';
@@ -13,6 +15,10 @@ import type { NormalizedEvent } from '@sentinel/shared/rules';
 import type { CorrelatedAlertCandidate } from '@sentinel/shared/correlation-types';
 import { logger as rootLogger, type Logger } from '@sentinel/shared/logger';
 import type { Redis } from 'ioredis';
+
+const CorrelationPayload = z.object({
+  eventId: z.string().uuid('eventId must be a valid UUID'),
+});
 
 export function createCorrelationHandler(redis: Redis, log?: Logger): JobHandler {
   const db = getDb();
@@ -24,7 +30,11 @@ export function createCorrelationHandler(redis: Redis, log?: Logger): JobHandler
     queueName: QUEUE_NAMES.EVENTS,
 
     async process(job: Job) {
-      const { eventId } = job.data as { eventId: string };
+      const parsed = CorrelationPayload.safeParse(job.data);
+      if (!parsed.success) {
+        throw new UnrecoverableError(`Invalid correlation.evaluate payload: ${parsed.error.message}`);
+      }
+      const { eventId } = parsed.data;
 
       // Load event
       const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);

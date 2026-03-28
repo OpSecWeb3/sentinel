@@ -17,8 +17,8 @@
     "db:studio": "pnpm --filter @sentinel/db studio",
     "test": "vitest run",
     "test:docker": "docker compose -f docker-compose.dev.yml --profile test run --rm test",
-    "test:unit": "vitest run --project packages/shared",
-    "test:integration": "vitest run --project apps/api",
+    "test:unit": "vitest run packages/ modules/",
+    "test:integration": "vitest run apps/ test/",
     "test:watch": "vitest watch",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck"

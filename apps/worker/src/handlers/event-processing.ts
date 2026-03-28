@@ -3,7 +3,9 @@
  * Takes a normalized event, runs it through the RuleEngine,
  * creates alerts, and enqueues notification dispatch.
  */
+import { UnrecoverableError } from 'bullmq';
 import type { Job } from 'bullmq';
+import { z } from 'zod';
 import { getDb, count, eq } from '@sentinel/db';
 import { events, alerts, detections } from '@sentinel/db/schema/core';
 import { correlationRules } from '@sentinel/db/schema/correlation';
@@ -12,6 +14,10 @@ import { RuleEngine } from '@sentinel/shared/rule-engine';
 import type { RuleEvaluator, NormalizedEvent } from '@sentinel/shared/rules';
 import { logger as rootLogger, type Logger } from '@sentinel/shared/logger';
 import type { Redis } from 'ioredis';
+
+const EventProcessingPayload = z.object({
+  eventId: z.string().uuid('eventId must be a valid UUID'),
+});
 
 export function createEventProcessingHandler(
   evaluators: Map<string, RuleEvaluator>,
@@ -27,7 +33,11 @@ export function createEventProcessingHandler(
     queueName: QUEUE_NAMES.EVENTS,
 
     async process(job: Job) {
-      const { eventId } = job.data as { eventId: string };
+      const parsed = EventProcessingPayload.safeParse(job.data);
+      if (!parsed.success) {
+        throw new UnrecoverableError(`Invalid event.evaluate payload: ${parsed.error.message}`);
+      }
+      const { eventId } = parsed.data;
 
       // Load event
       const [event] = await db.select().from(events).where(eq(events.id, eventId)).limit(1);

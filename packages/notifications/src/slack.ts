@@ -77,6 +77,7 @@ export async function sendSlackMessage(
       Authorization: `Bearer ${botToken}`,
     },
     body,
+    signal: AbortSignal.timeout(10_000),
   });
 
   const data = (await res.json()) as { ok: boolean; error?: string };

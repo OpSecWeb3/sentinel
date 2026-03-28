@@ -20,6 +20,7 @@ COPY modules/github/package.json ./modules/github/
 COPY modules/chain/package.json ./modules/chain/
 COPY modules/infra/package.json ./modules/infra/
 COPY modules/registry/package.json ./modules/registry/
+COPY modules/aws/package.json ./modules/aws/
 
 # Install all dependencies (including devDependencies for the build)
 RUN pnpm install --frozen-lockfile
@@ -45,6 +46,7 @@ COPY modules/github/ ./modules/github/
 COPY modules/chain/ ./modules/chain/
 COPY modules/infra/ ./modules/infra/
 COPY modules/registry/ ./modules/registry/
+COPY modules/aws/ ./modules/aws/
 
 # Copy API source
 COPY apps/api/ ./apps/api/
@@ -71,6 +73,7 @@ COPY modules/github/package.json ./modules/github/
 COPY modules/chain/package.json ./modules/chain/
 COPY modules/infra/package.json ./modules/infra/
 COPY modules/registry/package.json ./modules/registry/
+COPY modules/aws/package.json ./modules/aws/
 
 RUN pnpm install --frozen-lockfile --prod
 
@@ -108,6 +111,7 @@ COPY --from=builder --chown=sentinel:sentinel /app/modules/github/ ./modules/git
 COPY --from=builder --chown=sentinel:sentinel /app/modules/chain/ ./modules/chain/
 COPY --from=builder --chown=sentinel:sentinel /app/modules/infra/ ./modules/infra/
 COPY --from=builder --chown=sentinel:sentinel /app/modules/registry/ ./modules/registry/
+COPY --from=builder --chown=sentinel:sentinel /app/modules/aws/ ./modules/aws/
 
 # Install tsx globally for running TS workspace packages at runtime
 RUN npm install -g tsx
