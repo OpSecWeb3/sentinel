@@ -35,7 +35,7 @@ describe('Chunk 142 — Registry module router', () => {
 
     await createTestArtifact(org.id, { name: 'org/image-a' });
 
-    const res = await appRequest(app, 'GET', '/modules/registry/artifacts', {
+    const res = await appRequest(app, 'GET', '/modules/registry/images', {
       cookie: session.cookie,
     });
 
@@ -48,7 +48,7 @@ describe('Chunk 142 — Registry module router', () => {
     await addMembership(org.id, user.id, 'admin');
     const session = await createTestSession(user.id, org.id, 'admin');
 
-    const res = await appRequest(app, 'POST', '/modules/registry/artifacts', {
+    const res = await appRequest(app, 'POST', '/modules/registry/images', {
       cookie: session.cookie,
       body: {
         artifactType: 'docker_image',
@@ -70,7 +70,7 @@ describe('Chunk 142 — Registry module router', () => {
     await createTestArtifactVersion(artifact.id, { version: 'v1.0.0' });
     await createTestArtifactVersion(artifact.id, { version: 'v1.1.0' });
 
-    const res = await appRequest(app, 'GET', `/modules/registry/artifacts/${artifact.id}/versions`, {
+    const res = await appRequest(app, 'GET', `/modules/registry/images/${artifact.id}/versions`, {
       cookie: session.cookie,
     });
 
@@ -78,7 +78,7 @@ describe('Chunk 142 — Registry module router', () => {
   });
 
   it('should require auth for artifact endpoints', async () => {
-    const res = await appRequest(app, 'GET', '/modules/registry/artifacts', {});
+    const res = await appRequest(app, 'GET', '/modules/registry/images', {});
     expect(res.status).toBe(401);
   });
 });

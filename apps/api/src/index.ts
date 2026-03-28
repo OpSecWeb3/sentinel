@@ -231,10 +231,12 @@ for (const mod of modules) {
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) {
-    // If the exception carries a pre-built Response (e.g. validation errors
-    // with structured details), return it directly.
+    // If the exception carries a pre-built Response with JSON content type
+    // (e.g. validation errors with structured details), return it directly.
     const res = err.getResponse();
-    if (res.body) return res;
+    if (res.body && res.headers.get('content-type')?.includes('application/json')) {
+      return res;
+    }
     return c.json({ error: err.message }, err.status);
   }
   const reqLogger = c.get('logger') ?? log;

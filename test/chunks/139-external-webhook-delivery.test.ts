@@ -6,7 +6,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHmac } from 'node:crypto';
 
-const fetchSpy = vi.spyOn(globalThis, 'fetch');
+const fetchMock = vi.fn();
+vi.stubGlobal('fetch', fetchMock);
 
 vi.mock('node:dns/promises', () => ({
   default: {
@@ -19,7 +20,7 @@ import dns from 'node:dns/promises';
 const dnsLookup = vi.mocked(dns.lookup);
 
 beforeEach(() => {
-  fetchSpy.mockReset();
+  fetchMock.mockReset();
   dnsLookup.mockReset();
 });
 afterEach(() => { vi.restoreAllMocks(); });
@@ -28,7 +29,7 @@ describe('Chunk 139 — Webhook delivery', () => {
   describe('HMAC signature generation', () => {
     it('should include X-Signature header with correct HMAC-SHA256', async () => {
       dnsLookup.mockResolvedValueOnce({ address: '93.184.216.34', family: 4 } as any);
-      fetchSpy.mockResolvedValueOnce(new Response('OK', { status: 200 }));
+      fetchMock.mockResolvedValueOnce(new Response('OK', { status: 200 }));
 
       const { sendWebhookNotification } = await import('../../packages/notifications/src/webhook.js');
       await sendWebhookNotification(
@@ -36,8 +37,8 @@ describe('Chunk 139 — Webhook delivery', () => {
         { alertId: 'a1', severity: 'high' },
       );
 
-      expect(fetchSpy).toHaveBeenCalledOnce();
-      const [, init] = fetchSpy.mock.calls[0];
+      expect(fetchMock).toHaveBeenCalledOnce();
+      const [, init] = fetchMock.mock.calls[0];
       const headers = (init as RequestInit).headers as Record<string, string>;
       const body = (init as RequestInit).body as string;
 
@@ -48,7 +49,7 @@ describe('Chunk 139 — Webhook delivery', () => {
 
     it('should include event type and timestamp in body', async () => {
       dnsLookup.mockResolvedValueOnce({ address: '93.184.216.34', family: 4 } as any);
-      fetchSpy.mockResolvedValueOnce(new Response('OK', { status: 200 }));
+      fetchMock.mockResolvedValueOnce(new Response('OK', { status: 200 }));
 
       const { sendWebhookNotification } = await import('../../packages/notifications/src/webhook.js');
       await sendWebhookNotification(
@@ -56,7 +57,7 @@ describe('Chunk 139 — Webhook delivery', () => {
         { alertId: 'a2' },
       );
 
-      const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
       expect(body.event).toBe('alert.triggered');
       expect(body.timestamp).toBeDefined();
       expect(body.alertId).toBe('a2');
@@ -71,7 +72,7 @@ describe('Chunk 139 — Webhook delivery', () => {
       await expect(
         sendWebhookNotification({ url: 'https://evil.com/hook', secret: 's' }, {}),
       ).rejects.toThrow('private');
-      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('should block webhooks resolving to 127.0.0.1', async () => {
@@ -94,18 +95,18 @@ describe('Chunk 139 — Webhook delivery', () => {
 
     it('should allow webhooks resolving to public IPs', async () => {
       dnsLookup.mockResolvedValueOnce({ address: '93.184.216.34', family: 4 } as any);
-      fetchSpy.mockResolvedValueOnce(new Response('OK', { status: 200 }));
+      fetchMock.mockResolvedValueOnce(new Response('OK', { status: 200 }));
 
       const { sendWebhookNotification } = await import('../../packages/notifications/src/webhook.js');
       await sendWebhookNotification({ url: 'https://hooks.example.com/ok', secret: 's' }, {});
-      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(fetchMock).toHaveBeenCalledOnce();
     });
   });
 
   describe('delivery error handling', () => {
     it('should throw on non-OK response with status and body', async () => {
       dnsLookup.mockResolvedValueOnce({ address: '93.184.216.34', family: 4 } as any);
-      fetchSpy.mockResolvedValueOnce(new Response('Bad Request', { status: 400 }));
+      fetchMock.mockResolvedValueOnce(new Response('Bad Request', { status: 400 }));
 
       const { sendWebhookNotification } = await import('../../packages/notifications/src/webhook.js');
       await expect(

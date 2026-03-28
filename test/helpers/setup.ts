@@ -180,22 +180,41 @@ afterAll(async () => {
 // ---------------------------------------------------------------------------
 
 /**
- * Push the Drizzle schema to the database.
+ * Push the Drizzle schema to the database by running the migration files.
  *
- * This creates all tables, indexes, and constraints defined in the schema
- * files. It is idempotent: if tables already exist they are recreated via
- * the DROP SCHEMA above.
+ * This keeps the test schema in sync with the actual Drizzle schema definitions
+ * without manually duplicating every CREATE TABLE statement.
  */
 async function pushSchema(sql: ReturnType<typeof postgres>): Promise<void> {
   // Enable uuid-ossp for gen_random_uuid()
   await sql`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`;
 
-  // We create the tables in dependency order so foreign keys resolve.
-  // Core tables first, then module tables that reference them.
+  // Run migration files in order
+  const { readFileSync } = await import('node:fs');
+  const { resolve, dirname } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
 
-  // --- core.ts tables ---
-  await sql`
-    CREATE TABLE IF NOT EXISTS users (
+  const migrationsDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../packages/db/migrations');
+  const migrationFiles = [
+    '0000_bouncy_killer_shrike.sql',
+    '0001_bumpy_blonde_phantom.sql',
+    '0002_session_lookup_columns.sql',
+    '0003_aws_schema_fixes.sql',
+  ];
+
+  for (const file of migrationFiles) {
+    const migrationSql = readFileSync(resolve(migrationsDir, file), 'utf-8');
+    await sql.unsafe(migrationSql);
+  }
+}
+
+/*
+ * Dead code: manual schema push — replaced by migration files in pushSchema() above.
+ * Keeping as block comment for reference.
+
+async function _legacyPushSchema(sql: ReturnType<typeof postgres>): Promise<void> {
+  await sql`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`;
+  await sql`CREATE TABLE IF NOT EXISTS users (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       username TEXT UNIQUE NOT NULL,
       email TEXT UNIQUE NOT NULL,
@@ -580,7 +599,82 @@ async function pushSchema(sql: ReturnType<typeof postgres>): Promise<void> {
     )
   `;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS uq_infra_hosts_org_hostname ON infra_hosts(org_id, hostname)`;
+
+  // --- correlation.ts tables ---
+  await sql`
+    CREATE TABLE IF NOT EXISTS correlation_rules (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      created_by UUID REFERENCES users(id),
+      name TEXT NOT NULL,
+      description TEXT,
+      severity TEXT NOT NULL DEFAULT 'high',
+      status TEXT NOT NULL DEFAULT 'active',
+      config JSONB NOT NULL,
+      channel_ids UUID[] NOT NULL DEFAULT '{}'::uuid[],
+      slack_channel_id TEXT,
+      slack_channel_name TEXT,
+      cooldown_minutes INTEGER NOT NULL DEFAULT 0,
+      last_triggered_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_correlation_rules_org ON correlation_rules(org_id)`;
+
+  // --- aws.ts tables ---
+  await sql`
+    CREATE TABLE IF NOT EXISTS aws_integrations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      is_org_integration BOOLEAN NOT NULL DEFAULT false,
+      aws_org_id TEXT,
+      role_arn TEXT,
+      credentials_encrypted TEXT,
+      external_id TEXT,
+      sqs_queue_url TEXT,
+      sqs_region TEXT NOT NULL DEFAULT 'us-east-1',
+      regions TEXT[] NOT NULL DEFAULT '{}'::text[],
+      enabled BOOLEAN NOT NULL DEFAULT true,
+      status TEXT NOT NULL DEFAULT 'active',
+      error_message TEXT,
+      last_polled_at TIMESTAMPTZ,
+      next_poll_at TIMESTAMPTZ,
+      poll_interval_seconds INTEGER NOT NULL DEFAULT 60,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_aws_integration_org ON aws_integrations(org_id)`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS uq_aws_integration_account ON aws_integrations(org_id, account_id)`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS aws_cloudtrail_events (
+      id BIGSERIAL PRIMARY KEY,
+      integration_id UUID NOT NULL REFERENCES aws_integrations(id) ON DELETE CASCADE,
+      org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      event_id TEXT,
+      event_name TEXT NOT NULL,
+      event_source TEXT NOT NULL,
+      event_time TIMESTAMPTZ NOT NULL,
+      aws_region TEXT NOT NULL,
+      source_ip TEXT,
+      user_identity JSONB,
+      request_parameters JSONB,
+      response_elements JSONB,
+      error_code TEXT,
+      error_message TEXT,
+      raw JSONB NOT NULL,
+      ingested_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_aws_ct_org ON aws_cloudtrail_events(org_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_aws_ct_integration ON aws_cloudtrail_events(integration_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_aws_ct_event_time ON aws_cloudtrail_events(event_time)`;
 }
+end of dead code block */
 
 // ---------------------------------------------------------------------------
 // Table cleaning
@@ -590,15 +684,50 @@ async function pushSchema(sql: ReturnType<typeof postgres>): Promise<void> {
  * All data tables in dependency-safe truncation order.
  */
 const ALL_DATA_TABLES = [
-  // Module tables (depend on core)
+  // AWS module
+  'aws_raw_events',
+  'aws_integrations',
+  // Chain module
+  'chain_state_snapshots',
+  'chain_rpc_usage_hourly',
+  'chain_container_metrics',
+  'chain_block_cursors',
+  'chain_org_rpc_configs',
+  'chain_org_contracts',
+  'chain_detection_templates',
+  'chain_contracts',
+  'chain_networks',
+  // Correlation
+  'correlation_rules',
+  // Registry module
   'rc_ci_notifications',
   'rc_attributions',
   'rc_verifications',
   'rc_artifact_events',
   'rc_artifact_versions',
   'rc_artifacts',
+  // GitHub module
   'github_repositories',
   'github_installations',
+  // Infra module
+  'infra_whois_changes',
+  'infra_whois_records',
+  'infra_tls_analyses',
+  'infra_snapshots',
+  'infra_score_history',
+  'infra_scan_step_results',
+  'infra_scan_schedules',
+  'infra_scan_events',
+  'infra_reachability_checks',
+  'infra_http_header_checks',
+  'infra_finding_suppressions',
+  'infra_dns_records',
+  'infra_dns_health_checks',
+  'infra_dns_changes',
+  'infra_ct_log_entries',
+  'infra_certificates',
+  'infra_cdn_origin_records',
+  'infra_cdn_provider_configs',
   'infra_hosts',
   // Core tables
   'notification_deliveries',

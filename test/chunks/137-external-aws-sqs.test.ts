@@ -7,11 +7,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockSend = vi.fn();
 
-vi.mock('@aws-sdk/client-sqs', () => ({
-  SQSClient: vi.fn().mockImplementation(() => ({ send: mockSend })),
-  ReceiveMessageCommand: vi.fn().mockImplementation((input: unknown) => ({ _type: 'receive', input })),
-  DeleteMessageCommand: vi.fn().mockImplementation((input: unknown) => ({ _type: 'delete', input })),
-}));
+vi.mock('@aws-sdk/client-sqs', () => {
+  return {
+    SQSClient: class { send = mockSend; },
+    ReceiveMessageCommand: class { _type = 'receive'; input: unknown; constructor(input: unknown) { this.input = input; } },
+    DeleteMessageCommand: class { _type = 'delete'; input: unknown; constructor(input: unknown) { this.input = input; } },
+  };
+});
 
 beforeEach(() => { mockSend.mockReset(); });
 afterEach(() => { vi.restoreAllMocks(); });

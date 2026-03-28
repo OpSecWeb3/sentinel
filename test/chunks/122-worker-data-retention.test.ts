@@ -39,7 +39,7 @@ describe('Chunk 122 — Data retention handler', () => {
     `;
 
     // Apply retention: 90 days
-    const cutoff = new Date(Date.now() - 90 * 86_400_000);
+    const cutoff = new Date(Date.now() - 90 * 86_400_000).toISOString();
     await sql`
       DELETE FROM events WHERE received_at < ${cutoff}
     `;
@@ -61,7 +61,7 @@ describe('Chunk 122 — Data retention handler', () => {
       VALUES (${org.id}, 'github', 'github.push', '{}'::jsonb, ${boundaryDate.toISOString()}, ${boundaryDate.toISOString()})
     `;
 
-    const cutoff = new Date(Date.now() - 90 * 86_400_000);
+    const cutoff = new Date(Date.now() - 90 * 86_400_000).toISOString();
     await sql`DELETE FROM events WHERE received_at < ${cutoff}`;
 
     const [{ count }] = await sql`SELECT count(*) as count FROM events WHERE org_id = ${org.id}`;
@@ -87,7 +87,7 @@ describe('Chunk 122 — Data retention handler', () => {
     `;
 
     // Delete old alerts (365 days retention)
-    const cutoff = new Date(Date.now() - 365 * 86_400_000);
+    const cutoff = new Date(Date.now() - 365 * 86_400_000).toISOString();
     await sql`DELETE FROM alerts WHERE created_at < ${cutoff}`;
 
     const [{ count }] = await sql`SELECT count(*) as count FROM alerts WHERE org_id = ${org.id}`;
