@@ -5,9 +5,10 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const fetchSpy = vi.spyOn(globalThis, 'fetch');
+const fetchMock = vi.fn();
+vi.stubGlobal('fetch', fetchMock);
 
-beforeEach(() => { fetchSpy.mockReset(); });
+beforeEach(() => { fetchMock.mockReset(); });
 afterEach(() => { vi.restoreAllMocks(); });
 
 const sampleAlert = {
@@ -23,7 +24,7 @@ const sampleAlert = {
 describe('Chunk 129 — Slack API integration', () => {
   describe('sendSlackMessage success', () => {
     it('should POST to chat.postMessage with correct headers and body', async () => {
-      fetchSpy.mockResolvedValueOnce(new Response(
+      fetchMock.mockResolvedValueOnce(new Response(
         JSON.stringify({ ok: true, ts: '1234567890.123456' }),
         { status: 200 },
       ));
@@ -31,8 +32,8 @@ describe('Chunk 129 — Slack API integration', () => {
       const { sendSlackMessage } = await import('../../packages/notifications/src/slack.js');
       await sendSlackMessage('xoxb-test-token', 'C01ABCDEF', sampleAlert);
 
-      expect(fetchSpy).toHaveBeenCalledOnce();
-      const [url, init] = fetchSpy.mock.calls[0];
+      expect(fetchMock).toHaveBeenCalledOnce();
+      const [url, init] = fetchMock.mock.calls[0];
       expect(url).toBe('https://slack.com/api/chat.postMessage');
       expect((init as RequestInit).method).toBe('POST');
 
@@ -50,7 +51,7 @@ describe('Chunk 129 — Slack API integration', () => {
 
   describe('sendSlackMessage error responses', () => {
     it('should throw on Slack API error (invalid_auth)', async () => {
-      fetchSpy.mockResolvedValueOnce(new Response(
+      fetchMock.mockResolvedValueOnce(new Response(
         JSON.stringify({ ok: false, error: 'invalid_auth' }),
         { status: 200 },
       ));
@@ -62,7 +63,7 @@ describe('Chunk 129 — Slack API integration', () => {
     });
 
     it('should throw on channel_not_found error', async () => {
-      fetchSpy.mockResolvedValueOnce(new Response(
+      fetchMock.mockResolvedValueOnce(new Response(
         JSON.stringify({ ok: false, error: 'channel_not_found' }),
         { status: 200 },
       ));
@@ -74,7 +75,7 @@ describe('Chunk 129 — Slack API integration', () => {
     });
 
     it('should throw on rate_limited error', async () => {
-      fetchSpy.mockResolvedValueOnce(new Response(
+      fetchMock.mockResolvedValueOnce(new Response(
         JSON.stringify({ ok: false, error: 'rate_limited' }),
         { status: 200 },
       ));

@@ -18,15 +18,16 @@ vi.mock('@sentinel/shared/env', () => ({
   }),
 }));
 
-const fetchSpy = vi.spyOn(globalThis, 'fetch');
+const fetchMock = vi.fn();
+vi.stubGlobal('fetch', fetchMock);
 
-beforeEach(() => { fetchSpy.mockReset(); });
+beforeEach(() => { fetchMock.mockReset(); });
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('Chunk 127 — GitHub API integration', () => {
   describe('getInstallationAccessToken', () => {
     it('should POST to correct URL with Bearer JWT and return parsed token', async () => {
-      fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
         token: 'ghs_test_token_abc',
         expires_at: '2026-03-28T12:00:00Z',
         permissions: { contents: 'read' },
@@ -35,8 +36,8 @@ describe('Chunk 127 — GitHub API integration', () => {
       const { getInstallationAccessToken } = await import('../../modules/github/src/github-api.js');
       const result = await getInstallationAccessToken(99);
 
-      expect(fetchSpy).toHaveBeenCalledOnce();
-      const [url, init] = fetchSpy.mock.calls[0];
+      expect(fetchMock).toHaveBeenCalledOnce();
+      const [url, init] = fetchMock.mock.calls[0];
       expect(url).toBe('https://api.github.com/app/installations/99/access_tokens');
       expect((init as RequestInit).method).toBe('POST');
       expect((init as RequestInit).headers).toHaveProperty('Authorization');
@@ -45,7 +46,7 @@ describe('Chunk 127 — GitHub API integration', () => {
     });
 
     it('should throw on non-OK response', async () => {
-      fetchSpy.mockResolvedValueOnce(new Response('Not Found', { status: 404 }));
+      fetchMock.mockResolvedValueOnce(new Response('Not Found', { status: 404 }));
       const { getInstallationAccessToken } = await import('../../modules/github/src/github-api.js');
       await expect(getInstallationAccessToken(999)).rejects.toThrow('GitHub API error (404)');
     });
@@ -54,7 +55,7 @@ describe('Chunk 127 — GitHub API integration', () => {
   describe('getInstallationDetails', () => {
     it('should GET installation details and parse response', async () => {
       const body = { id: 42, app_slug: 'sentinel', target_type: 'Organization', account: { login: 'acme', id: 1, type: 'Organization' }, permissions: {}, events: ['push'] };
-      fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify(body), { status: 200 }));
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(body), { status: 200 }));
 
       const { getInstallationDetails } = await import('../../modules/github/src/github-api.js');
       const details = await getInstallationDetails(42);
@@ -84,19 +85,19 @@ describe('Chunk 127 — GitHub API integration', () => {
 
   describe('rate limit header handling', () => {
     it('should retry on 429 with Retry-After header', async () => {
-      fetchSpy
+      fetchMock
         .mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': '0' } }))
         .mockResolvedValueOnce(new Response(JSON.stringify({ id: 1 }), { status: 200, headers: { 'X-RateLimit-Remaining': '4999' } }));
 
       const { githubApiFetch } = await import('../../modules/github/src/github-api.js');
       const res = await githubApiFetch('/repos/test/test', { token: 'tok' });
       expect(res.status).toBe(200);
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     it('should throw after 3 retries on persistent rate limiting', async () => {
       const rateResp = () => new Response('', { status: 429, headers: { 'Retry-After': '0' } });
-      fetchSpy.mockResolvedValue(rateResp());
+      fetchMock.mockResolvedValue(rateResp());
 
       const { githubApiFetch } = await import('../../modules/github/src/github-api.js');
       await expect(githubApiFetch('/repos/x/y', { token: 'tok' })).rejects.toThrow('rate limited');

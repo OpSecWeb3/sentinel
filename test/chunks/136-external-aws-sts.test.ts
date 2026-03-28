@@ -7,16 +7,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockSend = vi.fn();
 
-vi.mock('@aws-sdk/client-sts', () => ({
-  STSClient: vi.fn().mockImplementation(() => ({ send: mockSend })),
-  AssumeRoleCommand: vi.fn().mockImplementation((input: unknown) => ({ input })),
-}));
+vi.mock('@aws-sdk/client-sts', () => {
+  return {
+    STSClient: class { send = mockSend; },
+    AssumeRoleCommand: class { input: unknown; constructor(input: unknown) { this.input = input; } },
+  };
+});
 
-vi.mock('@aws-sdk/client-sqs', () => ({
-  SQSClient: vi.fn().mockImplementation((config: unknown) => ({ config, send: vi.fn() })),
-  ReceiveMessageCommand: vi.fn().mockImplementation((input: unknown) => ({ input })),
-  DeleteMessageCommand: vi.fn().mockImplementation((input: unknown) => ({ input })),
-}));
+vi.mock('@aws-sdk/client-sqs', () => {
+  return {
+    SQSClient: class { config: unknown; send = vi.fn(); constructor(config: unknown) { this.config = config; } },
+    ReceiveMessageCommand: class { input: unknown; constructor(input: unknown) { this.input = input; } },
+    DeleteMessageCommand: class { input: unknown; constructor(input: unknown) { this.input = input; } },
+  };
+});
 
 beforeEach(() => { mockSend.mockReset(); });
 afterEach(() => { vi.restoreAllMocks(); });

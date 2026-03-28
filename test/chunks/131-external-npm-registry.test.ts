@@ -5,15 +5,16 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const fetchSpy = vi.spyOn(globalThis, 'fetch');
+const fetchMock = vi.fn();
+vi.stubGlobal('fetch', fetchMock);
 
-beforeEach(() => { fetchSpy.mockReset(); });
+beforeEach(() => { fetchMock.mockReset(); });
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('Chunk 131 — npm registry API integration', () => {
   describe('searchNpmScope', () => {
     it('should construct correct search URL with encoded scope', async () => {
-      fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
         objects: [
           { package: { name: '@acme/core', version: '2.1.0', description: 'Core lib' } },
           { package: { name: '@acme/utils', version: '1.0.0', description: 'Utilities' } },
@@ -23,8 +24,8 @@ describe('Chunk 131 — npm registry API integration', () => {
       const { searchNpmScope } = await import('../../modules/registry/src/npm-registry.js');
       const results = await searchNpmScope('@acme', 50);
 
-      expect(fetchSpy).toHaveBeenCalledOnce();
-      const [url] = fetchSpy.mock.calls[0];
+      expect(fetchMock).toHaveBeenCalledOnce();
+      const [url] = fetchMock.mock.calls[0];
       expect(url).toContain('registry.npmjs.org/-/v1/search');
       expect(url).toContain('scope%3A%40acme');
       expect(url).toContain('size=50');
@@ -34,7 +35,7 @@ describe('Chunk 131 — npm registry API integration', () => {
     });
 
     it('should filter results to exact scope prefix', async () => {
-      fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
         objects: [
           { package: { name: '@acme/core', version: '1.0.0' } },
           { package: { name: '@acme-fork/core', version: '1.0.0' } },
@@ -50,24 +51,24 @@ describe('Chunk 131 — npm registry API integration', () => {
     });
 
     it('should cap limit at 250', async () => {
-      fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ objects: [] }), { status: 200 }));
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ objects: [] }), { status: 200 }));
 
       const { searchNpmScope } = await import('../../modules/registry/src/npm-registry.js');
       await searchNpmScope('@big-scope', 999);
 
-      const [url] = fetchSpy.mock.calls[0];
+      const [url] = fetchMock.mock.calls[0];
       expect(url).toContain('size=250');
     });
 
     it('should throw on non-OK response (rate limit)', async () => {
-      fetchSpy.mockResolvedValueOnce(new Response('Too Many Requests', { status: 429 }));
+      fetchMock.mockResolvedValueOnce(new Response('Too Many Requests', { status: 429 }));
 
       const { searchNpmScope } = await import('../../modules/registry/src/npm-registry.js');
       await expect(searchNpmScope('@acme')).rejects.toThrow('npm registry search failed (429)');
     });
 
     it('should throw on server error', async () => {
-      fetchSpy.mockResolvedValueOnce(new Response('Internal Server Error', { status: 503 }));
+      fetchMock.mockResolvedValueOnce(new Response('Internal Server Error', { status: 503 }));
 
       const { searchNpmScope } = await import('../../modules/registry/src/npm-registry.js');
       await expect(searchNpmScope('@acme')).rejects.toThrow('npm registry search failed (503)');

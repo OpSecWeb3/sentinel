@@ -60,7 +60,7 @@ describe('Chunk 141 — GitHub module router', () => {
       visibility: 'private',
     });
 
-    const res = await appRequest(app, 'GET', `/modules/github/installations/${install.id}/repos`, {
+    const res = await appRequest(app, 'GET', '/modules/github/repositories', {
       cookie: session.cookie,
     });
 

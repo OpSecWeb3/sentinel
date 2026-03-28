@@ -34,9 +34,11 @@ describe('Chunk 119 — Worker correlation evaluation', () => {
 
     // Insert correlation rule
     await sql`
-      INSERT INTO correlation_rules (id, org_id, name, type, module_id, severity, config, status)
-      VALUES (gen_random_uuid(), ${org.id}, 'Test Sequence', 'sequence', 'github', 'high',
+      INSERT INTO correlation_rules (id, org_id, name, severity, config, status)
+      VALUES (gen_random_uuid(), ${org.id}, 'Test Sequence', 'high',
         ${JSON.stringify({
+          type: 'sequence',
+          moduleId: 'github',
           steps: [
             { eventType: 'github.repo_visibility', conditions: [] },
             { eventType: 'github.push', conditions: [] },

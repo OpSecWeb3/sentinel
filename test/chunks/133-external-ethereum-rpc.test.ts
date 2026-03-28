@@ -5,7 +5,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const fetchSpy = vi.spyOn(globalThis, 'fetch');
+const fetchMock = vi.fn();
+vi.stubGlobal('fetch', fetchMock);
 
 vi.mock('@sentinel/shared/logger', () => ({
   logger: { child: () => ({ warn: vi.fn(), debug: vi.fn(), info: vi.fn(), error: vi.fn() }) },
@@ -14,7 +15,7 @@ vi.mock('../../modules/chain/src/rpc-usage.js', () => ({
   trackRpcCall: vi.fn(),
 }));
 
-beforeEach(() => { fetchSpy.mockReset(); });
+beforeEach(() => { fetchMock.mockReset(); });
 afterEach(() => { vi.restoreAllMocks(); });
 
 function jsonRpcOk(result: unknown) {
@@ -28,14 +29,14 @@ function jsonRpcError(code: number, message: string) {
 describe('Chunk 133 — Ethereum RPC integration', () => {
   describe('eth_getBalance', () => {
     it('should send correct JSON-RPC body and parse hex result', async () => {
-      fetchSpy.mockResolvedValueOnce(jsonRpcOk('0xde0b6b3a7640000')); // 1 ETH
+      fetchMock.mockResolvedValueOnce(jsonRpcOk('0xde0b6b3a7640000')); // 1 ETH
 
       const { createRpcClient } = await import('../../modules/chain/src/rpc.js');
       const client = createRpcClient(['https://rpc.example.com'], 1, { maxRetries: 0, retryDelayMs: 0, timeoutMs: 5000 });
       const balance = await client.getBalance('0xabc');
 
       expect(balance).toBe(1000000000000000000n);
-      const [, init] = fetchSpy.mock.calls[0];
+      const [, init] = fetchMock.mock.calls[0];
       const body = JSON.parse((init as RequestInit).body as string);
       expect(body.method).toBe('eth_getBalance');
       expect(body.params).toEqual(['0xabc', 'latest']);
@@ -44,7 +45,7 @@ describe('Chunk 133 — Ethereum RPC integration', () => {
 
   describe('eth_getLogs', () => {
     it('should encode block range as hex and parse log entries', async () => {
-      fetchSpy.mockResolvedValueOnce(jsonRpcOk([
+      fetchMock.mockResolvedValueOnce(jsonRpcOk([
         { address: '0xtoken', topics: ['0xddf2'], data: '0x01', blockNumber: '0xa', transactionHash: '0xabc', logIndex: '0x0', transactionIndex: '0x0' },
       ]));
 
@@ -54,7 +55,7 @@ describe('Chunk 133 — Ethereum RPC integration', () => {
 
       expect(logs).toHaveLength(1);
       expect(logs[0].address).toBe('0xtoken');
-      const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
       expect(body.params[0].fromBlock).toBe('0x64');
       expect(body.params[0].toBlock).toBe('0xc8');
     });
@@ -62,14 +63,14 @@ describe('Chunk 133 — Ethereum RPC integration', () => {
 
   describe('eth_getStorageAt', () => {
     it('should request storage slot at latest block', async () => {
-      fetchSpy.mockResolvedValueOnce(jsonRpcOk('0x0000000000000000000000000000000000000000000000000000000000000001'));
+      fetchMock.mockResolvedValueOnce(jsonRpcOk('0x0000000000000000000000000000000000000000000000000000000000000001'));
 
       const { createRpcClient } = await import('../../modules/chain/src/rpc.js');
       const client = createRpcClient(['https://rpc.example.com'], 1, { maxRetries: 0, retryDelayMs: 0, timeoutMs: 5000 });
       const val = await client.getStorageAt('0xcontract', '0x0');
 
       expect(val).toContain('0x');
-      const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
       expect(body.method).toBe('eth_getStorageAt');
       expect(body.params).toEqual(['0xcontract', '0x0', 'latest']);
     });
@@ -77,7 +78,7 @@ describe('Chunk 133 — Ethereum RPC integration', () => {
 
   describe('JSON-RPC error handling', () => {
     it('should throw on JSON-RPC error response after exhausting retries', async () => {
-      fetchSpy.mockResolvedValue(jsonRpcError(-32000, 'execution reverted'));
+      fetchMock.mockResolvedValue(jsonRpcError(-32000, 'execution reverted'));
 
       const { createRpcClient } = await import('../../modules/chain/src/rpc.js');
       const client = createRpcClient(['https://rpc.example.com'], 1, { maxRetries: 0, retryDelayMs: 0, timeoutMs: 5000 });
@@ -87,7 +88,7 @@ describe('Chunk 133 — Ethereum RPC integration', () => {
 
   describe('retry logic with exponential backoff', () => {
     it('should retry on HTTP 500 and succeed on second attempt', async () => {
-      fetchSpy
+      fetchMock
         .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
         .mockResolvedValueOnce(jsonRpcOk('0x1'));
 
@@ -95,13 +96,13 @@ describe('Chunk 133 — Ethereum RPC integration', () => {
       const client = createRpcClient(['https://rpc.example.com'], 1, { maxRetries: 1, retryDelayMs: 0, timeoutMs: 5000 });
       const bn = await client.getBlockNumber();
       expect(bn).toBe(1n);
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
   });
 
   describe('node failover', () => {
     it('should try second URL when first fails', async () => {
-      fetchSpy
+      fetchMock
         .mockRejectedValueOnce(new Error('ECONNREFUSED'))
         .mockResolvedValueOnce(jsonRpcOk('0x5'));
 

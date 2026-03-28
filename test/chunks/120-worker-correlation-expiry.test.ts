@@ -60,9 +60,11 @@ describe('Chunk 120 — Correlation expiry handler', () => {
 
     // Create an absence correlation rule
     await sql`
-      INSERT INTO correlation_rules (id, org_id, name, type, module_id, severity, config, status)
-      VALUES (gen_random_uuid(), ${org.id}, 'Absence Rule', 'absence', 'infra', 'critical',
+      INSERT INTO correlation_rules (id, org_id, name, severity, config, status)
+      VALUES (gen_random_uuid(), ${org.id}, 'Absence Rule', 'critical',
         ${JSON.stringify({
+          type: 'absence',
+          moduleId: 'infra',
           triggerEvent: { eventType: 'infra.cert_scan' },
           expectedEvent: { eventType: 'infra.cert_valid' },
           windowMinutes: 5,
@@ -73,7 +75,7 @@ describe('Chunk 120 — Correlation expiry handler', () => {
     // Verify the rule exists
     const rules = await sql`SELECT * FROM correlation_rules WHERE org_id = ${org.id}`;
     expect(rules.length).toBe(1);
-    expect(rules[0].type).toBe('absence');
+    expect((rules[0].config as any).type).toBe('absence');
   });
 
   it('should handle empty expiry set gracefully', async () => {
