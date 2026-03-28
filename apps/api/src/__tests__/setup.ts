@@ -60,6 +60,8 @@ beforeAll(async () => {
       username TEXT UNIQUE NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
+      failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+      locked_until TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -68,7 +70,8 @@ beforeAll(async () => {
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name TEXT NOT NULL,
       slug TEXT UNIQUE NOT NULL,
-      invite_secret TEXT,
+      invite_secret_hash TEXT,
+      invite_secret_encrypted TEXT,
       webhook_secret_encrypted TEXT,
       notify_key_hash TEXT,
       notify_key_prefix TEXT,
