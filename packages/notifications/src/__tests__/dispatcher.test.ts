@@ -106,11 +106,12 @@ describe('dispatchAlert — Slack bot token', () => {
 
 describe('dispatchAlert — email channel', () => {
   it('dispatches to email channel', async () => {
-    const results = await dispatchAlert([emailChannel()], baseAlert());
+    const alert = baseAlert();
+    const results = await dispatchAlert([emailChannel()], alert);
 
     expect(sendEmailNotification).toHaveBeenCalledWith(
       ['ops@example.com', 'sec@example.com'],
-      baseAlert(),
+      alert,
     );
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({
