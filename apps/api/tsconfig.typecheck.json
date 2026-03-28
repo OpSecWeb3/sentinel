@@ -1,0 +1,16 @@
+{
+  // Typecheck config: includes API tests + shared monorepo harness files.
+  // This avoids widening build rootDir while still enforcing test typing.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "baseUrl": "../..",
+    "paths": {
+      "@sentinel/db": ["packages/db/index.ts"],
+      "@sentinel/db/*": ["packages/db/*"]
+    }
+  },
+  "include": ["src", "../../test/helpers/setup.ts"],
+  "exclude": []
+}

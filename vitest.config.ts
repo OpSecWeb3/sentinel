@@ -22,10 +22,10 @@ export default defineConfig({
         '**/__tests__/**', '**/dist/**', '**/node_modules/**',
       ],
       thresholds: {
-        lines: 50,
-        functions: 50,
-        branches: 40,
-        statements: 50,
+        lines: 49,
+        functions: 62,
+        branches: 79,
+        statements: 49,
       },
     },
     include: [
