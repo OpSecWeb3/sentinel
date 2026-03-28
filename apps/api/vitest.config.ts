@@ -32,8 +32,8 @@ export default defineConfig({
     env: {
       NODE_ENV: 'test',
       PORT: '0', // Let the OS pick an available port during tests
-      DATABASE_URL: 'postgresql://sentinel:sentinel@localhost:5432/sentinel_test',
-      REDIS_URL: 'redis://localhost:6379/1',
+      DATABASE_URL: 'postgresql://sentinel:sentinel@localhost:5434/sentinel_test',
+      REDIS_URL: 'redis://localhost:6380/1',
       SESSION_SECRET: 'test-session-secret-at-least-32-chars-long!!',
       ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       ALLOWED_ORIGINS: 'http://localhost:3000',

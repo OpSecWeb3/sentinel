@@ -92,9 +92,9 @@ let _db: TestDb | undefined;
 let _redis: Redis | undefined;
 
 const TEST_DATABASE_URL =
-  process.env.DATABASE_URL ?? 'postgresql://sentinel:sentinel@localhost:5432/sentinel_test';
+  process.env.DATABASE_URL ?? 'postgresql://sentinel:sentinel@localhost:5434/sentinel_test';
 const TEST_REDIS_URL =
-  process.env.REDIS_URL ?? 'redis://localhost:6379/1';
+  process.env.REDIS_URL ?? 'redis://localhost:6380/1';
 
 /**
  * Return the shared test Drizzle instance.
@@ -200,6 +200,8 @@ async function pushSchema(sql: ReturnType<typeof postgres>): Promise<void> {
       username TEXT UNIQUE NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
+      failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+      locked_until TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
@@ -211,6 +213,8 @@ async function pushSchema(sql: ReturnType<typeof postgres>): Promise<void> {
       name TEXT NOT NULL,
       slug TEXT UNIQUE NOT NULL,
       invite_secret TEXT,
+      invite_secret_hash TEXT,
+      invite_secret_encrypted TEXT,
       webhook_secret_encrypted TEXT,
       notify_key_hash TEXT,
       notify_key_prefix TEXT,
@@ -234,10 +238,14 @@ async function pushSchema(sql: ReturnType<typeof postgres>): Promise<void> {
     CREATE TABLE IF NOT EXISTS sessions (
       sid TEXT PRIMARY KEY,
       sess JSONB NOT NULL,
-      expire TIMESTAMPTZ NOT NULL
+      expire TIMESTAMPTZ NOT NULL,
+      user_id UUID,
+      org_id UUID
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_sessions_expire ON sessions(expire)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_sessions_org_id ON sessions(org_id)`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS api_keys (
@@ -292,6 +300,7 @@ async function pushSchema(sql: ReturnType<typeof postgres>): Promise<void> {
       status TEXT NOT NULL DEFAULT 'active',
       priority INTEGER NOT NULL DEFAULT 50,
       action TEXT NOT NULL DEFAULT 'alert',
+      last_triggered_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
@@ -332,6 +341,25 @@ async function pushSchema(sql: ReturnType<typeof postgres>): Promise<void> {
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_alerts_org ON alerts(org_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_alerts_detection ON alerts(detection_id)`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS notification_deliveries (
+      id BIGSERIAL PRIMARY KEY,
+      alert_id BIGINT NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+      channel_id TEXT NOT NULL,
+      channel_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      status_code INTEGER,
+      response_time_ms INTEGER,
+      error TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 1,
+      sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_notif_deliveries_alert ON notification_deliveries(alert_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_notif_deliveries_status ON notification_deliveries(status)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_notif_deliveries_created ON notification_deliveries(created_at)`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS notification_channels (
@@ -573,6 +601,7 @@ const ALL_DATA_TABLES = [
   'github_installations',
   'infra_hosts',
   // Core tables
+  'notification_deliveries',
   'audit_log',
   'alerts',
   'rules',
