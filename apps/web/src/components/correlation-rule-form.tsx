@@ -1022,7 +1022,7 @@ export function CorrelationRuleForm({ mode, ruleId, initialData, loading: extern
                           </button>
                         </div>
                         <p className="text-xs text-muted-foreground/60 mb-2">
-                          Link fields between this event and a previous step's event
+                          Link fields between this event and a previous step event
                         </p>
                         {step.matchConditions.map((mc, j) => {
                           const refStepFields = mc.refStep ? fieldsForStepName(mc.refStep) : [];

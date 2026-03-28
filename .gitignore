@@ -4,6 +4,7 @@ dist/
 .env.*
 !.env.example
 *.tsbuildinfo
+coverage/
 .DS_Store
 
 # Next.js build output

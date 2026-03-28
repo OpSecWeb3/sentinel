@@ -1,8 +1,11 @@
 {
+  // Build config: keep output scoped to API runtime source only.
+  // Test/harness typing lives in tsconfig.typecheck.json.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/__tests__/**"]
 }

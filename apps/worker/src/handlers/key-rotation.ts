@@ -7,7 +7,6 @@ import { githubInstallations } from '@sentinel/db/schema/github';
 import { rcArtifacts } from '@sentinel/db/schema/registry';
 import { infraCdnProviderConfigs } from '@sentinel/db/schema/infra';
 import { awsIntegrations } from '@sentinel/db/schema/aws';
-import type { AnyPgTable } from 'drizzle-orm/pg-core';
 import { decrypt, encrypt, needsReEncrypt } from '@sentinel/shared/crypto';
 import { QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { logger as rootLogger } from '@sentinel/shared/logger';
@@ -20,7 +19,13 @@ const _log = rootLogger.child({ component: 'key-rotation' });
  */
 interface RotationTarget {
   name: string;
-  table: AnyPgTable;
+  table:
+    | typeof organizations
+    | typeof slackInstallations
+    | typeof githubInstallations
+    | typeof rcArtifacts
+    | typeof infraCdnProviderConfigs
+    | typeof awsIntegrations;
   column: string;
 }
 
