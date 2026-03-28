@@ -1,4 +1,41 @@
+# Local development — one command: docker compose -f docker-compose.dev.yml up
+#
+# All services hot-reload. Source is bind-mounted, so code changes
+# are picked up instantly by tsx watch (api/worker) and next dev (web).
+#
+# Ports:
+#   3000  web (Next.js)
+#   4000  api (Hono)
+#   5434  postgres
+#   6380  redis
+
+x-app-base: &app-base
+  build:
+    context: .
+    dockerfile: Dockerfile.dev
+  env_file: .env
+  volumes:
+    # Mount source code for hot-reload
+    - ./apps:/app/apps
+    - ./packages:/app/packages
+    - ./modules:/app/modules
+    - ./tsconfig.base.json:/app/tsconfig.base.json
+    # Prevent host node_modules from shadowing container installs
+    - /app/node_modules
+    - /app/apps/api/node_modules
+    - /app/apps/worker/node_modules
+    - /app/apps/web/node_modules
+    - /app/packages/shared/node_modules
+    - /app/packages/db/node_modules
+    - /app/packages/notifications/node_modules
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
 services:
+  # ── Infrastructure ──────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: sentinel-postgres
@@ -19,67 +56,70 @@ services:
   redis:
     image: redis:7-alpine
     container_name: sentinel-redis
-    command: redis-server --requirepass sentinel-dev
     ports:
       - "6380:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "sentinel-dev", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  # ── Application (hot-reload) ────────────────────────────────────────
   api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
+    <<: *app-base
     container_name: sentinel-api
-    env_file: .env
     environment:
       - DATABASE_URL=postgresql://sentinel:${POSTGRES_PASSWORD:-sentinel}@postgres:5432/sentinel
-      - REDIS_URL=redis://:sentinel-dev@redis:6379
+      - REDIS_URL=redis://redis:6379
       - PORT=4000
     ports:
       - "4000:4000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    profiles:
-      - full
+    command: tsx watch apps/api/src/index.ts
 
   worker:
-    build:
-      context: .
-      dockerfile: apps/worker/Dockerfile
+    <<: *app-base
     container_name: sentinel-worker
-    env_file: .env
     environment:
       - DATABASE_URL=postgresql://sentinel:${POSTGRES_PASSWORD:-sentinel}@postgres:5432/sentinel
-      - REDIS_URL=redis://:sentinel-dev@redis:6379
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    profiles:
-      - full
+      - REDIS_URL=redis://redis:6379
+    command: tsx watch apps/worker/src/index.ts
 
   web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
+    <<: *app-base
     container_name: sentinel-web
-    env_file: .env
     environment:
-      - PORT=3000
+      - NEXT_PUBLIC_API_URL=http://localhost:4000
       - HOSTNAME=0.0.0.0
+      - PORT=3000
     ports:
       - "3000:3000"
-    depends_on:
-      - api
+    command: sh -c "cd apps/web && npx next dev --turbopack --hostname 0.0.0.0 --port 3000"
+
+  # ── Test runner (on-demand) ─────────────────────────────────────────
+  test:
+    <<: *app-base
+    container_name: sentinel-test
+    environment:
+      - NODE_ENV=test
+      - DATABASE_URL=postgresql://sentinel:${POSTGRES_PASSWORD:-sentinel}@postgres:5432/sentinel_test
+      - REDIS_URL=redis://redis:6379/1
+      - SESSION_SECRET=test-session-secret-at-least-32-chars-long!!
+      - ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      - ALLOWED_ORIGINS=http://localhost:3000
+      - SMTP_FROM=test@sentinel.dev
+      - DISABLE_RATE_LIMIT=true
+    volumes:
+      # Also mount test files
+      - ./test:/app/test
+      - ./vitest.config.ts:/app/vitest.config.ts
+      - ./apps:/app/apps
+      - ./packages:/app/packages
+      - ./modules:/app/modules
+      - ./tsconfig.base.json:/app/tsconfig.base.json
+      - /app/node_modules
     profiles:
-      - full
+      - test
+    command: pnpm vitest run
 
 volumes:
   sentinel-pgdata:

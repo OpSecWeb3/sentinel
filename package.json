@@ -3,14 +3,20 @@
   "private": true,
   "packageManager": "pnpm@9.15.4",
   "scripts": {
+    "dev": "docker compose -f docker-compose.dev.yml up",
+    "dev:build": "docker compose -f docker-compose.dev.yml up --build",
+    "dev:down": "docker compose -f docker-compose.dev.yml down",
+    "dev:infra": "docker compose -f docker-compose.dev.yml up postgres redis",
     "dev:api": "pnpm --filter @sentinel/api dev",
     "dev:worker": "pnpm --filter @sentinel/worker dev",
     "dev:web": "pnpm --filter @sentinel/web dev",
     "build": "pnpm -r build",
     "db:generate": "pnpm --filter @sentinel/db generate",
     "db:migrate": "pnpm --filter @sentinel/db migrate",
+    "db:seed": "pnpm --filter @sentinel/db seed",
     "db:studio": "pnpm --filter @sentinel/db studio",
     "test": "vitest run",
+    "test:docker": "docker compose -f docker-compose.dev.yml --profile test run --rm test",
     "test:unit": "vitest run --project packages/shared",
     "test:integration": "vitest run --project apps/api",
     "test:watch": "vitest watch",
@@ -18,8 +24,10 @@
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^3.0.0",
+    "ioredis": "^5.4.2",
+    "postgres": "^3.4.5",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "@vitest/coverage-v8": "^3.0.0"
+    "vitest": "^3.0.0"
   }
 }
