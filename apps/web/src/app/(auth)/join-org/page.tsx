@@ -53,8 +53,8 @@ export default function JoinOrgPage() {
       )}
 
       <div>
-        <label className="mb-1 block text-xs text-muted-foreground">
-          --invite-secret
+        <label className="mb-1 block text-xs text-primary">
+          invite secret
         </label>
         <Input
           type="text"

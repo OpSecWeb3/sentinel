@@ -110,7 +110,7 @@ export default function RegisterPage() {
 
       {/* Mode toggle */}
       <div className="flex items-center gap-3 text-xs">
-        <span className="text-muted-foreground">--mode</span>
+        <span className="text-muted-foreground">mode</span>
         <button
           type="button"
           onClick={() => setMode("first-user")}
@@ -141,8 +141,8 @@ export default function RegisterPage() {
 
       <div className="space-y-3">
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
-            --username
+          <label className="mb-1 block text-xs text-primary">
+            username
           </label>
           <Input
             type="text"
@@ -156,8 +156,8 @@ export default function RegisterPage() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
-            --email
+          <label className="mb-1 block text-xs text-primary">
+            email
           </label>
           <Input
             type="email"
@@ -170,8 +170,8 @@ export default function RegisterPage() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
-            --password
+          <label className="mb-1 block text-xs text-primary">
+            password
           </label>
           <Input
             type="password"
@@ -186,8 +186,8 @@ export default function RegisterPage() {
 
         {mode === "first-user" ? (
           <div>
-            <label className="mb-1 block text-xs text-muted-foreground">
-              --org-name
+            <label className="mb-1 block text-xs text-primary">
+              org name
             </label>
             <Input
               type="text"
@@ -202,8 +202,8 @@ export default function RegisterPage() {
           </div>
         ) : (
           <div>
-            <label className="mb-1 block text-xs text-muted-foreground">
-              --invite-secret
+            <label className="mb-1 block text-xs text-primary">
+              invite secret
             </label>
             <Input
               type="text"

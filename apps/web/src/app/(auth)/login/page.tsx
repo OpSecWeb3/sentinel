@@ -62,8 +62,8 @@ export default function LoginPage() {
 
       <div className="space-y-3">
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
-            --username
+          <label className="mb-1 block text-xs text-primary">
+            username
           </label>
           <Input
             type="text"
@@ -77,8 +77,8 @@ export default function LoginPage() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">
-            --password
+          <label className="mb-1 block text-xs text-primary">
+            password
           </label>
           <Input
             type="password"
