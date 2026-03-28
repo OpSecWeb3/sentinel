@@ -16,6 +16,7 @@ import {
   createTestRule,
 } from '../helpers/setup.js';
 import { RuleEngine } from '@sentinel/shared/rule-engine';
+import { z } from 'zod';
 import type { NormalizedEvent } from '@sentinel/shared/rules';
 
 function makeChainEvent(orgId: string, payload: Record<string, unknown>): NormalizedEvent {
@@ -58,14 +59,25 @@ describe('Chunk 089 — Chain view_call evaluator', () => {
     });
 
     const evaluators = new Map();
-    evaluators.set('chain.view_call', {
-      evaluate: (ev: NormalizedEvent, config: any) => {
-        const result = ev.payload?.result;
-        const cond = config.condition;
+    evaluators.set('chain:chain.view_call', {
+      configSchema: z.object({}).passthrough(),
+      evaluate: (ctx: any) => {
+        const result = ctx.event.payload?.result;
+        const cond = ctx.rule.config.condition;
         if (cond.op === 'eq' && result === cond.value) {
-          return { match: true, title: `View call ${config.function}: ${result}`, description: '' };
+          return {
+            orgId: ctx.event.orgId,
+            detectionId: ctx.rule.detectionId,
+            ruleId: ctx.rule.id,
+            eventId: ctx.event.id,
+            severity: 'high',
+            title: `View call ${ctx.rule.config.function}: ${result}`,
+            description: '',
+            triggerType: 'immediate',
+            triggerData: ctx.event.payload,
+          };
         }
-        return { match: false };
+        return null;
       },
     });
 
@@ -97,13 +109,24 @@ describe('Chunk 089 — Chain view_call evaluator', () => {
     });
 
     const evaluators = new Map();
-    evaluators.set('chain.view_call', {
-      evaluate: (ev: NormalizedEvent, config: any) => {
-        const result = ev.payload?.result;
-        if (config.condition.op === 'eq' && result === config.condition.value) {
-          return { match: true, title: 'match', description: '' };
+    evaluators.set('chain:chain.view_call', {
+      configSchema: z.object({}).passthrough(),
+      evaluate: (ctx: any) => {
+        const result = ctx.event.payload?.result;
+        if (ctx.rule.config.condition.op === 'eq' && result === ctx.rule.config.condition.value) {
+          return {
+            orgId: ctx.event.orgId,
+            detectionId: ctx.rule.detectionId,
+            ruleId: ctx.rule.id,
+            eventId: ctx.event.id,
+            severity: 'high',
+            title: 'match',
+            description: '',
+            triggerType: 'immediate',
+            triggerData: ctx.event.payload,
+          };
         }
-        return { match: false };
+        return null;
       },
     });
 
