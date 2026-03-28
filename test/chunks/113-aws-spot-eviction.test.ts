@@ -14,6 +14,7 @@ import {
   createTestRule,
 } from '../helpers/setup.js';
 import { RuleEngine } from '@sentinel/shared/rule-engine';
+import { z } from 'zod';
 import type { NormalizedEvent } from '@sentinel/shared/rules';
 
 function makeAwsEvent(orgId: string, payload: Record<string, unknown>): NormalizedEvent {
@@ -56,16 +57,25 @@ describe('Chunk 113 — AWS spot eviction evaluator', () => {
     });
 
     const evaluators = new Map();
-    evaluators.set('aws.spot_eviction', {
-      evaluate: (ev: NormalizedEvent, config: any) => {
-        const instanceId = ev.payload?.instanceId as string;
-        if (!config.watchInstanceIds || config.watchInstanceIds.length === 0) {
-          return { match: true, title: `Spot eviction: ${instanceId}`, description: '' };
+    evaluators.set('aws:aws.spot_eviction', {
+      configSchema: z.object({}).passthrough(),
+      evaluate: (ctx: any) => {
+        const instanceId = ctx.event.payload?.instanceId as string;
+        if (!ctx.rule.config.watchInstanceIds || ctx.rule.config.watchInstanceIds.length === 0) {
+          return {
+            orgId: ctx.event.orgId, detectionId: ctx.rule.detectionId, ruleId: ctx.rule.id,
+            eventId: ctx.event.id, severity: 'high', title: `Spot eviction: ${instanceId}`,
+            description: '', triggerType: 'immediate', triggerData: ctx.event.payload,
+          };
         }
-        if (config.watchInstanceIds.includes(instanceId)) {
-          return { match: true, title: `Spot eviction: ${instanceId}`, description: '' };
+        if (ctx.rule.config.watchInstanceIds.includes(instanceId)) {
+          return {
+            orgId: ctx.event.orgId, detectionId: ctx.rule.detectionId, ruleId: ctx.rule.id,
+            eventId: ctx.event.id, severity: 'high', title: `Spot eviction: ${instanceId}`,
+            description: '', triggerType: 'immediate', triggerData: ctx.event.payload,
+          };
         }
-        return { match: false };
+        return null;
       },
     });
 
@@ -92,13 +102,18 @@ describe('Chunk 113 — AWS spot eviction evaluator', () => {
     });
 
     const evaluators = new Map();
-    evaluators.set('aws.spot_eviction', {
-      evaluate: (ev: NormalizedEvent, config: any) => {
-        const instanceId = ev.payload?.instanceId as string;
-        if (config.watchInstanceIds?.includes(instanceId)) {
-          return { match: true, title: `Spot eviction: ${instanceId}`, description: '' };
+    evaluators.set('aws:aws.spot_eviction', {
+      configSchema: z.object({}).passthrough(),
+      evaluate: (ctx: any) => {
+        const instanceId = ctx.event.payload?.instanceId as string;
+        if (ctx.rule.config.watchInstanceIds?.includes(instanceId)) {
+          return {
+            orgId: ctx.event.orgId, detectionId: ctx.rule.detectionId, ruleId: ctx.rule.id,
+            eventId: ctx.event.id, severity: 'high', title: `Spot eviction: ${instanceId}`,
+            description: '', triggerType: 'immediate', triggerData: ctx.event.payload,
+          };
         }
-        return { match: false };
+        return null;
       },
     });
 
@@ -125,12 +140,17 @@ describe('Chunk 113 — AWS spot eviction evaluator', () => {
     });
 
     const evaluators = new Map();
-    evaluators.set('aws.spot_eviction', {
-      evaluate: (ev: NormalizedEvent, config: any) => {
-        if (!config.watchInstanceIds || config.watchInstanceIds.length === 0) {
-          return { match: true, title: 'Spot eviction detected', description: '' };
+    evaluators.set('aws:aws.spot_eviction', {
+      configSchema: z.object({}).passthrough(),
+      evaluate: (ctx: any) => {
+        if (!ctx.rule.config.watchInstanceIds || ctx.rule.config.watchInstanceIds.length === 0) {
+          return {
+            orgId: ctx.event.orgId, detectionId: ctx.rule.detectionId, ruleId: ctx.rule.id,
+            eventId: ctx.event.id, severity: 'high', title: 'Spot eviction detected',
+            description: '', triggerType: 'immediate', triggerData: ctx.event.payload,
+          };
         }
-        return { match: false };
+        return null;
       },
     });
 
