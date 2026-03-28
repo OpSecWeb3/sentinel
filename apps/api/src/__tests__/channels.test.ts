@@ -98,11 +98,10 @@ describe('POST /api/channels', () => {
     expect(res.status).toBe(201);
     expect(body.data.type).toBe('webhook');
     expect(body.data.config.url).toBe('https://hooks.example.com/sentinel');
-    // Secret should be auto-generated (64 hex chars)
-    expect(body.data.config.secret).toBeDefined();
-    expect(body.data.config.secret.length).toBe(64);
-    // The generated secret should also be returned at the top level
-    expect(body.generatedSecret).toBe(body.data.config.secret);
+    // Secret is auto-generated and returned once as generatedSecret; stored value is redacted
+    expect(body.generatedSecret).toBeDefined();
+    expect(body.generatedSecret.length).toBe(64);
+    expect(body.data.config.secret).toBe('***');
   });
 
   it('keeps user-provided webhook secret', async () => {
@@ -111,7 +110,8 @@ describe('POST /api/channels', () => {
       config: { url: 'https://hooks.example.com/sentinel', secret: 'my-custom-secret' },
     });
 
-    expect(body.data.config.secret).toBe('my-custom-secret');
+    // User-provided secret is encrypted at rest and redacted in responses
+    expect(body.data.config.secret).toBe('***');
     // No generatedSecret when user provides their own
     expect(body.generatedSecret).toBeUndefined();
   });

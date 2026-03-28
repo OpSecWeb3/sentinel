@@ -72,3 +72,4 @@ jobs:
           ALLOWED_ORIGINS: http://localhost:3000
           SMTP_FROM: test@sentinel.dev
           DISABLE_RATE_LIMIT: "true"
+          SMTP_URL: "smtp://localhost:1025"
