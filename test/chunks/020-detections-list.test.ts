@@ -48,7 +48,7 @@ describe('Chunk 020 — List detections with filters', () => {
     expect(res.status).toBe(200);
     const body = await res.json() as any;
     expect(body.data.length).toBe(2);
-    expect(body.total).toBe(2);
+    expect(body.meta.total).toBe(2);
   });
 
   it('should filter by moduleId', async () => {
@@ -108,7 +108,7 @@ describe('Chunk 020 — List detections with filters', () => {
     });
     const body1 = await page1.json() as any;
     expect(body1.data.length).toBe(2);
-    expect(body1.total).toBe(5);
+    expect(body1.meta.total).toBe(5);
 
     const page2 = await appRequest(app, 'GET', '/api/detections', {
       cookie: admin.cookie,
@@ -128,6 +128,6 @@ describe('Chunk 020 — List detections with filters', () => {
 
     const body = await res.json() as any;
     expect(body.data).toEqual([]);
-    expect(body.total).toBe(0);
+    expect(body.meta.total).toBe(0);
   });
 });

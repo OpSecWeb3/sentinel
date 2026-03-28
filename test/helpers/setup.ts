@@ -90,11 +90,14 @@ export interface TestRule {
 let _sql: ReturnType<typeof postgres> | undefined;
 let _db: TestDb | undefined;
 let _redis: Redis | undefined;
+let _setupLockSql: ReturnType<typeof postgres> | undefined;
 
 const TEST_DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgresql://sentinel:sentinel@localhost:5434/sentinel_test';
 const TEST_REDIS_URL =
   process.env.REDIS_URL ?? 'redis://localhost:6380/1';
+const SETUP_LOCK_KEY_1 = 548731;
+const SETUP_LOCK_KEY_2 = 99213;
 
 /**
  * Return the shared test Drizzle instance.
@@ -131,18 +134,24 @@ export function getTestRedis(): Redis {
 // ---------------------------------------------------------------------------
 
 beforeAll(async () => {
-  // --- Postgres ---
-  _sql = postgres(TEST_DATABASE_URL, { max: 5 });
-  _db = drizzle(_sql, { schema });
+  // Serialize destructive schema reset across concurrent test runners/processes.
+  // This prevents races where one process drops/recreates public schema while
+  // another process is bootstrapping or executing tests.
+  _setupLockSql = postgres(TEST_DATABASE_URL, { max: 1 });
+  await _setupLockSql`SELECT pg_advisory_lock(${SETUP_LOCK_KEY_1}, ${SETUP_LOCK_KEY_2})`;
 
   // Drop and recreate the public schema so every test run starts clean.
-  await _sql`DROP SCHEMA IF EXISTS public CASCADE`;
-  await _sql`CREATE SCHEMA public`;
+  await _setupLockSql`DROP SCHEMA IF EXISTS public CASCADE`;
+  await _setupLockSql`CREATE SCHEMA IF NOT EXISTS public`;
 
   // Run Drizzle migrations. We push the schema directly rather than running
   // migration files, which keeps tests in sync with the current schema
   // definition without requiring a separate generate step.
-  await pushSchema(_sql);
+  await pushSchema(_setupLockSql);
+
+  // --- Postgres runtime client used by test helpers ---
+  _sql = postgres(TEST_DATABASE_URL, { max: 5 });
+  _db = drizzle(_sql, { schema });
 
   // --- Redis ---
   _redis = new Redis(TEST_REDIS_URL, {
@@ -172,6 +181,11 @@ afterAll(async () => {
     await _sql.end();
     _sql = undefined;
     _db = undefined;
+  }
+  if (_setupLockSql) {
+    await _setupLockSql`SELECT pg_advisory_unlock(${SETUP_LOCK_KEY_1}, ${SETUP_LOCK_KEY_2})`;
+    await _setupLockSql.end();
+    _setupLockSql = undefined;
   }
 });
 

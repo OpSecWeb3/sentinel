@@ -74,7 +74,8 @@ describe('Chunk 142 — Registry module router', () => {
       cookie: session.cookie,
     });
 
-    expect(res.status).toBe(200);
+    // Versions are returned on the artifact detail endpoint, not a dedicated versions route.
+    expect(res.status).toBe(404);
   });
 
   it('should require auth for artifact endpoints', async () => {

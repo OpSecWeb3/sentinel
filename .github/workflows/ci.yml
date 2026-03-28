@@ -62,7 +62,7 @@ jobs:
           DATABASE_URL: postgresql://sentinel:sentinel@localhost:5432/sentinel_test
 
       - name: Test
-        run: pnpm test
+        run: pnpm test -- --coverage
         env:
           NODE_ENV: test
           DATABASE_URL: postgresql://sentinel:sentinel@localhost:5432/sentinel_test

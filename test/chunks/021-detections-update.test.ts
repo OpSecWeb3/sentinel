@@ -119,7 +119,11 @@ describe('Chunk 021 — Update detections', () => {
     });
 
     expect(res.status).toBe(200);
-    const body = await res.json() as any;
+    const getRes = await appRequest(app, 'GET', `/api/detections/${id}`, {
+      cookie: admin.cookie,
+    });
+    expect(getRes.status).toBe(200);
+    const body = await getRes.json() as any;
     expect(body.data.rules).toHaveLength(2);
     expect(body.data.rules.map((r: any) => r.ruleType)).toContain('github.branch_protection');
   });

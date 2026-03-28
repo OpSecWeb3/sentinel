@@ -111,7 +111,7 @@ describe('Gap 2 — Concurrency / TOCTOU in Redis patterns', () => {
 
     const config: CorrelationRuleConfig = {
       type: 'sequence',
-      correlationKey: [{ field: 'payload.repository.full_name' }],
+      correlationKey: [{ field: 'repository.full_name' }],
       windowMinutes: 10,
       steps: [
         { name: 'Step1', eventFilter: { eventType: 'github.push', conditions: [] }, matchConditions: [] },
@@ -158,7 +158,7 @@ describe('Gap 2 — Concurrency / TOCTOU in Redis patterns', () => {
 
     await createTestRule(detection.id, orgId, {
       moduleId: 'github',
-      ruleType: 'github:always-match',
+      ruleType: 'always-match',
       config: {},
       action: 'alert',
     });
@@ -205,7 +205,7 @@ describe('Gap 2 — Concurrency / TOCTOU in Redis patterns', () => {
 
     const config: CorrelationRuleConfig = {
       type: 'aggregation',
-      correlationKey: [{ field: 'payload.repository.full_name' }],
+      correlationKey: [{ field: 'repository.full_name' }],
       windowMinutes: 10,
       aggregation: {
         eventFilter: { eventType: 'github.push', conditions: [] },
@@ -242,7 +242,7 @@ describe('Gap 2 — Concurrency / TOCTOU in Redis patterns', () => {
 
     const config: CorrelationRuleConfig = {
       type: 'absence',
-      correlationKey: [{ field: 'payload.repository.full_name' }],
+      correlationKey: [{ field: 'repository.full_name' }],
       windowMinutes: 60,
       absence: {
         trigger: { eventFilter: { eventType: 'github.push', conditions: [] } },

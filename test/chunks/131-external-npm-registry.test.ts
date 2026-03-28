@@ -27,7 +27,7 @@ describe('Chunk 131 — npm registry API integration', () => {
       expect(fetchMock).toHaveBeenCalledOnce();
       const [url] = fetchMock.mock.calls[0];
       expect(url).toContain('registry.npmjs.org/-/v1/search');
-      expect(url).toContain('scope%3A%40acme');
+      expect(url).toContain('text=scope:%40acme');
       expect(url).toContain('size=50');
       expect(results).toHaveLength(2);
       expect(results[0].name).toBe('@acme/core');

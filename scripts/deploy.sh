@@ -10,12 +10,21 @@ RETRY_INTERVAL=2
 
 cd "$APP_DIR"
 
+ENV_PERMS=$(stat -c '%a' .env 2>/dev/null || echo "000")
+if [ "$ENV_PERMS" != "600" ]; then
+  echo "ERROR: .env has permissions $ENV_PERMS (expected 600). Run: chmod 600 .env"
+  exit 1
+fi
+
 echo "==> Pulling latest code..."
 git pull origin main
 
 echo "==> Ensuring Docker networks exist..."
 docker network create gateway 2>/dev/null || true
 docker network create shared-infra 2>/dev/null || true
+
+echo "==> Building containers..."
+docker compose -f "$COMPOSE_FILE" build
 
 echo "==> Running database migrations..."
 set -a; source .env; set +a
@@ -24,8 +33,7 @@ npx drizzle-kit migrate --config packages/db/drizzle.config.ts
 echo "==> Seeding database..."
 npx tsx packages/db/src/seed.ts
 
-echo "==> Building and starting containers..."
-docker compose -f "$COMPOSE_FILE" build
+echo "==> Starting containers..."
 docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
 
 echo "==> Waiting for API health check..."

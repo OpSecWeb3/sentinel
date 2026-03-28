@@ -47,7 +47,7 @@ describe('Chunk 022 — Delete detections', () => {
     expect(res.status).toBe(200);
   });
 
-  it('should cascade delete rules when detection is deleted', async () => {
+  it('should disable rules when detection is deleted', async () => {
     const admin = await setupAdmin(app);
     const created = await createDetection(admin.cookie);
     const id = created.data.detection.id;
@@ -56,9 +56,9 @@ describe('Chunk 022 — Delete detections', () => {
       cookie: admin.cookie,
     });
 
-    // Rules should be gone
+    // Rules are soft-disabled, not hard-deleted
     const sql = getTestSql();
-    const remaining = await sql`SELECT count(*) as count FROM rules WHERE detection_id = ${id}`;
+    const remaining = await sql`SELECT count(*) as count FROM rules WHERE detection_id = ${id} AND status != 'disabled'`;
     expect(Number(remaining[0].count)).toBe(0);
   });
 
@@ -73,6 +73,7 @@ describe('Chunk 022 — Delete detections', () => {
 
     const listRes = await appRequest(app, 'GET', '/api/detections', {
       cookie: admin.cookie,
+      query: { status: 'active' },
     });
     const body = await listRes.json() as any;
     expect(body.data.length).toBe(1);

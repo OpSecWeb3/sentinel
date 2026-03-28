@@ -635,7 +635,7 @@ describe('windowedCountEvaluator', () => {
 
     // zremrangebyscore should be called with '-inf' and a cutoff timestamp
     expect(redis.zremrangebyscore).toHaveBeenCalledWith(
-      expect.stringContaining('sentinel:window:rule-1'),
+      expect.stringContaining('sentinel:wcount:org-1:rule-1'),
       '-inf',
       expect.any(Number),
     );
