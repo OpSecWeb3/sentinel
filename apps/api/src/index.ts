@@ -247,10 +247,42 @@ app.onError((err, c) => {
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 
+// ── Prometheus metrics endpoint ─────────────────────────────────────────
+
+import { register as metricsRegistry, httpRequestDuration, httpRequestsTotal } from '@sentinel/shared/metrics';
+
+app.get('/metrics', async (c) => {
+  const metrics = await metricsRegistry.metrics();
+  return new Response(metrics, {
+    headers: { 'Content-Type': metricsRegistry.contentType },
+  });
+});
+
 // ── Start server ────────────────────────────────────────────────────────
 
 if (process.env.NODE_ENV !== 'test') {
   const port = config.PORT;
+
+  // Verify DB and Redis are reachable before binding the port.
+  // Fail fast so Docker healthcheck or orchestrator can restart us
+  // instead of serving 500s to nginx.
+  try {
+    const db = getDb();
+    await db.execute(sql`SELECT 1`);
+    log.info('Startup: database connected');
+  } catch (err) {
+    log.fatal({ err }, 'Startup: database unreachable — aborting');
+    process.exit(1);
+  }
+
+  try {
+    await getSharedRedis().ping();
+    log.info('Startup: Redis connected');
+  } catch (err) {
+    log.fatal({ err }, 'Startup: Redis unreachable — aborting');
+    process.exit(1);
+  }
+
   log.info({ port }, 'Starting Sentinel API');
   serve({ fetch: app.fetch, port });
 }

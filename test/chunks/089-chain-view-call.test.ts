@@ -16,7 +16,7 @@ import {
   createTestRule,
 } from '../helpers/setup.js';
 import { RuleEngine } from '@sentinel/shared/rule-engine';
-import { z } from 'zod';
+
 import type { NormalizedEvent } from '@sentinel/shared/rules';
 
 function makeChainEvent(orgId: string, payload: Record<string, unknown>): NormalizedEvent {
@@ -60,7 +60,7 @@ describe('Chunk 089 — Chain view_call evaluator', () => {
 
     const evaluators = new Map();
     evaluators.set('chain:chain.view_call', {
-      configSchema: z.object({}).passthrough(),
+      configSchema: { safeParse: () => ({ success: true, data: {} }) },
       evaluate: (ctx: any) => {
         const result = ctx.event.payload?.result;
         const cond = ctx.rule.config.condition;
@@ -110,7 +110,7 @@ describe('Chunk 089 — Chain view_call evaluator', () => {
 
     const evaluators = new Map();
     evaluators.set('chain:chain.view_call', {
-      configSchema: z.object({}).passthrough(),
+      configSchema: { safeParse: () => ({ success: true, data: {} }) },
       evaluate: (ctx: any) => {
         const result = ctx.event.payload?.result;
         if (ctx.rule.config.condition.op === 'eq' && result === ctx.rule.config.condition.value) {

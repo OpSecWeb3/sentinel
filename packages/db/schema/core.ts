@@ -105,6 +105,7 @@ export const detections = pgTable('detections', {
   index('idx_detections_org').on(t.orgId),
   index('idx_detections_module').on(t.moduleId),
   index('idx_detections_status').on(t.status).where(sql`status = 'active'`),
+  index('idx_detections_created_by').on(t.createdBy),
 ]);
 
 export const rules = pgTable('rules', {
@@ -191,7 +192,9 @@ export const notificationChannels = pgTable('notification_channels', {
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt,
   updatedAt,
-});
+}, (t) => [
+  index('idx_notification_channels_org').on(t.orgId),
+]);
 
 export const slackInstallations = pgTable('slack_installations', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -203,7 +206,10 @@ export const slackInstallations = pgTable('slack_installations', {
   installedBy: uuid('installed_by').notNull().references(() => users.id),
   createdAt,
   updatedAt,
-}, (t) => [uniqueIndex('uq_slack_org').on(t.orgId)]);
+}, (t) => [
+  uniqueIndex('uq_slack_org').on(t.orgId),
+  index('idx_slack_installations_installed_by').on(t.installedBy),
+]);
 
 export const notificationDeliveries = pgTable('notification_deliveries', {
   id: bigserial('id', { mode: 'bigint' }).primaryKey(),
@@ -236,4 +242,7 @@ export const auditLog = pgTable('audit_log', {
   resourceId: text('resource_id').notNull(),
   details: jsonb('details'),
   createdAt,
-});
+}, (t) => [
+  index('idx_audit_log_org').on(t.orgId),
+  index('idx_audit_log_user').on(t.userId),
+]);

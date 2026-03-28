@@ -126,7 +126,7 @@ describe('Gap 6 — Module route branch coverage', () => {
       await addMembership(org.id, user.id, 'admin');
       const session = await createTestSession(user.id, org.id, 'admin');
 
-      const res = await appRequest(app, 'GET', '/modules/registry/artifacts', {
+      const res = await appRequest(app, 'GET', '/modules/registry/images', {
         cookie: session.cookie,
       });
       expect(res.status).toBe(200);

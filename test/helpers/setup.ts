@@ -828,17 +828,20 @@ export async function createTestOrg(overrides: Partial<{
   const slug = overrides.slug ?? `test-org-${_orgCounter}`;
   const inviteSecret = overrides.inviteSecret ?? crypto.randomBytes(24).toString('base64url');
 
+  // Hash the invite secret for storage (matches how auth routes look it up)
+  const inviteSecretHash = crypto.createHash('sha256').update(inviteSecret).digest('hex');
+
   const [row] = await sql`
-    INSERT INTO organizations (name, slug, invite_secret)
-    VALUES (${name}, ${slug}, ${inviteSecret})
-    RETURNING id, name, slug, invite_secret
+    INSERT INTO organizations (name, slug, invite_secret_hash)
+    VALUES (${name}, ${slug}, ${inviteSecretHash})
+    RETURNING id, name, slug
   `;
 
   return {
     id: row.id,
     name: row.name,
     slug: row.slug,
-    inviteSecret: row.invite_secret,
+    inviteSecret,  // Return the raw secret for tests that need it
   };
 }
 

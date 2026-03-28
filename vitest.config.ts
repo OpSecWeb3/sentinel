@@ -24,6 +24,7 @@ export default defineConfig({
       ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       ALLOWED_ORIGINS: 'http://localhost:3000',
       SMTP_FROM: 'test@sentinel.dev',
+      DISABLE_RATE_LIMIT: 'true',
     },
   },
   resolve: {

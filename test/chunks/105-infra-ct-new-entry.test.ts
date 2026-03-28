@@ -14,7 +14,7 @@ import {
   createTestRule,
 } from '../helpers/setup.js';
 import { RuleEngine } from '@sentinel/shared/rule-engine';
-import { z } from 'zod';
+
 import type { NormalizedEvent } from '@sentinel/shared/rules';
 
 function makeCTEvent(orgId: string, payload: Record<string, unknown>): NormalizedEvent {
@@ -55,7 +55,7 @@ describe('Chunk 105 — Infra CT new entry evaluator', () => {
 
     const evaluators = new Map();
     evaluators.set('infra:infra.ct_new_entry', {
-      configSchema: z.object({}).passthrough(),
+      configSchema: { safeParse: () => ({ success: true, data: {} }) },
       evaluate: (ctx: any) => {
         const domain = ctx.event.payload?.domain as string;
         const ignorePatterns = ctx.rule.config.ignorePatterns ?? [];
@@ -104,7 +104,7 @@ describe('Chunk 105 — Infra CT new entry evaluator', () => {
 
     const evaluators = new Map();
     evaluators.set('infra:infra.ct_new_entry', {
-      configSchema: z.object({}).passthrough(),
+      configSchema: { safeParse: () => ({ success: true, data: {} }) },
       evaluate: (ctx: any) => {
         const domain = ctx.event.payload?.domain as string;
         const ignorePatterns = ctx.rule.config.ignorePatterns ?? [];

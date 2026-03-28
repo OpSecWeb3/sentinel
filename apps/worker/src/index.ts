@@ -43,6 +43,9 @@ async function main() {
 
   log.info('Starting Sentinel workers');
 
+  // ── Startup connectivity checks ─────────────────────────────────────
+  // Fail fast if infrastructure is unreachable rather than silently failing
+  // on every job. Docker will restart us via unless-stopped policy.
   const redis = new IORedis(config.REDIS_URL, {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
@@ -60,11 +63,31 @@ async function main() {
     enableReadyCheck: false,
   }));
 
+  // Verify Redis is reachable before proceeding
+  try {
+    await redis.ping();
+    log.info('Startup: Redis connected');
+  } catch (err) {
+    log.fatal({ err }, 'Startup: Redis unreachable — aborting');
+    process.exit(1);
+  }
+
   // Init database — worker processes use a larger pool to support concurrent
   // BullMQ job processing across all queues (events=15, alerts=15, etc.).
   // Total concurrency across all workers: EVENTS=15 + ALERTS=15 + MODULE_JOBS=10 + DEFERRED=5 = 45.
   // Size the pool to match so jobs never block waiting for a connection.
   getDb(undefined, { maxConnections: 50 });
+
+  // Verify DB is reachable
+  try {
+    const { sql: dbSql } = await import('@sentinel/db');
+    const db = getDb();
+    await db.execute(dbSql`SELECT 1`);
+    log.info('Startup: database connected');
+  } catch (err) {
+    log.fatal({ err }, 'Startup: database unreachable — aborting');
+    process.exit(1);
+  }
 
   // ── Register modules ────────────────────────────────────────────────
   const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule, AwsModule];
@@ -110,6 +133,12 @@ async function main() {
     handlersByQueue.set(h.queueName, existing);
   }
 
+  // ── Dead-letter queue for permanently failed jobs ────────────────────
+  const deadLetterQueue = getQueue('sentinel:dead-letter');
+
+  // ── Metrics ─────────────────────────────────────────────────────────
+  const { jobsProcessedTotal, jobDuration, deadLetterTotal, queueDepth } = await import('@sentinel/shared/metrics');
+
   // ── Start workers ───────────────────────────────────────────────────
   const workers: Awaited<ReturnType<typeof createWorker>>[] = [];
   for (const [queueName, handlers] of handlersByQueue) {
@@ -121,14 +150,53 @@ async function main() {
 
     worker.on('completed', (job) => {
       log.debug({ queue: queueName, jobName: job.name, jobId: job.id }, 'Job completed');
+      jobsProcessedTotal.inc({ queue: queueName, jobName: job.name, status: 'completed' });
     });
+
     worker.on('failed', (job, err) => {
-      log.error({ queue: queueName, jobName: job?.name, jobId: job?.id, err }, 'Job failed');
+      const jobName = job?.name ?? 'unknown';
+      const attemptsMade = job?.attemptsMade ?? 0;
+      const maxAttempts = (job?.opts?.attempts ?? 3);
+
+      log.error({ queue: queueName, jobName, jobId: job?.id, attemptsMade, err }, 'Job failed');
+      jobsProcessedTotal.inc({ queue: queueName, jobName, status: 'failed' });
+
+      // Move to dead-letter queue after exhausting all retries
+      if (attemptsMade >= maxAttempts) {
+        deadLetterQueue.add('dead-letter', {
+          originalQueue: queueName,
+          jobName,
+          jobId: job?.id,
+          data: job?.data,
+          error: err?.message,
+          failedAt: new Date().toISOString(),
+          attemptsMade,
+        }, {
+          removeOnComplete: false,  // Keep dead-letter jobs for inspection
+          removeOnFail: false,
+          attempts: 1,              // Don't retry dead-letter entries
+        }).catch((dlErr) => {
+          log.error({ dlErr, jobName, jobId: job?.id }, 'Failed to enqueue dead-letter job');
+        });
+        deadLetterTotal.inc({ queue: queueName, jobName });
+        log.warn({ queue: queueName, jobName, jobId: job?.id, attemptsMade }, 'Job moved to dead-letter queue after exhausting retries');
+      }
     });
 
     workers.push(worker);
     log.info({ queue: queueName, concurrency, handlers: handlers.map((h) => h.jobName) }, 'Started worker');
   }
+
+  // ── Periodic queue depth reporting ─────────────────────────────────
+  setInterval(async () => {
+    for (const [queueName] of handlersByQueue) {
+      try {
+        const q = getQueue(queueName);
+        const waiting = await q.getWaitingCount();
+        queueDepth.set({ queue: queueName }, waiting);
+      } catch { /* best effort */ }
+    }
+  }, 15_000);
 
   // ── Schedule daily data retention cleanup ───────────────────────────
   const deferredQueue = getQueue(QUEUE_NAMES.DEFERRED);

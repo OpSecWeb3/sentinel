@@ -16,7 +16,7 @@ import {
 } from '../helpers/setup.js';
 import { RuleEngine } from '@sentinel/shared/rule-engine';
 import type { NormalizedEvent } from '@sentinel/shared/rules';
-import { z } from 'zod';
+
 
 function makeEvent(orgId: string, overrides: Partial<NormalizedEvent> = {}): NormalizedEvent {
   return {
@@ -36,7 +36,7 @@ function makeEvent(orgId: string, overrides: Partial<NormalizedEvent> = {}): Nor
 const alwaysMatchEvaluator = {
   moduleId: 'infra',
   ruleType: 'infra.cert_expiry',
-  configSchema: z.object({}).passthrough(),
+  configSchema: { safeParse: () => ({ success: true, data: {} }) },
   evaluate: (ctx: any) => ({
     orgId: ctx.event.orgId,
     detectionId: ctx.rule.detectionId,
