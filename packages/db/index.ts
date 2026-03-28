@@ -50,14 +50,25 @@ export const schema = {
 
 let _sql: ReturnType<typeof postgres> | undefined;
 let _db: ReturnType<typeof drizzle> | undefined;
+let _url: string | undefined;
 
-export function getDb(databaseUrl?: string) {
-  if (!_db) {
-    const url = databaseUrl ?? process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is required');
-    _sql = postgres(url);
-    _db = drizzle(_sql, { schema });
+export function getDb(databaseUrl?: string, opts?: { maxConnections?: number }) {
+  const url = databaseUrl ?? process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+
+  if (_db) {
+    if (url !== _url) {
+      throw new Error(
+        'getDb() was already initialised with a different DATABASE_URL. ' +
+        'Call closeDb() first if you need to reconnect.',
+      );
+    }
+    return _db;
   }
+
+  _url = url;
+  _sql = postgres(url, { max: opts?.maxConnections ?? 10 });
+  _db = drizzle(_sql, { schema });
   return _db;
 }
 
@@ -66,6 +77,7 @@ export async function closeDb() {
     await _sql.end();
     _sql = undefined;
     _db = undefined;
+    _url = undefined;
   }
 }
 

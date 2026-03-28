@@ -373,7 +373,7 @@ export default function RegistryEventsPage() {
           <span className="ml-1 animate-pulse">_</span>
         </h1>
         <p className="mt-1 text-xs text-muted-foreground">
-          {">"} release chain event log -- Docker and npm artifact changes
+          {">"} registry event log -- Docker and npm artifact changes
         </p>
       </div>
 
@@ -437,7 +437,7 @@ export default function RegistryEventsPage() {
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16">
               <p className="text-sm text-muted-foreground">
-                {">"} no release chain events found
+                {">"} no registry events found
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {hasActiveFilters

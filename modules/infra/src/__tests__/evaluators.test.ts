@@ -668,7 +668,7 @@ describe('scoreDegradationEvaluator', () => {
     });
     const rule = makeRule({
       ruleType: 'infra.score_degradation',
-      config: { mode: 'below', minScore: 70 },
+      config: { mode: 'score', minScore: 70 },
     });
     const result = await scoreDegradationEvaluator.evaluate(makeCtx(event, rule));
 
@@ -688,7 +688,7 @@ describe('scoreDegradationEvaluator', () => {
     });
     const rule = makeRule({
       ruleType: 'infra.score_degradation',
-      config: { mode: 'below', minScore: 70 },
+      config: { mode: 'score', minScore: 70 },
     });
     const result = await scoreDegradationEvaluator.evaluate(makeCtx(event, rule));
 

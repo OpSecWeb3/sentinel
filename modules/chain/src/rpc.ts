@@ -98,6 +98,11 @@ interface JsonRpcResponse {
   error?: { code: number; message: string; data?: unknown };
 }
 
+// Wrap at Number.MAX_SAFE_INTEGER to prevent the counter from ever exceeding
+// the safe integer range.  JSON-RPC only requires that IDs are unique within
+// an in-flight request set, not globally unique across all time, so recycling
+// is fine in practice (a single process would take ~285 million years at
+// 1 000 calls/s to wrap around even without the guard).
 let _nextId = 1;
 
 async function rpcCall(
@@ -108,10 +113,11 @@ async function rpcCall(
 ): Promise<unknown> {
   const body: JsonRpcRequest = {
     jsonrpc: '2.0',
-    id: _nextId++,
+    id: _nextId,
     method,
     params,
   };
+  _nextId = (_nextId % Number.MAX_SAFE_INTEGER) + 1;
 
   let lastError: Error | undefined;
 
@@ -162,7 +168,7 @@ async function rpcCall(
  * "primary" URL changes based on the current hour.
  */
 export function rotateUrls(urls: string[], rotationWindowHours?: number): string[] {
-  if (urls.length <= 1 || !rotationWindowHours) return urls;
+  if (urls.length <= 1 || !rotationWindowHours || rotationWindowHours <= 0) return urls;
   const hoursSinceEpoch = Math.floor(Date.now() / (rotationWindowHours * 3600 * 1000));
   const idx = hoursSinceEpoch % urls.length;
   return [...urls.slice(idx), ...urls.slice(0, idx)];
@@ -193,15 +199,58 @@ const PRIVATE_IP_PATTERNS = [
   /^2[4-5]\d\./,         // 240.0.0.0/4 reserved (RFC 1112)
 ];
 
+/** Private/reserved IPv6 patterns (bracketed as they appear in URL hostnames) */
+const PRIVATE_IPV6_PATTERNS = [
+  /^\[::1?\]$/,                        // ::1 loopback and :: unspecified
+  /^\[fe80:/i,                         // fe80::/10 link-local
+  /^\[fc/i,                            // fc00::/7 unique-local (fc00::/8)
+  /^\[fd/i,                            // fc00::/7 unique-local (fd00::/8)
+  /^\[::ffff:\d{1,3}\.\d{1,3}\./i,    // ::ffff:x.x.x.x IPv4-mapped IPv6
+  /^\[100::/,                          // 100::/64 discard prefix (RFC 6666)
+  /^\[2001:db8:/i,                     // 2001:db8::/32 documentation
+  /^\[0*:0*:0*:0*:0*:(0*:)?\d{1,3}\./, // ::x.x.x.x IPv4-compatible (deprecated)
+];
+
 function isPrivateIp(ip: string): boolean {
   if (ip === '255.255.255.255') return true; // broadcast
-  return PRIVATE_IP_PATTERNS.some((p) => p.test(ip));
+  // Check IPv4 patterns
+  if (PRIVATE_IP_PATTERNS.some((p) => p.test(ip))) return true;
+  // Check IPv6 patterns (hostnames are bracketed in URLs, e.g. [::1])
+  if (ip.startsWith('[') && PRIVATE_IPV6_PATTERNS.some((p) => p.test(ip))) return true;
+  // Check IPv4-mapped IPv6 where the embedded IPv4 is private (e.g. [::ffff:10.0.0.1])
+  const v4MappedMatch = ip.match(/^\[::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]$/i);
+  if (v4MappedMatch) {
+    return PRIVATE_IP_PATTERNS.some((p) => p.test(v4MappedMatch[1]!));
+  }
+  return false;
 }
 
 /**
  * Validate that an RPC URL is safe:
  * - Must use HTTPS (or HTTP only for localhost in development)
  * - Hostname must not resolve to private/internal IPs
+ *
+ * KNOWN LIMITATION — DNS rebinding (SSRF via DNS):
+ * -------------------------------------------------
+ * This function inspects the *literal hostname string* only.  It cannot
+ * prevent an attacker from registering a public domain (e.g. evil.com) that
+ * resolves to a private IP address (e.g. 192.168.1.1) at connection time —
+ * a technique known as DNS rebinding.  Full prevention requires one or more
+ * of the following at the infrastructure level:
+ *
+ *   1. Egress firewall rules that block outbound connections to RFC-1918 and
+ *      link-local CIDR ranges (10/8, 172.16/12, 192.168/16, 169.254/16, etc.)
+ *      regardless of what hostname was used to establish the connection.
+ *   2. A DNS resolver that refuses to answer public names with private IPs
+ *      (RPZ / Response Policy Zones, e.g. bind's "rpz-ip" rule).
+ *   3. A forward-proxy / egress proxy that performs its own IP-level checks
+ *      after resolving the hostname (e.g. Squid with ACL deny to_localhost).
+ *
+ * Application-level DNS pre-resolution (resolve → check → connect) is not
+ * implemented here because it introduces a TOCTOU race (the IP could change
+ * between the check and the actual connection), requires an extra round-trip
+ * on every call, and is platform-dependent.  Infrastructure controls are the
+ * correct mitigation layer.
  */
 function validateRpcUrl(url: string): void {
   let parsed: URL;
@@ -211,9 +260,15 @@ function validateRpcUrl(url: string): void {
     throw new Error(`Invalid RPC URL: ${url}`);
   }
 
-  // Enforce HTTPS in production
+  // Enforce HTTPS in production; allow HTTP only in development/test
+  const isProduction = process.env.NODE_ENV === 'production';
+
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
     throw new Error(`RPC URL must use HTTPS: ${url}`);
+  }
+
+  if (parsed.protocol === 'http:' && isProduction) {
+    throw new Error(`RPC URL must use HTTPS in production (got HTTP): ${url}`);
   }
 
   // Block obviously internal hostnames
@@ -226,6 +281,13 @@ function validateRpcUrl(url: string): void {
     hostname === '[::1]' ||
     hostname.endsWith('.internal') ||
     hostname.endsWith('.local') ||
+    // Common unregistered private LAN TLDs used by home routers and
+    // enterprise networks — these will never resolve on the public internet
+    // but could be reached via DNS rebinding from a controlled domain.
+    hostname.endsWith('.lan') ||
+    hostname.endsWith('.corp') ||
+    hostname.endsWith('.home') ||
+    hostname.endsWith('.intranet') ||
     hostname === 'metadata.google.internal' ||
     hostname === '169.254.169.254'
   ) {
@@ -237,9 +299,9 @@ function validateRpcUrl(url: string): void {
     throw new Error(`RPC URL resolves to a private IP range: ${url}`);
   }
 
-  // Warn (but don't block) non-HTTPS URLs
+  // Warn about non-HTTPS URLs in non-production environments
   if (parsed.protocol === 'http:') {
-    log.warn({ hostname: safeHostname(url) }, 'RPC URL uses insecure HTTP');
+    log.warn({ hostname: safeHostname(url) }, 'RPC URL uses insecure HTTP (allowed outside production)');
   }
 }
 
@@ -263,10 +325,12 @@ export function createRpcClient(
     timeoutMs: clientOpts?.timeoutMs ?? 15_000,
   };
 
-  const orderedUrls = rotateUrls(rpcUrls, clientOpts?.rotationWindowHours);
+  const rotationWindowHours = clientOpts?.rotationWindowHours;
 
   // Try each URL in order; if all fail, throw the last error
   async function callWithFailover(method: string, params: unknown[]): Promise<unknown> {
+    // Re-compute rotation on every call so long-lived clients rotate providers
+    const orderedUrls = rotateUrls(rpcUrls, rotationWindowHours);
     let lastError: Error | undefined;
     for (const url of orderedUrls) {
       try {
@@ -357,7 +421,7 @@ export function createRpcClient(
           from: tx.from as string,
           to: (tx.to as string) ?? null,
           input: tx.input as string,
-          value: tx.value ? String(BigInt(tx.value as string)) : '0',
+          value: safeBigIntStr(tx.value as string | undefined),
           blockNumber: tx.blockNumber ? String(BigInt(tx.blockNumber as string)) : null,
         }));
       } else {
@@ -376,6 +440,16 @@ export function createRpcClient(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Safely convert a hex or numeric string to a decimal string via BigInt. Returns '0' on failure. */
+function safeBigIntStr(value: string | undefined | null): string {
+  if (!value) return '0';
+  try {
+    return String(BigInt(value));
+  } catch {
+    return '0';
+  }
+}
 
 function safeHostname(url: string): string {
   try {
@@ -455,7 +529,7 @@ async function resolveViewCallArgs(
 // Standard ABI base types recognised by viem's parseAbi.
 // User-defined value types (Solidity UDVTs) must be replaced with uint256.
 const KNOWN_ABI_TYPES = new Set([
-  'address', 'bool', 'string', 'bytes', 'tuple', 'function',
+  'address', 'bool', 'string', 'bytes', 'tuple', 'function', 'uint', 'int',
 ]);
 
 function isKnownAbiType(t: string): boolean {

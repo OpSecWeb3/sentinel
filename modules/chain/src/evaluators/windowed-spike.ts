@@ -63,7 +63,7 @@ async function checkWindowSpikeThreshold(
   redis: EvalContext['redis'],
   ruleId: string,
   eventId: string,
-  timestamp: number,
+  _timestamp: number,
   observationMs: number,
   baselineMs: number,
   increasePercent: number,
@@ -72,8 +72,12 @@ async function checkWindowSpikeThreshold(
   const key = windowKey(ruleId);
   const now = Date.now();
 
-  // 1. Add the new event
-  await redis.zadd(key, timestamp, eventId);
+  // 1. Add the new event using wall-clock time so that add and prune
+  //    operate on the same time domain. Using block timestamps here would
+  //    cause catch-up events (whose timestamps are in the past) to be
+  //    immediately pruned by the wall-clock cutoff below, silently
+  //    dropping them from both the observation and baseline windows.
+  await redis.zadd(key, now, eventId);
 
   // 2. Prune entries older than the full baseline window
   await redis.zremrangebyscore(key, '-inf', now - baselineMs);
@@ -111,7 +115,7 @@ async function checkGroupedWindowSpikeThreshold(
   ruleId: string,
   groupValue: string,
   eventId: string,
-  timestamp: number,
+  _timestamp: number,
   observationMs: number,
   baselineMs: number,
   increasePercent: number,
@@ -120,8 +124,10 @@ async function checkGroupedWindowSpikeThreshold(
   const key = windowKey(ruleId, groupValue);
   const now = Date.now();
 
-  // 1. Add the new event
-  await redis.zadd(key, timestamp, eventId);
+  // 1. Add the new event using wall-clock time (same reasoning as the
+  //    ungrouped variant above — block timestamps and wall-clock pruning
+  //    must not be mixed).
+  await redis.zadd(key, now, eventId);
 
   // 2. Prune entries older than the full baseline window
   await redis.zremrangebyscore(key, '-inf', now - baselineMs);

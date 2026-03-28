@@ -12,6 +12,28 @@ export interface RetentionPolicy {
 }
 
 /**
+ * Allowlist of permitted table names for retention policies.
+ * Prevents SQL identifier injection via crafted job payloads
+ * (e.g. if Redis is compromised).
+ */
+const ALLOWED_TABLES: ReadonlySet<string> = new Set([
+  'events',
+  'alerts',
+  'notification_deliveries',
+  'sessions',
+]);
+
+/**
+ * Allowlist of permitted timestamp column names for retention policies.
+ */
+const ALLOWED_TIMESTAMP_COLUMNS: ReadonlySet<string> = new Set([
+  'received_at',
+  'created_at',
+  'updated_at',
+  'expire',
+]);
+
+/**
  * Allowlist of permitted filter expressions for retention policies.
  * Any filter not in this set will be rejected to prevent SQL injection
  * via crafted job payloads (e.g. if Redis is compromised).
@@ -41,6 +63,35 @@ export const dataRetentionHandler: JobHandler = {
     const db = getDb();
 
     for (const policy of policies) {
+      // Validate table and timestampColumn against allowlists to prevent
+      // SQL identifier injection via crafted job payloads.
+      if (!ALLOWED_TABLES.has(policy.table)) {
+        _log.warn(
+          { table: policy.table },
+          'Skipping retention policy with unrecognised table name',
+        );
+        continue;
+      }
+
+      if (!ALLOWED_TIMESTAMP_COLUMNS.has(policy.timestampColumn)) {
+        _log.warn(
+          { table: policy.table, timestampColumn: policy.timestampColumn },
+          'Skipping retention policy with unrecognised timestamp column',
+        );
+        continue;
+      }
+
+      // Validate retentionDays: a value of 0 or negative would compute a cutoff
+      // in the future (or right now), causing the DELETE to remove every row in
+      // the table. Require at least 1 day to be safe.
+      if (!Number.isInteger(policy.retentionDays) || policy.retentionDays < 1) {
+        _log.warn(
+          { table: policy.table, retentionDays: policy.retentionDays },
+          'Skipping retention policy with invalid retentionDays (must be an integer >= 1)',
+        );
+        continue;
+      }
+
       // Validate filter against allowlist to prevent SQL injection via crafted job payloads
       if (policy.filter && !ALLOWED_FILTERS.has(policy.filter)) {
         _log.warn(

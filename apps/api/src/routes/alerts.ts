@@ -7,7 +7,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '@sentinel/db';
 import { alerts, detections, events } from '@sentinel/db/schema/core';
-import { eq, and, gte, lte, sql, count, desc, or, ilike } from '@sentinel/db';
+import { eq, and, gte, lte, sql, count, desc, or, ilike, inArray } from '@sentinel/db';
 import type { AppEnv } from '@sentinel/shared/hono-types';
 import { requireAuth, requireOrg } from '../middleware/rbac.js';
 import { requireScope } from '../middleware/scope.js';
@@ -59,11 +59,14 @@ router.get('/', requireScope('api:read'), validate('query', listQuerySchema), as
   if (query.from) conditions.push(gte(alerts.createdAt, new Date(query.from)));
   if (query.to) conditions.push(lte(alerts.createdAt, new Date(query.to)));
 
-  // Filter by moduleId via detection join
+  // Filter by moduleId via detection join — use a type-safe Drizzle subquery
+  // instead of raw sql`` interpolation to keep the query fully parameterized.
   if (query.moduleId) {
-    conditions.push(sql`${alerts.detectionId} IN (
-      SELECT id FROM detections WHERE module_id = ${query.moduleId} AND org_id = ${orgId}
-    )`);
+    const matchingDetectionIds = db
+      .select({ id: detections.id })
+      .from(detections)
+      .where(and(eq(detections.moduleId, query.moduleId), eq(detections.orgId, orgId)));
+    conditions.push(inArray(alerts.detectionId, matchingDetectionIds));
   }
 
   const where = and(...conditions);
@@ -82,10 +85,10 @@ router.get('/', requireScope('api:read'), validate('query', listQuerySchema), as
       ruleId: alerts.ruleId,
       eventId: alerts.eventId,
       detectionName: sql<string | null>`(
-        SELECT name FROM detections WHERE detections.id = ${alerts.detectionId}
+        SELECT name FROM detections WHERE detections.id = ${alerts.detectionId} AND detections.org_id = ${alerts.orgId}
       )`.as('detection_name'),
       moduleId: sql<string | null>`(
-        SELECT module_id FROM detections WHERE detections.id = ${alerts.detectionId}
+        SELECT module_id FROM detections WHERE detections.id = ${alerts.detectionId} AND detections.org_id = ${alerts.orgId}
       )`.as('module_id'),
     })
       .from(alerts)
@@ -189,12 +192,14 @@ router.get('/:id', requireScope('api:read'), validate('param', idParamSchema), a
 
   if (!alert) return c.json({ error: 'Alert not found' }, 404);
 
-  // Load associated event if present
+  // Load associated event if present.
+  // Guard with orgId so an attacker who knows a foreign event UUID cannot
+  // read events belonging to a different organisation.
   let event = null;
   if (alert.alert.eventId) {
     const [row] = await db.select()
       .from(events)
-      .where(eq(events.id, alert.alert.eventId))
+      .where(and(eq(events.id, alert.alert.eventId), eq(events.orgId, orgId)))
       .limit(1);
     event = row ?? null;
   }

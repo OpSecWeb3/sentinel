@@ -711,10 +711,11 @@ describe('Attack Chain Scenarios', () => {
   it('org member removed + deploy keys revoked (offboarding verification)', async () => {
     const memberEvent = makeEvent({
       id: 'evt_member_rm',
-      eventType: 'github.member.removed',
+      eventType: 'github.organization.member_removed',
       payload: {
-        action: 'removed',
-        member: { login: 'ex-employee', id: 100, role: 'admin' },
+        action: 'member_removed',
+        membership: { user: { login: 'ex-employee' }, role: 'admin' },
+        organization: { login: 'my-org' },
         sender: { login: 'hr-admin' },
       },
     });
@@ -723,7 +724,7 @@ describe('Attack Chain Scenarios', () => {
       id: 'rule_member',
       moduleId: 'github',
       ruleType: 'github.member_change',
-      config: { alertOnActions: ['removed'], watchRoles: ['admin'] },
+      config: { alertOnActions: ['member_removed'], watchRoles: ['admin'] },
     });
 
     const memberResult = await memberChangeEvaluator.evaluate(

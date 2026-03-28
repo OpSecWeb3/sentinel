@@ -3,27 +3,46 @@ import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { getDb } from '@sentinel/db';
-import { users, organizations, orgMemberships, apiKeys, sessions } from '@sentinel/db/schema/core';
-import { eq, or, and, sql, ne } from '@sentinel/db';
+import { users, organizations, orgMemberships, apiKeys } from '@sentinel/db/schema/core';
+import { eq, or, and, sql } from '@sentinel/db';
 import { getCookie } from 'hono/cookie';
 import { generateApiKey, generateInviteSecret, hashInviteSecret, decrypt } from '@sentinel/shared/crypto';
 import type { AppEnv } from '@sentinel/shared/hono-types';
-import { createSession, destroySession } from '../middleware/session.js';
+import { createSession, destroySession, deleteSessionsByUserId, deleteSessionsByOrgId, deleteSessionsByUserIdExcept } from '../middleware/session.js';
 import { requireAuth, requireOrg, requireRole } from '../middleware/rbac.js';
 import { requireScope } from '../middleware/scope.js';
-import { authLimiter, apiWriteLimiter } from '../middleware/rate-limit.js';
+import { authLimiter, apiReadLimiter, apiWriteLimiter } from '../middleware/rate-limit.js';
 import { generateNotifyKey } from '../middleware/notify-key.js';
 
 const SALT_ROUNDS = 12;
 
-// Pre-computed dummy hash for constant-time login responses when user is not found.
+// Lockout policy constants for brute-force protection on the login endpoint.
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_MINUTES = 15;
+
+// Lazily computed dummy hash for constant-time login responses when user is not found.
 // This prevents timing-based user enumeration (bcrypt compare takes ~200ms).
-const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', SALT_ROUNDS);
+// Using lazy init avoids blocking the event loop during module import.
+let _dummyHash: string | null = null;
+async function getDummyHash(): Promise<string> {
+  if (!_dummyHash) {
+    _dummyHash = await bcrypt.hash('dummy-password-for-timing', SALT_ROUNDS);
+  }
+  return _dummyHash;
+}
 
 const auth = new Hono<AppEnv>();
 
-// Apply baseline rate limiting to all auth routes
+// Apply baseline rate limiting to all auth routes.
+// Write limiter (30/min) covers mutating operations by default; read endpoints
+// override this with the more permissive read limiter (100/min).
 auth.use('*', apiWriteLimiter);
+auth.use('/me', apiReadLimiter);
+auth.use('/api-keys', apiReadLimiter);
+auth.use('/org/invite-secret', apiReadLimiter);
+auth.use('/org/notify-key/status', apiReadLimiter);
+auth.use('/users', apiReadLimiter);
+auth.use('/setup-status', apiReadLimiter);
 
 // ---------------------------------------------------------------------------
 // POST /register
@@ -139,7 +158,9 @@ const loginSchema = z.object({
 });
 
 auth.post('/login', authLimiter, async (c) => {
-  const { username, password } = loginSchema.parse(await c.req.json());
+  const parsed = loginSchema.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: 'Invalid input', details: parsed.error.flatten() }, 400);
+  const { username, password } = parsed.data;
   const db = getDb();
 
   const [user] = await db.select()
@@ -150,7 +171,7 @@ auth.post('/login', authLimiter, async (c) => {
   if (!user) {
     // Perform a dummy bcrypt compare to equalize response timing and prevent
     // user-existence enumeration via timing side-channel.
-    await bcrypt.compare(password, DUMMY_HASH);
+    await bcrypt.compare(password, await getDummyHash());
     return c.json({ error: 'Invalid username or password' }, 401);
   }
 
@@ -158,9 +179,6 @@ auth.post('/login', authLimiter, async (c) => {
   if (user.lockedUntil && user.lockedUntil > new Date()) {
     return c.json({ error: 'Account temporarily locked. Try again later.' }, 423);
   }
-
-  const MAX_ATTEMPTS = 5;
-  const LOCKOUT_MINUTES = 15;
 
   if (!(await bcrypt.compare(password, user.passwordHash))) {
     // Increment failed attempts and potentially lock
@@ -188,16 +206,21 @@ auth.post('/login', authLimiter, async (c) => {
     .where(eq(orgMemberships.userId, user.id))
     .limit(1);
 
+  if (!membership) {
+    // User exists but has no org membership — cannot issue a usable session.
+    return c.json({ error: 'No organisation membership found. Ask an admin for an invite.', needsOrg: true }, 403);
+  }
+
   // Destroy any pre-existing session to prevent session fixation attacks.
   await destroySession(c);
 
   await createSession(c, {
     id: user.id,
-    orgId: membership?.orgId,
-    role: membership?.role,
+    orgId: membership.orgId,
+    role: membership.role,
   });
 
-  return c.json({ status: 'ok', user: { id: user.id, username: user.username, role: membership?.role } });
+  return c.json({ status: 'ok', user: { id: user.id, username: user.username, role: membership.role } });
 });
 
 // ---------------------------------------------------------------------------
@@ -290,7 +313,7 @@ auth.delete('/api-keys/:id', requireAuth, requireOrg, requireScope('api:write'),
 // Org invite secret management (admin only)
 // ---------------------------------------------------------------------------
 
-auth.get('/org/invite-secret', requireRole('admin'), requireOrg, async (c) => {
+auth.get('/org/invite-secret', requireScope('api:read'), requireRole('admin'), requireOrg, async (c) => {
   const orgId = c.get('orgId');
   const db = getDb();
   const [org] = await db
@@ -395,7 +418,9 @@ auth.post('/org/join', requireAuth, async (c) => {
   const orgId = c.get('orgId');
   if (orgId) return c.json({ error: 'You already belong to an organisation. Leave it first.' }, 400);
 
-  const { inviteSecret } = z.object({ inviteSecret: z.string().min(1) }).parse(await c.req.json());
+  const parsedJoin = z.object({ inviteSecret: z.string().min(1) }).safeParse(await c.req.json());
+  if (!parsedJoin.success) return c.json({ error: 'Invalid input', details: parsedJoin.error.flatten() }, 400);
+  const { inviteSecret } = parsedJoin.data;
   const db = getDb();
 
   const submittedHash = hashInviteSecret(inviteSecret);
@@ -404,6 +429,12 @@ auth.post('/org/join', requireAuth, async (c) => {
   if (!org) return c.json({ error: 'Invalid invite secret' }, 400);
 
   await db.insert(orgMemberships).values({ orgId: org.id, userId, role: 'viewer' });
+
+  // Refresh the session so the new orgId and role are immediately reflected.
+  // Destroy the current session first to prevent session fixation.
+  await destroySession(c);
+  await createSession(c, { id: userId, orgId: org.id, role: 'viewer' });
+
   return c.json({ status: 'joined', org: { id: org.id, name: org.name, slug: org.slug } });
 });
 
@@ -436,10 +467,9 @@ auth.post('/org/leave', requireAuth, requireOrg, async (c) => {
     .set({ revoked: true })
     .where(and(eq(apiKeys.userId, userId), eq(apiKeys.orgId, orgId)));
 
-  // Invalidate all sessions for this user (orgId is now stale)
-  await db.delete(sessions).where(
-    sql`(sess->>'userId') = ${userId}`,
-  );
+  // Invalidate all sessions for this user (orgId is now stale).
+  // Sessions are encrypted so JSONB extraction cannot be used; use helper instead.
+  await deleteSessionsByUserId([userId]);
 
   // Destroy the current session cookie
   await destroySession(c);
@@ -453,9 +483,8 @@ auth.delete('/org', requireRole('admin'), requireOrg, async (c) => {
 
   // Invalidate all sessions for members of this org before deleting it,
   // since session JSONB stores orgId and has no FK cascade.
-  await db.delete(sessions).where(
-    sql`(sess->>'orgId') = ${orgId}`,
-  );
+  // Sessions are encrypted so JSONB extraction cannot be used; use helper instead.
+  await deleteSessionsByOrgId(orgId);
 
   const [result] = await db.delete(organizations)
     .where(eq(organizations.id, orgId))
@@ -488,7 +517,9 @@ auth.patch('/users/:id/role', requireRole('admin'), requireOrg, async (c) => {
   const orgId = c.get('orgId')!;
   const currentUserId = c.get('userId')!;
   const targetUserId = c.req.param('id')!;
-  const { role } = z.object({ role: z.enum(['admin', 'editor', 'viewer']) }).parse(await c.req.json());
+  const parsedRole = z.object({ role: z.enum(['admin', 'editor', 'viewer']) }).safeParse(await c.req.json());
+  if (!parsedRole.success) return c.json({ error: 'Invalid input', details: parsedRole.error.flatten() }, 400);
+  const { role } = parsedRole.data;
   const db = getDb();
 
   // Prevent admin from changing their own role
@@ -519,10 +550,9 @@ auth.patch('/users/:id/role', requireRole('admin'), requireOrg, async (c) => {
 
   if (!result) return c.json({ error: 'User not found in this organisation' }, 404);
 
-  // Invalidate all sessions for the target user so stale role is not used
-  await db.delete(sessions).where(
-    sql`(sess->>'userId') = ${targetUserId}`,
-  );
+  // Invalidate all sessions for the target user so stale role is not used.
+  // Sessions are encrypted so JSONB extraction cannot be used; use helper instead.
+  await deleteSessionsByUserId([targetUserId]);
 
   return c.json(result);
 });
@@ -537,7 +567,9 @@ const changePasswordSchema = z.object({
 });
 
 auth.post('/change-password', authLimiter, requireAuth, async (c) => {
-  const { currentPassword, newPassword } = changePasswordSchema.parse(await c.req.json());
+  const parsedPw = changePasswordSchema.safeParse(await c.req.json());
+  if (!parsedPw.success) return c.json({ error: 'Invalid input', details: parsedPw.error.flatten() }, 400);
+  const { currentPassword, newPassword } = parsedPw.data;
   const userId = c.get('userId')!;
   const db = getDb();
 
@@ -551,15 +583,11 @@ auth.post('/change-password', authLimiter, requireAuth, async (c) => {
   const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
   await db.update(users).set({ passwordHash, failedLoginAttempts: 0, lockedUntil: null }).where(eq(users.id, userId));
 
-  // Invalidate all other sessions for this user (except current)
+  // Invalidate all other sessions for this user (except current).
+  // Sessions are encrypted so JSONB extraction cannot be used; use helper instead.
   const currentSid = getCookie(c, 'sentinel.sid');
   if (currentSid) {
-    await db.delete(sessions).where(
-      and(
-        sql`(sess->>'userId')::text = ${userId}`,
-        ne(sessions.sid, currentSid),
-      ),
-    );
+    await deleteSessionsByUserIdExcept(userId, currentSid);
   }
 
   return c.json({ status: 'ok' });
@@ -593,9 +621,8 @@ auth.delete('/users/:id', requireRole('admin'), requireOrg, async (c) => {
     .set({ revoked: true })
     .where(and(eq(apiKeys.orgId, orgId), eq(apiKeys.userId, targetUserId)));
 
-  await db.delete(sessions).where(
-    sql`(sess->>'userId')::text = ${targetUserId} AND (sess->>'orgId')::text = ${orgId}`,
-  );
+  // Sessions are encrypted so JSONB extraction cannot be used; use helper instead.
+  await deleteSessionsByUserId([targetUserId]);
 
   return c.json({ status: 'ok', userId: targetUserId });
 });

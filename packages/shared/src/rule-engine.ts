@@ -87,8 +87,8 @@ export class RuleEngine {
   /**
    * Build the Redis cooldown key. Override point for per-resource cooldowns (Phase 1.2).
    */
-  protected cooldownKey(detectionId: string, _ruleId: string, resourceId?: string): string {
-    const base = `sentinel:cooldown:${detectionId}:${_ruleId}`;
+  protected cooldownKey(detectionId: string, ruleId: string, resourceId?: string): string {
+    const base = `sentinel:cooldown:${detectionId}:${ruleId}`;
     return resourceId ? `${base}:${resourceId}` : base;
   }
 
@@ -101,6 +101,10 @@ export class RuleEngine {
     const candidates: AlertCandidate[] = [];
     let suppressed = false;
     const acquiredCooldownLocks = new Set<string>();
+    // Track the exact Redis keys we SET so cleanup can delete them directly
+    // without a SCAN (which is non-atomic and could delete keys acquired by a
+    // concurrent request between the SCAN and DEL).
+    const acquiredRedisKeys = new Map<string, string[]>(); // detectionId → redisKeys[]
     const resourceId = (event.payload?.resourceId as string) ?? undefined;
 
     for (const { rule, detection } of activeRules) {
@@ -127,6 +131,7 @@ export class RuleEngine {
 
       // Cooldown check
       if (detection.cooldownMinutes > 0) {
+        const redisKey = this.cooldownKey(detection.id, rule.id, resourceId);
         const acquired = await this.checkCooldown(
           detection,
           rule.id,
@@ -134,6 +139,9 @@ export class RuleEngine {
         );
         if (!acquired) continue;
         acquiredCooldownLocks.add(detection.id);
+        const existing = acquiredRedisKeys.get(detection.id) ?? [];
+        existing.push(redisKey);
+        acquiredRedisKeys.set(detection.id, existing);
       }
 
       // Evaluate
@@ -171,8 +179,9 @@ export class RuleEngine {
     // Determine which detections produced alerts
     const alertedDetectionIds = new Set(candidates.map((c) => c.detectionId));
 
-    // Release Redis cooldown locks for detections that did NOT produce an alert
-    await this.cleanupUnusedLocks(acquiredCooldownLocks, alertedDetectionIds);
+    // Release Redis cooldown locks for detections that did NOT produce an alert.
+    // Pass the exact keys we acquired so cleanup can use targeted DEL rather than SCAN.
+    await this.cleanupUnusedLocks(acquiredCooldownLocks, alertedDetectionIds, acquiredRedisKeys);
 
     return { candidates, suppressed, acquiredCooldownLocks, alertedDetectionIds };
   }
@@ -288,6 +297,14 @@ export class RuleEngine {
 
   /**
    * Attempt to acquire cooldown lock. Returns true if acquired (proceed with evaluation).
+   *
+   * Redis path: atomic SET NX PX — scoped to (detectionId, ruleId, resourceId).
+   *
+   * DB fallback: updates `rules.lastTriggeredAt` scoped to the specific rule,
+   * not the parent detection.  Using `detections.lastTriggeredAt` was wrong
+   * because it is a single timestamp shared by every rule under that detection:
+   * rule A firing would block rule B for the full cooldown period even though
+   * B has its own independent scope/resource.
    */
   private async checkCooldown(
     detection: typeof detections.$inferSelect,
@@ -301,49 +318,50 @@ export class RuleEngine {
       const acquired = await this.redis.set(redisKey, '1', 'PX', cooldownMs, 'NX');
       return !!acquired;
     } catch (err) {
-      this.log.debug({ err, detectionId: detection.id }, 'Redis cooldown unavailable, using DB fallback');
+      this.log.debug({ err, detectionId: detection.id, ruleId }, 'Redis cooldown unavailable, using DB fallback');
       const cooldownThreshold = new Date(Date.now() - cooldownMs);
+      // Scope the cooldown to the specific rule, not the parent detection.
+      // `rules.lastTriggeredAt` was added in migration 0011 for this purpose.
       const [acquired] = await this.db
-        .update(detections)
+        .update(rules)
         .set({ lastTriggeredAt: new Date() })
         .where(
           and(
-            eq(detections.id, detection.id),
+            eq(rules.id, ruleId),
             or(
-              isNull(detections.lastTriggeredAt),
-              lt(detections.lastTriggeredAt, cooldownThreshold),
+              isNull(rules.lastTriggeredAt),
+              lt(rules.lastTriggeredAt, cooldownThreshold),
             ),
           ),
         )
-        .returning({ id: detections.id });
+        .returning({ id: rules.id });
       return !!acquired;
     }
   }
 
   /**
    * Release Redis cooldown locks for detections that did not produce alerts.
+   *
+   * Uses targeted DEL on the exact key that was SET during this evaluation
+   * rather than SCAN + DEL.  The SCAN approach was non-atomic: a new cooldown
+   * lock acquired by a concurrent request between the SCAN and the DEL could
+   * be deleted here, allowing that concurrent evaluation to fire immediately
+   * and bypass its cooldown.  Since we recorded the exact Redis key at
+   * acquisition time, we can delete only that key — no SCAN needed.
    */
   private async cleanupUnusedLocks(
     acquired: Set<string>,
     alerted: Set<string>,
+    acquiredRedisKeys: Map<string, string[]>,
   ): Promise<void> {
     for (const detectionId of acquired) {
       if (!alerted.has(detectionId)) {
+        const redisKeys = acquiredRedisKeys.get(detectionId);
+        if (!redisKeys || redisKeys.length === 0) continue;
         try {
-          // Scan for all cooldown keys matching this detection and delete them
-          const pattern = `sentinel:cooldown:${detectionId}:*`;
-          let cursor = '0';
-          do {
-            const [nextCursor, keys] = await this.redis.scan(
-              cursor, 'MATCH', pattern, 'COUNT', 100,
-            );
-            cursor = nextCursor;
-            if (keys.length > 0) {
-              await this.redis.del(...keys);
-            }
-          } while (cursor !== '0');
+          await this.redis.del(...redisKeys);
         } catch (err) {
-          this.log.debug({ err, detectionId }, 'Best-effort cooldown lock cleanup failed');
+          this.log.debug({ err, detectionId, redisKeys }, 'Best-effort cooldown lock cleanup failed');
         }
       }
     }

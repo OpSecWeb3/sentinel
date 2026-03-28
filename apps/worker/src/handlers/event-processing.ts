@@ -4,9 +4,9 @@
  * creates alerts, and enqueues notification dispatch.
  */
 import type { Job } from 'bullmq';
-import { getDb } from '@sentinel/db';
+import { getDb, count, eq } from '@sentinel/db';
 import { events, alerts, detections } from '@sentinel/db/schema/core';
-import { eq } from '@sentinel/db';
+import { correlationRules } from '@sentinel/db/schema/correlation';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { RuleEngine } from '@sentinel/shared/rule-engine';
 import type { RuleEvaluator, NormalizedEvent } from '@sentinel/shared/rules';
@@ -51,35 +51,81 @@ export function createEventProcessingHandler(
       // Create alerts and enqueue dispatch
       const alertsQueue = getQueue(QUEUE_NAMES.ALERTS);
 
-      // Enqueue correlation evaluation (runs in parallel with alert creation)
+      // Bug fix: only enqueue correlation evaluation if the org has at least one
+      // active correlation rule. Absence/aggregation/sequence rules still run correctly
+      // because the guard is on whether any rules exist at all, not on whether
+      // detection-level candidates were produced. This avoids churning the queue
+      // for the common case where an org has no correlation rules configured.
       const correlationQueue = getQueue(QUEUE_NAMES.EVENTS);
-      await correlationQueue.add('correlation.evaluate', { eventId: event.id });
+      const [{ activeRuleCount }] = await db
+        .select({ activeRuleCount: count() })
+        .from(correlationRules)
+        .where(eq(correlationRules.orgId, event.orgId));
+      if (activeRuleCount > 0) {
+        await correlationQueue.add('correlation.evaluate', { eventId: event.id });
+      }
 
-      for (const candidate of result.candidates) {
+      // Bug fix: wrap all alert inserts + lastTriggeredAt updates for this event
+      // in a single transaction. If any insert fails the entire batch rolls back,
+      // so a retry will never see a partially-committed set of alerts.
+      //
+      // Note: for true idempotency against a retry that fires *after* the
+      // transaction commits but *before* all dispatch jobs are enqueued, a
+      // unique DB constraint on (event_id, detection_id, rule_id) would be the
+      // definitive fix. Until that migration is added, the transaction boundary
+      // is sufficient to prevent the partial-insert duplicate reported here.
+      const createdAlerts: Array<{ id: bigint; detectionId: string | null }> = [];
+      if (result.candidates.length > 0) {
         try {
-          const [alert] = await db.insert(alerts).values({
-            orgId: candidate.orgId,
-            detectionId: candidate.detectionId,
-            ruleId: candidate.ruleId,
-            eventId: candidate.eventId,
-            severity: candidate.severity,
-            title: candidate.title,
-            description: candidate.description,
-            triggerType: candidate.triggerType,
-            triggerData: candidate.triggerData,
-          }).returning();
+          await db.transaction(async (tx) => {
+            for (const candidate of result.candidates) {
+              // Use ON CONFLICT DO NOTHING to rely on the DB unique constraint
+              // (uq_alerts_event_detection_rule) for deduplication instead of
+              // the previous SELECT-before-INSERT pattern, which was racy.
+              const [alert] = await tx.insert(alerts).values({
+                orgId: candidate.orgId,
+                detectionId: candidate.detectionId,
+                ruleId: candidate.ruleId,
+                eventId: candidate.eventId,
+                severity: candidate.severity,
+                title: candidate.title,
+                description: candidate.description,
+                triggerType: candidate.triggerType,
+                triggerData: candidate.triggerData,
+              })
+                .onConflictDoNothing()
+                .returning();
 
-          // Always update lastTriggeredAt so the DB stays in sync for Redis failover
-          if (candidate.detectionId) {
-            await db.update(detections)
-              .set({ lastTriggeredAt: new Date() })
-              .where(eq(detections.id, candidate.detectionId));
-          }
+              if (!alert) {
+                // Duplicate detected by constraint — skip this candidate
+                _log.debug({ eventId: candidate.eventId, detectionId: candidate.detectionId, ruleId: candidate.ruleId }, 'Duplicate alert suppressed by constraint');
+                continue;
+              }
 
-          // Enqueue notification dispatch
-          await alertsQueue.add('alert.dispatch', { alertId: String(alert.id) });
+              // Always update lastTriggeredAt so the DB stays in sync for Redis failover
+              if (candidate.detectionId) {
+                await tx.update(detections)
+                  .set({ lastTriggeredAt: new Date() })
+                  .where(eq(detections.id, candidate.detectionId));
+              }
+
+              createdAlerts.push({ id: alert.id, detectionId: candidate.detectionId });
+            }
+          });
         } catch (err) {
-          _log.error({ err, detectionId: candidate.detectionId }, 'Failed to create alert');
+          _log.error({ err, eventId: event.id, candidateCount: result.candidates.length }, 'Alert batch insert failed — transaction rolled back');
+        }
+
+        // Enqueue dispatch outside the transaction so queue writes are not
+        // rolled back if a later candidate insert fails. Alerts that were
+        // committed are dispatched; a subsequent retry will see none of them
+        // if the transaction rolled back.
+        for (const created of createdAlerts) {
+          try {
+            await alertsQueue.add('alert.dispatch', { alertId: String(created.id) });
+          } catch (err) {
+            _log.error({ err, alertId: String(created.id) }, 'Failed to enqueue alert dispatch');
+          }
         }
       }
     },

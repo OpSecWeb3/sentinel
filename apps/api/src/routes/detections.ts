@@ -3,6 +3,7 @@
  * Detections are created from module templates, contain rules that get evaluated against events.
  * Ported from ChainAlert's detection patterns adapted for multi-module platform.
  */
+import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '@sentinel/db';
@@ -207,7 +208,8 @@ router.get('/resolve-template', requireScope('api:read'), validate('query', reso
   const { RegistryModule } = await import('@sentinel/module-registry');
   const { ChainModule } = await import('@sentinel/module-chain');
   const { InfraModule } = await import('@sentinel/module-infra');
-  const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule];
+  const { AwsModule } = await import('@sentinel/module-aws');
+  const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule, AwsModule];
 
   const mod = modules.find((m) => m.id === moduleId);
   if (!mod) return c.json({ error: `Module "${moduleId}" not found` }, 404);
@@ -234,7 +236,8 @@ router.get('/rule-schema', requireScope('api:read'), validate('query', ruleSchem
   const { RegistryModule } = await import('@sentinel/module-registry');
   const { ChainModule } = await import('@sentinel/module-chain');
   const { InfraModule } = await import('@sentinel/module-infra');
-  const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule];
+  const { AwsModule } = await import('@sentinel/module-aws');
+  const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule, AwsModule];
 
   for (const mod of modules) {
     const evaluator = mod.evaluators.find((e) => e.ruleType === ruleType);
@@ -307,16 +310,30 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
   if (body.status !== undefined) {
     updateSet.status = body.status;
 
-    // Pausing detection pauses its rules; activating reactivates them
+    // Pausing detection pauses its rules; activating reactivates them.
+    // Include orgId for defence-in-depth — the detection ownership check above
+    // already guards against cross-org access, but belt-and-suspenders here
+    // ensures stale/dangling rules from another org can never be touched.
     const ruleStatus = body.status === 'paused' ? 'paused' : 'active';
     await db.update(rules)
       .set({ status: ruleStatus })
-      .where(eq(rules.detectionId, id));
+      .where(and(eq(rules.detectionId, id), eq(rules.orgId, orgId)));
   }
 
-  // Replace rules if provided (delete existing, insert new)
+  // Replace rules if provided (delete existing, insert new).
+  // The detection update is included inside the same transaction so that a
+  // failure during the detection write cannot leave the DB with new rules
+  // paired to the old detection record (inconsistent state).
   if (body.rules !== undefined) {
-    await db.transaction(async (tx) => {
+    // Keep detection.config in sync with the merged rule configs so the
+    // detail and edit pages reflect the current values.
+    const mergedConfig = body.rules.reduce<Record<string, unknown>>(
+      (acc, r) => ({ ...acc, ...r.config }),
+      {},
+    );
+    updateSet.config = mergedConfig;
+
+    const [updated] = await db.transaction(async (tx) => {
       await tx.delete(rules).where(eq(rules.detectionId, id));
       await tx.insert(rules).values(
         body.rules!.map((r) => ({
@@ -329,24 +346,24 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
           priority: r.priority,
         })),
       );
+      return tx.update(detections)
+        .set(updateSet)
+        .where(and(eq(detections.id, id), eq(detections.orgId, orgId)))
+        .returning();
     });
 
-    // Keep detection.config in sync with the merged rule configs so the
-    // detail and edit pages reflect the current values.
-    const mergedConfig = body.rules.reduce<Record<string, unknown>>(
-      (acc, r) => ({ ...acc, ...r.config }),
-      {},
-    );
-    updateSet.config = mergedConfig;
+    return c.json({ data: updated });
   }
 
-  // Template-based rule rebuild: resolve template, apply inputs, replace rules
+  // Template-based rule rebuild: resolve template, apply inputs, replace rules.
+  // Same atomicity requirement — detection update is inside the transaction.
   if (body.templateSlug !== undefined) {
     const { GitHubModule } = await import('@sentinel/module-github');
     const { RegistryModule } = await import('@sentinel/module-registry');
     const { ChainModule } = await import('@sentinel/module-chain');
     const { InfraModule } = await import('@sentinel/module-infra');
-    const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule];
+    const { AwsModule } = await import('@sentinel/module-aws');
+    const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule, AwsModule];
 
     const mod = modules.find((m) => m.id === existing.moduleId);
     if (!mod) return c.json({ error: `Module "${existing.moduleId}" not found` }, 400);
@@ -361,7 +378,10 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
       return c.json({ error: `Missing required inputs: ${patchUnresolved.join(', ')}` }, 400);
     }
 
-    await db.transaction(async (tx) => {
+    // Keep config in sync so the edit page can pre-fill on next load
+    updateSet.config = { ...inputsMap, ...(body.overrides ?? {}) };
+
+    const [updated] = await db.transaction(async (tx) => {
       await tx.delete(rules).where(eq(rules.detectionId, id));
       await tx.insert(rules).values(
         template.rules.map((r, i) => ({
@@ -374,12 +394,16 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
           priority: r.priority ?? 50,
         })),
       );
+      return tx.update(detections)
+        .set(updateSet)
+        .where(and(eq(detections.id, id), eq(detections.orgId, orgId)))
+        .returning();
     });
 
-    // Keep config in sync so the edit page can pre-fill on next load
-    updateSet.config = { ...inputsMap, ...(body.overrides ?? {}) };
+    return c.json({ data: updated });
   }
 
+  // No rule replacement — plain field or status-only update.
   const [updated] = await db.update(detections)
     .set(updateSet)
     .where(and(eq(detections.id, id), eq(detections.orgId, orgId)))
@@ -460,8 +484,9 @@ function findUnresolvedPlaceholders(configs: Record<string, unknown>[]): string[
   const found: string[] = [];
   function scan(val: unknown) {
     if (typeof val === 'string') {
-      const matches = val.match(/\{\{(\w+)\}\}/g);
-      if (matches) found.push(...matches);
+      let m: RegExpExecArray | null;
+      const re = /\{\{(\w+)\}\}/g;
+      while ((m = re.exec(val)) !== null) found.push(m[1]);
     } else if (Array.isArray(val)) {
       val.forEach(scan);
     } else if (val && typeof val === 'object') {
@@ -497,7 +522,8 @@ router.post('/from-template', requireRole('admin', 'editor'), requireScope('api:
   const { RegistryModule } = await import('@sentinel/module-registry');
   const { ChainModule } = await import('@sentinel/module-chain');
   const { InfraModule } = await import('@sentinel/module-infra');
-  const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule];
+  const { AwsModule } = await import('@sentinel/module-aws');
+  const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule, AwsModule];
 
   const mod = modules.find((m) => m.id === body.moduleId);
   if (!mod) return c.json({ error: `Module "${body.moduleId}" not found` }, 404);
@@ -560,9 +586,9 @@ const testBodySchema = z.object({
   }).optional(),
 }).refine((d) => d.eventId || d.event, { message: 'Provide either eventId or event' });
 
-router.post('/:id/test', requireScope('api:read'), async (c) => {
+router.post('/:id/test', requireScope('api:read'), validate('param', idParamSchema), async (c) => {
   const orgId = c.get('orgId')!;
-  const detectionId = c.req.param('id')!;
+  const { id: detectionId } = getValidated<z.infer<typeof idParamSchema>>(c, 'param');
   const db = getDb();
 
   // Validate detection exists and belongs to org
@@ -607,7 +633,7 @@ router.post('/:id/test', requireScope('api:read'), async (c) => {
   } else {
     const ev = parsed.data.event!;
     normalizedEvent = {
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       orgId,
       moduleId: detection.moduleId,
       eventType: ev.eventType,
@@ -623,12 +649,12 @@ router.post('/:id/test', requireScope('api:read'), async (c) => {
   const { RegistryModule } = await import('@sentinel/module-registry');
   const { ChainModule } = await import('@sentinel/module-chain');
   const { InfraModule } = await import('@sentinel/module-infra');
+  const { AwsModule } = await import('@sentinel/module-aws');
   const { compoundEvaluator } = await import('@sentinel/shared/evaluators/compound');
-  const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule];
+  const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule, AwsModule];
 
   const { RuleEngine } = await import('@sentinel/shared/rule-engine');
-  const { default: IORedis } = await import('ioredis');
-  const { env } = await import('@sentinel/shared/env');
+  const { getSharedRedis } = await import('../redis.js');
 
   const evaluators = new Map();
   for (const mod of modules) {
@@ -638,23 +664,18 @@ router.post('/:id/test', requireScope('api:read'), async (c) => {
   }
   evaluators.set(`${compoundEvaluator.moduleId}:${compoundEvaluator.ruleType}`, compoundEvaluator);
 
-  const redis = new IORedis(env().REDIS_URL, { maxRetriesPerRequest: null, enableReadyCheck: false });
+  const redis = getSharedRedis();
+  const engine = new RuleEngine({ evaluators, redis, db });
+  const result = await engine.evaluateDryRun(normalizedEvent, detectionId);
 
-  try {
-    const engine = new RuleEngine({ evaluators, redis, db });
-    const result = await engine.evaluateDryRun(normalizedEvent, detectionId);
-
-    return c.json({
-      data: {
-        wouldTrigger: result.candidates.length > 0,
-        suppressed: result.suppressed,
-        candidates: result.candidates,
-        rulesEvaluated: result.alertedDetectionIds.size + (result.suppressed ? 1 : 0),
-      },
-    });
-  } finally {
-    await redis.quit();
-  }
+  return c.json({
+    data: {
+      wouldTrigger: result.candidates.length > 0,
+      suppressed: result.suppressed,
+      candidates: result.candidates,
+      rulesEvaluated: result.alertedDetectionIds.size + (result.suppressed ? 1 : 0),
+    },
+  });
 });
 
 export { router as detectionsRouter };

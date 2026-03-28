@@ -1,5 +1,6 @@
 import type { DetectionModule } from '@sentinel/shared/module';
-import { githubRouter } from './router.js';
+import { githubRouter, setWebhookRateLimitRedis } from './router.js';
+export { setWebhookRateLimitRedis };
 import { repoVisibilityEvaluator } from './evaluators/repo-visibility.js';
 import { branchProtectionEvaluator } from './evaluators/branch-protection.js';
 import { memberChangeEvaluator } from './evaluators/member-change.js';

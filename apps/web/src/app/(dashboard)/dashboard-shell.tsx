@@ -25,6 +25,7 @@ interface ModuleNavItem {
 const mainNav: NavItem[] = [
   { title: "dashboard", href: "/dashboard", icon: "~" },
   { title: "detections", href: "/detections", icon: "!" },
+  { title: "correlations", href: "/correlations", icon: "#" },
 ];
 
 const moduleNav: ModuleNavItem[] = [
@@ -307,7 +308,34 @@ export function DashboardShell({
     );
   }
 
-  if (!user) return null;
+  if (!user) {
+    // Auth check completed but no user — redirect is already in-flight from
+    // the catch block in checkAuth. Show the loading skeleton until the
+    // navigation completes so the user never sees a blank screen.
+    return (
+      <div className="flex h-screen overflow-hidden">
+        <aside className="hidden w-64 flex-col border-r border-border bg-background lg:flex">
+          <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
+            <span className="text-sm font-bold tracking-wider text-foreground">
+              SENTINEL
+            </span>
+            <span className="text-primary animate-pulse">_</span>
+          </div>
+        </aside>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-background px-4 sm:px-6">
+            <div className="h-4 w-32 animate-pulse rounded bg-muted-foreground/20" />
+          </header>
+          <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+            <div className="space-y-4 animate-pulse">
+              <div className="h-4 w-48 rounded bg-muted-foreground/20" />
+              <div className="h-3 w-64 rounded bg-muted-foreground/10" />
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
 
   /* ── main layout ───────────────────────────────────────────── */
 

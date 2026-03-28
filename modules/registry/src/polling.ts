@@ -40,6 +40,7 @@ export interface MonitoredArtifact {
   storedVersions: Map<string, StoredVersion>;
   metadata: Record<string, unknown>;
   credentialsEncrypted?: string | null;
+  watchMode: 'dist-tags' | 'versions';
 }
 
 export interface StoredVersion {
@@ -81,10 +82,13 @@ const FULL_SCAN_EVERY_N_POLLS = 10;
 /** npm dist-tags mode: full scans every 6 hours. */
 const FULL_SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-// Fix #14: Poll tracking uses Redis when available, falling back to
-// the rcArtifacts table metadata. The in-memory Maps serve as a local
-// cache within a single worker process for the current session only.
-// The authoritative state is persisted in rcArtifacts.metadata.
+// WARNING: These Maps are process-local. Under a multi-worker deployment each
+// worker maintains its own copy. Full-scan scheduling (FULL_SCAN_EVERY_N_POLLS
+// and FULL_SCAN_INTERVAL_MS) is driven by pollCount / lastFullScanAt persisted
+// in rcArtifacts.metadata, which is read from the DB at the start of every
+// poll call so that all workers share the same authoritative state.
+// Do NOT rely on these Maps as a cache across poll cycles — they exist only to
+// satisfy resetFullScanTracking() in tests.
 const pollCounts = new Map<string, number>();
 const lastFullScanAt = new Map<string, number>();
 
@@ -331,6 +335,307 @@ export async function fetchNpmVersions(
 }
 
 // ---------------------------------------------------------------------------
+// npm dist-tags fetch (for watchMode: 'dist-tags')
+// ---------------------------------------------------------------------------
+
+export async function fetchNpmDistTags(
+  packageName: string,
+  isFullScan: boolean,
+  token?: string,
+): Promise<RegistryFetchResult> {
+  const headers: Record<string, string> = isFullScan
+    ? {}
+    : { Accept: 'application/vnd.npm.install-v1+json' };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${NPM_REGISTRY_BASE}/${encodeURIComponent(packageName)}`, {
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(`npm registry returned ${response.status} for ${packageName}`);
+  }
+
+  const data = (await response.json()) as Record<string, unknown>;
+  const distTags = (data['dist-tags'] ?? {}) as Record<string, string>;
+  const versionMap = (data.versions ?? {}) as Record<string, Record<string, unknown>>;
+  const versions: RemoteVersion[] = [];
+
+  for (const [tagName, resolvedVersion] of Object.entries(distTags)) {
+    const versionData = versionMap[resolvedVersion];
+    const dist = (versionData?.dist ?? {}) as Record<string, unknown>;
+    const shasum = (dist.shasum as string) ?? (dist.integrity as string) ?? null;
+
+    versions.push({
+      name: tagName,
+      digest: shasum,
+      metadata: {
+        distTag: tagName,
+        resolvedVersion,
+      },
+    });
+  }
+
+  const artifactMetadata: Record<string, unknown> = { distTags };
+  if (isFullScan) {
+    const maintainers = (data.maintainers ?? []) as Array<{ name: string; email?: string }>;
+    artifactMetadata.maintainers = maintainers;
+    artifactMetadata.license = data.license;
+    artifactMetadata.description = data.description;
+  }
+
+  return {
+    versions,
+    artifactMetadata,
+    totalCount: versions.length,
+    pagesUsed: 1,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// npm dist-tags poll logic
+// ---------------------------------------------------------------------------
+
+async function pollNpmDistTags(
+  artifact: MonitoredArtifact,
+  isFullScan: boolean,
+  token?: string,
+): Promise<void> {
+  const {
+    id: artifactId,
+    orgId,
+    name,
+    tagPatterns,
+    ignorePatterns,
+    storedVersions,
+    metadata: storedMetadata,
+  } = artifact;
+
+  const db = getDb();
+
+  log.info({ artifact: name, mode: isFullScan ? 'full' : 'incremental', watchMode: 'dist-tags' }, 'Polling npm dist-tags');
+
+  let result: RegistryFetchResult;
+  try {
+    result = await fetchNpmDistTags(name, isFullScan, token);
+    log.debug({ artifact: name, tagCount: result.versions.length }, 'Fetched dist-tags');
+  } catch (err) {
+    log.error({ err, artifact: name }, 'Failed to fetch npm dist-tags');
+    return;
+  }
+
+  const remoteTagNames = new Set<string>();
+
+  for (const remoteTag of result.versions) {
+    const tagName = remoteTag.name;
+    remoteTagNames.add(tagName);
+
+    if (!matchTagPattern(tagName, tagPatterns, ignorePatterns)) {
+      continue;
+    }
+
+    const digest = remoteTag.digest;
+    const local = storedVersions.get(tagName);
+
+    if (!local) {
+      // New dist-tag appeared
+      const changeType: PollChangeType = 'npm.new_tag';
+
+      const enrichedPayload: Record<string, unknown> = {
+        artifact: name,
+        registry: 'npmjs',
+        tag: tagName,
+        oldDigest: null,
+        newDigest: digest,
+        ...(remoteTag.metadata ?? {}),
+      };
+
+      const [versionRow] = await db
+        .insert(rcArtifactVersions)
+        .values({
+          artifactId,
+          version: tagName,
+          currentDigest: digest,
+          status: 'active',
+          metadata: remoteTag.metadata ?? {},
+        })
+        .returning();
+
+      if (digest) {
+        const normalized = normalizePollChange(changeType, enrichedPayload, orgId);
+        const [event] = await db.insert(events).values(normalized).returning();
+
+        await db.insert(rcArtifactEvents).values({
+          eventId: event.id,
+          artifactId,
+          versionId: versionRow.id,
+          artifactEventType: 'new_tag',
+          version: tagName,
+          oldDigest: null,
+          newDigest: digest,
+          source: 'poll',
+          metadata: enrichedPayload,
+        });
+
+        await safeEnqueue(QUEUE_NAMES.EVENTS, 'event.evaluate', { eventId: event.id });
+
+        await safeEnqueue(
+          QUEUE_NAMES.DEFERRED,
+          'registry.attribution',
+          { eventId: event.id, artifactName: name, tag: tagName, digest },
+          { delay: 5 * 60 * 1000, jobId: `attr-${event.id}` },
+        );
+      }
+
+      log.info({ artifact: name, tag: tagName, hasDigest: !!digest }, 'New dist-tag discovered');
+    } else if (digest && local.currentDigest !== digest) {
+      // Dist-tag pointer moved (resolved version changed)
+      const changeType: PollChangeType = 'npm.dist_tag_updated';
+
+      const enrichedPayload: Record<string, unknown> = {
+        artifact: name,
+        registry: 'npmjs',
+        tag: tagName,
+        oldDigest: local.currentDigest,
+        newDigest: digest,
+        ...(remoteTag.metadata ?? {}),
+      };
+
+      const normalized = normalizePollChange(changeType, enrichedPayload, orgId);
+      const [event] = await db.insert(events).values(normalized).returning();
+
+      await db
+        .update(rcArtifactVersions)
+        .set({
+          currentDigest: digest,
+          digestChangedAt: new Date(),
+          metadata: remoteTag.metadata ?? {},
+        })
+        .where(eq(rcArtifactVersions.id, local.id));
+
+      await db.insert(rcArtifactEvents).values({
+        eventId: event.id,
+        artifactId,
+        versionId: local.id,
+        artifactEventType: 'dist_tag_updated',
+        version: tagName,
+        oldDigest: local.currentDigest,
+        newDigest: digest,
+        source: 'poll',
+        metadata: enrichedPayload,
+      });
+
+      await safeEnqueue(QUEUE_NAMES.EVENTS, 'event.evaluate', { eventId: event.id });
+
+      await safeEnqueue(
+        QUEUE_NAMES.DEFERRED,
+        'registry.attribution',
+        { eventId: event.id, artifactName: name, tag: tagName, digest },
+        { delay: 5 * 60 * 1000, jobId: `attr-${event.id}` },
+      );
+
+      log.info({ artifact: name, tag: tagName }, 'Dist-tag pointer changed');
+    }
+  }
+
+  // Removal detection (full scans only)
+  if (isFullScan) {
+    for (const [tagName, local] of storedVersions) {
+      if (local.status !== 'active') continue;
+      if (remoteTagNames.has(tagName)) continue;
+
+      const changeType: PollChangeType = 'npm.tag_removed';
+
+      const normalized = normalizePollChange(
+        changeType,
+        {
+          artifact: name,
+          registry: 'npmjs',
+          tag: tagName,
+          oldDigest: local.currentDigest,
+          newDigest: null,
+        },
+        orgId,
+      );
+
+      const [event] = await db.insert(events).values(normalized).returning();
+
+      await db
+        .update(rcArtifactVersions)
+        .set({ status: 'gone' })
+        .where(eq(rcArtifactVersions.id, local.id));
+
+      await db.insert(rcArtifactEvents).values({
+        eventId: event.id,
+        artifactId,
+        versionId: local.id,
+        artifactEventType: 'tag_removed',
+        version: tagName,
+        oldDigest: local.currentDigest,
+        newDigest: null,
+        source: 'poll',
+      });
+
+      await safeEnqueue(QUEUE_NAMES.EVENTS, 'event.evaluate', { eventId: event.id });
+
+      log.info({ artifact: name, tag: tagName }, 'Dist-tag removed');
+    }
+  }
+
+  // Metadata changes (maintainers, full scan only)
+  if (isFullScan && result.artifactMetadata && Object.keys(storedMetadata).length > 0) {
+    const metaChanges = detectMetadataChanges(storedMetadata, result.artifactMetadata);
+
+    for (const change of metaChanges) {
+      const normalized = normalizePollChange(
+        change.eventType,
+        {
+          artifact: name,
+          registry: 'npmjs',
+          tag: change.version,
+          oldDigest: change.oldDigest,
+          newDigest: change.newDigest,
+          ...change.metadata,
+        },
+        orgId,
+      );
+
+      const [event] = await db.insert(events).values(normalized).returning();
+      await safeEnqueue(QUEUE_NAMES.EVENTS, 'event.evaluate', { eventId: event.id });
+
+      log.info({ artifact: name, eventType: change.eventType, version: change.version }, 'Metadata change detected');
+    }
+  }
+
+  // Update lastPolledAt and metadata
+  const count = (pollCounts.get(artifactId) ?? 0) + 1;
+  pollCounts.set(artifactId, count);
+  if (isFullScan) {
+    lastFullScanAt.set(artifactId, Date.now());
+  }
+
+  try {
+    await db
+      .update(rcArtifacts)
+      .set({
+        lastPolledAt: new Date(),
+        metadata: {
+          ...storedMetadata,
+          ...(result.artifactMetadata ?? {}),
+          pollCount: count,
+          lastFullScanAt: lastFullScanAt.get(artifactId) ?? null,
+        },
+      })
+      .where(eq(rcArtifacts.id, artifactId));
+  } catch (err) {
+    log.warn({ err, artifact: name }, 'Failed to update rcArtifacts metadata');
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Change detection: metadata changes (npm maintainers, dist-tags)
 // ---------------------------------------------------------------------------
 
@@ -439,11 +744,12 @@ export async function pollArtifact(artifact: MonitoredArtifact): Promise<void> {
     metadata: storedMetadata,
   } = artifact;
 
-  // Fix #14: Load poll tracking state from DB metadata if not in memory
   const db = getDb();
 
-  // Load persisted poll count from rcArtifacts.metadata if not cached
-  if (!pollCounts.has(artifactId)) {
+  // Always load poll tracking state from the DB so that all workers share the
+  // same authoritative counters. Using the in-memory Map as a cache would let
+  // each worker diverge and cause full scans to fire N times under N workers.
+  {
     const [dbArtifact] = await db
       .select({ metadata: rcArtifacts.metadata })
       .from(rcArtifacts)
@@ -453,6 +759,8 @@ export async function pollArtifact(artifact: MonitoredArtifact): Promise<void> {
     pollCounts.set(artifactId, (meta.pollCount as number) ?? 0);
     if (meta.lastFullScanAt) {
       lastFullScanAt.set(artifactId, meta.lastFullScanAt as number);
+    } else {
+      lastFullScanAt.delete(artifactId);
     }
   }
 
@@ -488,6 +796,11 @@ export async function pollArtifact(artifact: MonitoredArtifact): Promise<void> {
     } catch (err) {
       log.warn({ err, artifact: name }, 'Failed to decrypt artifact credentials — polling without auth');
     }
+  }
+
+  // Dist-tags mode: use dedicated poll function for npm dist-tag watching
+  if (registry === 'npmjs' && artifact.watchMode === 'dist-tags') {
+    return pollNpmDistTags(artifact, isFullScan, credentials.npmToken);
   }
 
   // Fetch from registry
@@ -540,12 +853,21 @@ export async function pollArtifact(artifact: MonitoredArtifact): Promise<void> {
     }
 
     const digest = remoteVersion.digest;
-    if (!digest) continue;
+    // NOTE: digest may be null for some npm packages at publish time — the
+    // registry occasionally returns a version entry before the shasum/integrity
+    // fields are populated.  We must NOT skip these versions entirely:
+    // if we skip them now and the digest is added later, the next poll will
+    // see an "unknown" version and fire a false `new_version` alert.
+    // Instead, we store the version immediately with digest=null so that the
+    // version is already known.  Digest changes are detected only when both
+    // the stored and incoming digests are non-null.
 
     const local = storedVersions.get(versionName);
 
     if (!local) {
-      // New version/tag
+      // New version/tag — store it regardless of whether a digest is present.
+      // Only fire the alert when we have a digest; versions without one are
+      // recorded silently so a later digest population does not look "new".
       const changeType: PollChangeType =
         registry === 'docker_hub' ? 'docker.new_tag' : 'npm.version_published';
 
@@ -581,56 +903,63 @@ export async function pollArtifact(artifact: MonitoredArtifact): Promise<void> {
         }
       }
 
-      const normalized = normalizePollChange(changeType, enrichedPayload, orgId);
-      const [event] = await db.insert(events).values(normalized).returning();
-
-      // Fix #5: Insert into rcArtifactEvents and upsert rcArtifactVersions
+      // Fix #5: Insert into rcArtifactEvents and upsert rcArtifactVersions.
+      // Always persist the version row (with digest=null if unavailable) so
+      // subsequent polls recognise it as an already-known version.
       const [versionRow] = await db
         .insert(rcArtifactVersions)
         .values({
           artifactId,
           version: versionName,
-          currentDigest: digest,
+          currentDigest: digest,   // null is fine — stored as-is
           status: 'active',
           metadata: remoteVersion.metadata ?? {},
         })
         .returning();
 
-      await db.insert(rcArtifactEvents).values({
-        eventId: event.id,
-        artifactId,
-        versionId: versionRow.id,
-        artifactEventType: changeType.replace(/^(?:docker|npm)\./, ''),
-        version: versionName,
-        oldDigest: null,
-        newDigest: digest,
-        source: 'poll',
-        metadata: enrichedPayload,
-      });
+      // Only emit an event and enqueue downstream jobs when we have a digest.
+      // Without a digest the version is "known but unverified"; we'll catch
+      // the digest on the next poll and emit a digest_change event then.
+      if (digest) {
+        const normalized = normalizePollChange(changeType, enrichedPayload, orgId);
+        const [event] = await db.insert(events).values(normalized).returning();
 
-      await safeEnqueue(QUEUE_NAMES.EVENTS, 'event.evaluate', { eventId: event.id });
+        await db.insert(rcArtifactEvents).values({
+          eventId: event.id,
+          artifactId,
+          versionId: versionRow.id,
+          artifactEventType: changeType.replace(/^(?:docker|npm)\./, ''),
+          version: versionName,
+          oldDigest: null,
+          newDigest: digest,
+          source: 'poll',
+          metadata: enrichedPayload,
+        });
 
-      // Schedule deferred attribution check (5 min grace period)
-      await safeEnqueue(
-        QUEUE_NAMES.DEFERRED,
-        'registry.attribution',
-        { eventId: event.id, artifactName: name, tag: versionName, digest },
-        { delay: 5 * 60 * 1000, jobId: `attr-${event.id}` },
-      );
+        await safeEnqueue(QUEUE_NAMES.EVENTS, 'event.evaluate', { eventId: event.id });
 
-      // Fix #8: Enqueue verification job for new versions
-      await safeEnqueue(QUEUE_NAMES.MODULE_JOBS, 'registry.verify', {
-        artifactId,
-        versionId: versionRow.id,
-        artifactType: registry === 'docker_hub' ? 'docker_image' : 'npm_package',
-        artifactName: name,
-        version: versionName,
-        digest,
-        eventId: event.id,
-      });
+        // Schedule deferred attribution check (5 min grace period)
+        await safeEnqueue(
+          QUEUE_NAMES.DEFERRED,
+          'registry.attribution',
+          { eventId: event.id, artifactName: name, tag: versionName, digest },
+          { delay: 5 * 60 * 1000, jobId: `attr-${event.id}` },
+        );
 
-      log.info({ artifact: name, version: versionName }, 'New version discovered');
-    } else if (local.currentDigest !== digest) {
+        // Fix #8: Enqueue verification job for new versions
+        await safeEnqueue(QUEUE_NAMES.MODULE_JOBS, 'registry.verify', {
+          artifactId,
+          versionId: versionRow.id,
+          artifactType: registry === 'docker_hub' ? 'docker_image' : 'npm_package',
+          artifactName: name,
+          version: versionName,
+          digest,
+          eventId: event.id,
+        });
+      }
+
+      log.info({ artifact: name, version: versionName, hasDigest: !!digest }, 'New version discovered');
+    } else if (digest && local.currentDigest !== digest) {
       // Content changed (digest change)
       const changeType: PollChangeType =
         registry === 'docker_hub' ? 'docker.digest_change' : 'npm.version_published';

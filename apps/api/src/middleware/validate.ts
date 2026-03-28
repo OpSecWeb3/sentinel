@@ -39,10 +39,16 @@ export function validate<S extends ZodSchema>(target: ValidationTarget, schema: 
 
     const result = schema.safeParse(data);
     if (!result.success) {
-      return c.json({
+      const body = {
         error: 'Validation failed',
         details: formatZodError(result.error),
-      }, 400);
+      };
+      throw new HTTPException(400, {
+        res: new Response(JSON.stringify(body), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      });
     }
 
     const key = `validated_${target}` as 'validated_json' | 'validated_query' | 'validated_param';
@@ -54,5 +60,11 @@ export function validate<S extends ZodSchema>(target: ValidationTarget, schema: 
 /** Type-safe getter for validated data */
 export function getValidated<T>(c: AuthContext, target: ValidationTarget): T {
   const key = `validated_${target}` as 'validated_json' | 'validated_query' | 'validated_param';
-  return c.get(key) as T;
+  const value = c.get(key);
+  if (value === undefined) {
+    throw new HTTPException(500, {
+      message: `getValidated('${target}') called without a preceding validate('${target}') middleware`,
+    });
+  }
+  return value as T;
 }

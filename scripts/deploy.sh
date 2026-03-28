@@ -21,6 +21,9 @@ echo "==> Running database migrations..."
 set -a; source .env; set +a
 npx drizzle-kit migrate --config packages/db/drizzle.config.ts
 
+echo "==> Seeding database..."
+npx tsx packages/db/src/seed.ts
+
 echo "==> Building and starting containers..."
 docker compose -f "$COMPOSE_FILE" build
 docker compose -f "$COMPOSE_FILE" up -d --remove-orphans

@@ -7,8 +7,8 @@ const configSchema = z.object({
   minScore: z.number().int().min(0).max(100).default(70),
   /** Alert when score drops by at least this many points since last scan */
   minDrop: z.number().int().min(1).default(10),
-  /** Which check to apply: 'below', 'drop', or 'both' */
-  mode: z.enum(['below', 'drop', 'both']).default('both'),
+  /** Which check to apply: 'score' (below min), 'drop' (by N points), or 'both' (either condition) */
+  mode: z.enum(['score', 'drop', 'both']).default('both'),
 });
 
 export const scoreDegradationEvaluator: RuleEvaluator = {
@@ -16,7 +16,7 @@ export const scoreDegradationEvaluator: RuleEvaluator = {
   ruleType: 'infra.score_degradation',
   configSchema,
   uiSchema: [
-    { key: 'mode', label: 'Alert mode', type: 'select', required: false, options: [{ value: 'below', label: 'Score drops below minimum' }, { value: 'drop', label: 'Score drops by N points' }, { value: 'both', label: 'Either condition' }] },
+    { key: 'mode', label: 'Alert mode', type: 'select', required: false, options: [{ value: 'score', label: 'Score drops below minimum' }, { value: 'drop', label: 'Score drops by N points' }, { value: 'both', label: 'Either condition (OR)' }] },
     { key: 'minScore', label: 'Minimum acceptable score', type: 'number', required: false, default: 70, min: 0, max: 100 },
     { key: 'minDrop', label: 'Score drop to alert on', type: 'number', required: false, default: 10, min: 1 },
   ] as TemplateInput[],
@@ -37,7 +37,7 @@ export const scoreDegradationEvaluator: RuleEvaluator = {
     let triggered = false;
 
     // Check absolute threshold
-    if ((config.mode === 'below' || config.mode === 'both') && payload.currentScore < config.minScore) {
+    if ((config.mode === 'score' || config.mode === 'both') && payload.currentScore < config.minScore) {
       reasons.push(`Score ${payload.currentScore} is below threshold ${config.minScore}`);
       triggered = true;
     }

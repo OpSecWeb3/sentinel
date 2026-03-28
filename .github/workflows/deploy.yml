@@ -65,11 +65,12 @@ jobs:
           SENTRY_DSN=$(fetch_param /sentinel/production/SENTRY_DSN)
           SENTRY_ENVIRONMENT=$(fetch_param /sentinel/production/SENTRY_ENVIRONMENT "production")
           ETHERSCAN_API_KEY=$(fetch_param /sentinel/production/ETHERSCAN_API_KEY)
+          RPC_ETHEREUM=$(fetch_param /sentinel/production/RPC_ETHEREUM)
 
           cat > /tmp/sentinel.env << 'ENVEOF'
-          NODE_ENV=production
-          PORT=4100
-          ENVEOF
+NODE_ENV=production
+PORT=4100
+ENVEOF
 
           # Append secrets (using printf to handle multi-line values like PEM keys)
           {
@@ -95,10 +96,9 @@ jobs:
             printf 'SENTRY_DSN=%s\n' "$SENTRY_DSN"
             printf 'SENTRY_ENVIRONMENT=%s\n' "$SENTRY_ENVIRONMENT"
             printf 'ETHERSCAN_API_KEY=%s\n' "$ETHERSCAN_API_KEY"
+            printf 'RPC_ETHEREUM=%s\n' "$RPC_ETHEREUM"
           } >> /tmp/sentinel.env
 
-          # Strip leading whitespace from heredoc lines
-          sed -i 's/^[[:space:]]*//' /tmp/sentinel.env
 
       - name: Setup SSH
         run: |

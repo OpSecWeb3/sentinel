@@ -46,6 +46,9 @@ export const certExpiryEvaluator: RuleEvaluator = {
 
     const days = payload.daysRemaining;
 
+    // Guard against missing/malformed payload — daysRemaining must be a number
+    if (typeof days !== 'number') return null;
+
     // Only alert if within the configured threshold
     if (days > config.thresholdDays) return null;
 

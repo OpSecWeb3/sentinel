@@ -10,26 +10,15 @@ import type { Next } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { AuthContext } from '@sentinel/shared/hono-types';
 import { getClientIp } from '@sentinel/shared/ip';
-import IORedis from 'ioredis';
-
-let _redis: IORedis | undefined;
-
-function getRedis(): IORedis {
-  if (!_redis) {
-    _redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-    });
-  }
-  return _redis;
-}
+import { env } from '@sentinel/shared/env';
+import { getSharedRedis } from '../redis.js';
 
 function getKey(c: AuthContext): string {
   const orgId = c.get('orgId');
   if (orgId) return `org:${orgId}`;
 
   const auth = c.req.header('Authorization');
-  if (auth?.startsWith('Bearer sk_')) return `key:${auth.slice(7, 18)}`;
+  if (auth?.startsWith('Bearer sk_')) return `key:${auth.slice(7, 27)}`;
 
   return `ip:${getClientIp(c)}`;
 }
@@ -42,26 +31,29 @@ interface RateLimitOptions {
 
 function createLimiter(opts: RateLimitOptions) {
   return async (c: AuthContext, next: Next) => {
-    if (process.env.DISABLE_RATE_LIMIT === 'true') return next();
+    if (env().DISABLE_RATE_LIMIT === 'true') return next();
 
-    const redis = getRedis();
+    const redis = getSharedRedis();
     const key = `sentinel:rl:${opts.prefix}:${getKey(c)}`;
     const windowSec = Math.ceil(opts.windowMs / 1000);
 
-    // Use a Lua script to atomically INCR and set EXPIRE to avoid
-    // race conditions where a crash between INCR and EXPIRE leaves
-    // a key without a TTL.
+    // Use a Lua script to atomically INCR, set EXPIRE, and return both the
+    // current count and TTL in one round-trip to avoid an extra redis.ttl()
+    // call and the race conditions where a crash between INCR and EXPIRE
+    // leaves a key without a TTL.
     const luaScript = `
       local current = redis.call('INCR', KEYS[1])
       if current == 1 then
         redis.call('EXPIRE', KEYS[1], ARGV[1])
       end
-      return current
+      local ttl = redis.call('TTL', KEYS[1])
+      return {current, ttl}
     `;
-    const current = await redis.eval(luaScript, 1, key, windowSec) as number;
+    const result = await redis.eval(luaScript, 1, key, windowSec) as [number, number];
+    const current = result[0];
+    const ttl = result[1];
 
     // Set standard rate limit headers
-    const ttl = await redis.ttl(key);
     const remaining = Math.max(0, opts.limit - current);
     const reset = Math.ceil(Date.now() / 1000) + (ttl > 0 ? ttl : windowSec);
 

@@ -35,24 +35,28 @@ function getConnection(): Redis {
 // Queue factory
 // ---------------------------------------------------------------------------
 
+// Stores resolved Queue instances.
 const queues = new Map<string, Queue>();
 
 export function getQueue(name: string): Queue {
-  if (!queues.has(name)) {
-    queues.set(
-      name,
-      new Queue(name, {
-        connection: getConnection(),
-        defaultJobOptions: {
-          removeOnComplete: { count: 200 },
-          removeOnFail: { count: 500 },
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 2000 },
-        },
-      }),
-    );
-  }
-  return queues.get(name)!;
+  const existing = queues.get(name);
+  if (existing) return existing;
+
+  // `new Queue()` is synchronous — no async gap means no TOCTOU race.
+  // The return value is taken directly from the local variable, never from
+  // a `.get()` that could return undefined.
+  const queue = new Queue(name, {
+    connection: getConnection(),
+    defaultJobOptions: {
+      removeOnComplete: { count: 200 },
+      removeOnFail: { count: 500 },
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
+    },
+  });
+
+  queues.set(name, queue);
+  return queue;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,8 +75,33 @@ export interface JobHandler {
 }
 
 // ---------------------------------------------------------------------------
+// Connection factory type
+// ---------------------------------------------------------------------------
+
+/**
+ * A function that creates a new Redis connection.
+ * Used by createWorker to give each Worker its own connection, as
+ * recommended by BullMQ to avoid head-of-line blocking between workers.
+ */
+export type RedisConnectionFactory = () => Redis;
+
+let _connectionFactory: RedisConnectionFactory | undefined;
+
+/**
+ * Register a connection factory so each Worker gets its own Redis connection.
+ * If not set, workers fall back to the shared connection (legacy behaviour).
+ */
+export function setConnectionFactory(factory: RedisConnectionFactory): void {
+  _connectionFactory = factory;
+}
+
+// ---------------------------------------------------------------------------
 // Worker factory
 // ---------------------------------------------------------------------------
+
+// Track all created Workers so closeAllQueues() can close them and release
+// their Redis connections on graceful shutdown.
+const workers = new Set<Worker>();
 
 export function createWorker(
   queueName: string,
@@ -90,11 +119,19 @@ export function createWorker(
     await handler.process(job);
   };
 
-  return new Worker(queueName, processor, {
-    connection: getConnection(),
+  // Each Worker gets its own dedicated Redis connection when a factory is
+  // available. BullMQ recommends separate connections for Worker vs Queue to
+  // avoid head-of-line blocking on the blocking BRPOPLPUSH that workers use.
+  const connection = _connectionFactory ? _connectionFactory() : getConnection();
+
+  const worker = new Worker(queueName, processor, {
+    connection,
     concurrency: 5,
     ...opts,
   });
+
+  workers.add(worker);
+  return worker;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +153,10 @@ export function getFlowProducer(): FlowProducer {
 
 export async function closeAllQueues(): Promise<void> {
   const closables: Array<Promise<unknown>> = [
-    ...([...queues.values()].map((q) => q.close())),
+    ...[...queues.values()].map((q) => q.close()),
+    // Close tracked Workers so they release their Redis connections.
+    // Previously Workers were untracked and left open on shutdown.
+    ...[...workers].map((w) => w.close()),
   ];
   if (_flowProducer) {
     closables.push(_flowProducer.close());
@@ -124,4 +164,5 @@ export async function closeAllQueues(): Promise<void> {
   }
   await Promise.allSettled(closables);
   queues.clear();
+  workers.clear();
 }

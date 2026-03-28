@@ -44,6 +44,16 @@ export const eventTypes: EventTypeDefinition[] = [
     label: 'npm dist-tag updated',
     description: 'A dist-tag (e.g. "latest") now points to a different version',
   },
+  {
+    type: 'registry.npm.new_tag',
+    label: 'npm dist-tag added',
+    description: 'A new dist-tag appeared on a monitored npm package',
+  },
+  {
+    type: 'registry.npm.tag_removed',
+    label: 'npm dist-tag removed',
+    description: 'A dist-tag was removed from a monitored npm package',
+  },
 
   // ── Verification ────────────────────────────────────────────────────
   {

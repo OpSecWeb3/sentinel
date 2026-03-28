@@ -34,6 +34,7 @@ export const whoisExpiryEvaluator: RuleEvaluator = {
       registrar: string | null;
     };
 
+    if (typeof payload.daysRemaining !== 'number') return null;
     if (payload.daysRemaining > config.thresholdDays) return null;
 
     const severity = severityForDays(payload.daysRemaining);

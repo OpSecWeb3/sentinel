@@ -1390,7 +1390,7 @@ describe('scoreDegradationEvaluator - scenarios', () => {
     });
     const rule = makeRule({
       ruleType: 'infra.score_degradation',
-      config: { mode: 'below', minScore: 70 },
+      config: { mode: 'score', minScore: 70 },
     });
     const result = await scoreDegradationEvaluator.evaluate(makeCtx(event, rule));
 
@@ -1468,7 +1468,7 @@ describe('scoreDegradationEvaluator - scenarios', () => {
     });
     const rule = makeRule({
       ruleType: 'infra.score_degradation',
-      config: { mode: 'below', minScore: 70 },
+      config: { mode: 'score', minScore: 70 },
     });
     const result = await scoreDegradationEvaluator.evaluate(makeCtx(event, rule));
 
@@ -1528,7 +1528,7 @@ describe('scoreDegradationEvaluator - scenarios', () => {
     });
     const rule = makeRule({
       ruleType: 'infra.score_degradation',
-      config: { mode: 'below', minScore: 70 },
+      config: { mode: 'score', minScore: 70 },
     });
     const result = await scoreDegradationEvaluator.evaluate(makeCtx(event, rule));
 
@@ -2322,7 +2322,7 @@ describe('cross-cutting scenarios', () => {
     });
     const rule = makeRule({
       ruleType: 'infra.score_degradation',
-      config: { mode: 'below', minScore: 70 },
+      config: { mode: 'score', minScore: 70 },
     });
     const result = await scoreDegradationEvaluator.evaluate(makeCtx(event, rule));
 

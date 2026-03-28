@@ -13,7 +13,7 @@ export { initVerification } from './verification.js';
 
 export const RegistryModule: DetectionModule = {
   id: 'registry',
-  name: 'Release Chain',
+  name: 'Registry',
   router: registryRouter,
   evaluators: [
     digestChangeEvaluator,

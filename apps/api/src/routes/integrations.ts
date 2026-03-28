@@ -6,8 +6,9 @@ import { Hono } from 'hono';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { getDb } from '@sentinel/db';
-import { slackInstallations, detections } from '@sentinel/db/schema/core';
-import { eq } from '@sentinel/db';
+import { slackInstallations, detections, orgMemberships } from '@sentinel/db/schema/core';
+import { correlationRules } from '@sentinel/db/schema/correlation';
+import { eq, and } from '@sentinel/db';
 import { encrypt, decrypt } from '@sentinel/shared/crypto';
 import { env } from '@sentinel/shared/env';
 import type { AppEnv } from '@sentinel/shared/hono-types';
@@ -38,7 +39,11 @@ const MAX_STATE_AGE_MS = 10 * 60 * 1000; // 10 minutes
 integrations.get('/slack/callback', async (c) => {
   const code = c.req.query('code');
   const stateParam = c.req.query('state');
-  const webUrl = env().ALLOWED_ORIGINS.split(',')[0]?.trim() ?? 'http://localhost:3000';
+  const webUrl = env().ALLOWED_ORIGINS.split(',')[0]?.trim();
+  if (!webUrl) {
+    // ALLOWED_ORIGINS must be set; refuse to redirect to localhost in production.
+    return new Response('Server misconfiguration: ALLOWED_ORIGINS is not set', { status: 500 });
+  }
 
   if (!code || !stateParam) {
     return c.redirect(`${webUrl}/settings?slack=error&reason=missing_params`);
@@ -76,6 +81,19 @@ integrations.get('/slack/callback', async (c) => {
     return c.redirect(`${webUrl}/settings?slack=error&reason=expired_state`);
   }
 
+  // Verify the user from state still exists and belongs to the org.
+  // This prevents a revoked/deleted user's OAuth state from being replayed.
+  const db = getDb();
+  const [membership] = await db
+    .select({ role: orgMemberships.role })
+    .from(orgMemberships)
+    .where(and(eq(orgMemberships.userId, userId), eq(orgMemberships.orgId, orgId)))
+    .limit(1);
+
+  if (!membership) {
+    return c.redirect(`${webUrl}/settings?slack=error&reason=unauthorized`);
+  }
+
   // Exchange code for token
   const slackClientId = env().SLACK_CLIENT_ID;
   const slackClientSecret = env().SLACK_CLIENT_SECRET;
@@ -109,7 +127,6 @@ integrations.get('/slack/callback', async (c) => {
   }
 
   // Encrypt and store
-  const db = getDb();
   const encryptedToken = encrypt(tokenData.access_token);
 
   await db.insert(slackInstallations).values({
@@ -195,10 +212,14 @@ authed.delete('/slack', requireRole('admin'), async (c) => {
 
   await db.delete(slackInstallations).where(eq(slackInstallations.orgId, orgId));
 
-  // Clear slack channel references from detections
+  // Clear slack channel references from detections and correlation rules
   await db.update(detections)
     .set({ slackChannelId: null, slackChannelName: null })
     .where(eq(detections.orgId, orgId));
+
+  await db.update(correlationRules)
+    .set({ slackChannelId: null, slackChannelName: null })
+    .where(eq(correlationRules.orgId, orgId));
 
   return c.json({ disconnected: true });
 });
@@ -219,6 +240,8 @@ authed.get('/slack/channels', async (c) => {
   const token = decrypt(installation.botToken);
   const matched: Array<{ id: string; name: string; isPrivate: boolean }> = [];
   let cursor: string | undefined;
+  let pageCount = 0;
+  const MAX_PAGES = 5;
 
   do {
     const params = new URLSearchParams({
@@ -239,8 +262,10 @@ authed.get('/slack/channels', async (c) => {
       response_metadata?: { next_cursor?: string };
     };
 
+    pageCount++;
+
     if (!data.ok) {
-      console.error('[slack] conversations.list failed:', data.error ?? 'unknown');
+      c.get('logger').error({ slackError: data.error ?? 'unknown' }, '[slack] conversations.list failed');
       return c.json({ error: 'Failed to fetch channels from Slack' }, 502);
     }
 
@@ -251,7 +276,7 @@ authed.get('/slack/channels', async (c) => {
     }
 
     cursor = data.response_metadata?.next_cursor || undefined;
-  } while (cursor && matched.length < 50);
+  } while (cursor && matched.length < 50 && pageCount < MAX_PAGES);
 
   return c.json({ channels: matched.slice(0, 50) });
 });
@@ -280,7 +305,7 @@ authed.get('/slack/channels/:channelId', async (c) => {
   };
 
   if (!data.ok || !data.channel) {
-    console.error('[slack] conversations.info failed:', data.error ?? 'unknown');
+    c.get('logger').error({ slackError: data.error ?? 'unknown' }, '[slack] conversations.info failed');
     return c.json({ error: 'Could not resolve the specified Slack channel' }, 404);
   }
 

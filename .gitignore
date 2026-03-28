@@ -12,3 +12,4 @@ apps/web/out/
 
 # Claude Code
 .claude/
+memory/

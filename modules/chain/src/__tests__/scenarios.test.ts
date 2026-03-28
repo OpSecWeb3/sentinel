@@ -2486,7 +2486,7 @@ describe('windowedSumEvaluator', () => {
   // --- 1. Sum of transfer values exceeds 1M ETH ---
   it('triggers when sum of transfer values exceeds threshold', async () => {
     const redis = makeMockRedis({
-      zrange: vi.fn().mockResolvedValue([
+      zrangebyscore: vi.fn().mockResolvedValue([
         `evt-1:500000000000000000000000`,  // 500k ETH
         `evt-2:600000000000000000000000`,  // 600k ETH
       ]),
@@ -2518,7 +2518,7 @@ describe('windowedSumEvaluator', () => {
   // --- 2. Sum below threshold - no alert ---
   it('returns null when sum is below threshold', async () => {
     const redis = makeMockRedis({
-      zrange: vi.fn().mockResolvedValue([
+      zrangebyscore: vi.fn().mockResolvedValue([
         `evt-1:100000000000000000000`, // 100 ETH
         `evt-2:200000000000000000000`, // 200 ETH
       ]),
@@ -2548,7 +2548,7 @@ describe('windowedSumEvaluator', () => {
   // --- 3. Sum with 'gte' operator at exact threshold ---
   it('triggers with gte operator when sum equals threshold exactly', async () => {
     const redis = makeMockRedis({
-      zrange: vi.fn().mockResolvedValue([
+      zrangebyscore: vi.fn().mockResolvedValue([
         `evt-1:500000000000000000000000`,
         `evt-2:500000000000000000000000`,
       ]),
@@ -2578,7 +2578,7 @@ describe('windowedSumEvaluator', () => {
   // --- 4. Sum with 'lt' operator ---
   it('triggers with lt operator when sum is less than threshold', async () => {
     const redis = makeMockRedis({
-      zrange: vi.fn().mockResolvedValue([
+      zrangebyscore: vi.fn().mockResolvedValue([
         `evt-1:100`,
         `evt-2:200`,
       ]),
@@ -2608,7 +2608,7 @@ describe('windowedSumEvaluator', () => {
   // --- 5. GroupBy field sums independently ---
   it('groups sums independently by decoded arg field', async () => {
     const redis = makeMockRedis({
-      zrange: vi.fn().mockResolvedValue([
+      zrangebyscore: vi.fn().mockResolvedValue([
         `evt-1:500000000000000000000000`,
         `evt-2:600000000000000000000000`,
       ]),
@@ -2642,7 +2642,7 @@ describe('windowedSumEvaluator', () => {
   it('sums large BigInt values without overflow', async () => {
     const largeVal = '57896044618658097711785492504343953926634992332820282019728792003956564819967';
     const redis = makeMockRedis({
-      zrange: vi.fn().mockResolvedValue([
+      zrangebyscore: vi.fn().mockResolvedValue([
         `evt-1:${largeVal}`,
         `evt-2:${largeVal}`,
       ]),
@@ -2672,7 +2672,7 @@ describe('windowedSumEvaluator', () => {
   // --- 7. Window expiry removes old values ---
   it('calls zremrangebyscore to prune stale entries', async () => {
     const redis = makeMockRedis({
-      zrange: vi.fn().mockResolvedValue([`evt-1:100`]),
+      zrangebyscore: vi.fn().mockResolvedValue([`evt-1:100`]),
     });
     const event = makeEvent({
       payload: {
@@ -2699,7 +2699,7 @@ describe('windowedSumEvaluator', () => {
   // --- 8. Mixed positive values ---
   it('sums multiple positive values correctly', async () => {
     const redis = makeMockRedis({
-      zrange: vi.fn().mockResolvedValue([
+      zrangebyscore: vi.fn().mockResolvedValue([
         `evt-1:100`,
         `evt-2:200`,
         `evt-3:300`,
@@ -2733,7 +2733,7 @@ describe('windowedSumEvaluator', () => {
   // --- 9. Single large transaction exceeds threshold ---
   it('triggers on a single large transaction that exceeds threshold', async () => {
     const redis = makeMockRedis({
-      zrange: vi.fn().mockResolvedValue([
+      zrangebyscore: vi.fn().mockResolvedValue([
         `evt-1:${ONE_MILLION_ETH}`,
       ]),
     });
@@ -2762,7 +2762,7 @@ describe('windowedSumEvaluator', () => {
   // --- 10. Zero values in sum ---
   it('handles zero values in summing without error', async () => {
     const redis = makeMockRedis({
-      zrange: vi.fn().mockResolvedValue([
+      zrangebyscore: vi.fn().mockResolvedValue([
         `evt-1:0`,
         `evt-2:0`,
         `evt-3:0`,
@@ -2843,7 +2843,7 @@ describe('windowedSumEvaluator', () => {
   // --- 13. Threshold comparison with string BigInt via lte ---
   it('supports lte comparison against string BigInt threshold', async () => {
     const redis = makeMockRedis({
-      zrange: vi.fn().mockResolvedValue([
+      zrangebyscore: vi.fn().mockResolvedValue([
         `evt-1:500`,
         `evt-2:500`,
       ]),

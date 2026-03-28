@@ -31,25 +31,28 @@ export async function notifyKeyMiddleware(c: AuthContext, next: Next) {
       .where(eq(organizations.notifyKeyPrefix, prefix))
       .limit(1);
 
-    if (!org?.notifyKeyHash) return next();
+    if (!org?.notifyKeyHash) throw new HTTPException(401, { message: 'Invalid notify key' });
 
     // Full hash verify (timing-safe comparison)
     const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
     const hashBuffer = Buffer.from(keyHash, 'hex');
     const storedBuffer = Buffer.from(org.notifyKeyHash, 'hex');
     if (hashBuffer.length !== storedBuffer.length || !crypto.timingSafeEqual(hashBuffer, storedBuffer)) {
-      return next();
+      throw new HTTPException(401, { message: 'Invalid notify key' });
     }
 
     c.set('notifyKeyOrgId', org.id);
 
-    // Fire-and-forget last_used_at
-    db.update(organizations)
+    // Update last_used_at — awaited so errors propagate to the global handler
+    // instead of being silently swallowed by a detached promise.
+    await db.update(organizations)
       .set({ notifyKeyLastUsedAt: new Date() })
       .where(eq(organizations.id, org.id))
-      .catch((err) => { rootLogger.debug({ err, orgId: org.id }, 'Failed to update notifyKey lastUsedAt'); });
+      .catch((err) => { rootLogger.warn({ err, orgId: org.id }, 'Failed to update notifyKey lastUsedAt'); });
   } catch (err) {
-    rootLogger.debug({ err }, 'Notify key auth lookup failed, falling through');
+    if (err instanceof HTTPException) throw err;
+    rootLogger.error({ err }, 'Notify key auth lookup failed unexpectedly');
+    throw new HTTPException(500, { message: 'Internal authentication error' });
   }
 
   await next();

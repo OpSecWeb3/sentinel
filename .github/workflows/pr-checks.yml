@@ -94,11 +94,33 @@ jobs:
       - name: Apply migrations
         run: pnpm db:migrate
 
-      - name: Check for uncommitted migrations
+      - name: Three-way migration sync check
         run: |
-          pnpm db:generate
+          SQL_COUNT=$(ls packages/db/migrations/*.sql 2>/dev/null | wc -l | tr -d ' ')
+          JOURNAL_COUNT=$(grep -c '"tag"' packages/db/migrations/meta/_journal.json || echo 0)
+          DB_COUNT=$(psql "$DATABASE_URL" -t -A -c "SELECT count(*) FROM drizzle.__drizzle_migrations;")
+
+          echo "SQL files: $SQL_COUNT | Journal entries: $JOURNAL_COUNT | DB rows: $DB_COUNT"
+
+          if [ "$SQL_COUNT" != "$JOURNAL_COUNT" ]; then
+            echo "::error::Migration file count ($SQL_COUNT) does not match journal entries ($JOURNAL_COUNT). A migration file may be missing from _journal.json."
+            exit 1
+          fi
+
+          if [ "$JOURNAL_COUNT" != "$DB_COUNT" ]; then
+            echo "::error::Journal entries ($JOURNAL_COUNT) do not match applied migrations ($DB_COUNT). Run 'pnpm db:migrate' and check for unapplied migrations."
+            exit 1
+          fi
+
+      - name: Check for uncommitted schema drift
+        run: |
+          # Timeout protects against interactive prompts hanging CI
+          timeout 30 pnpm db:generate || {
+            echo "::error::pnpm db:generate timed out or failed. If it needs interactive input, the schema change may require a manual migration."
+            exit 1
+          }
           if [ -n "$(git status --porcelain packages/db/migrations/)" ]; then
-            echo "Schema changes detected without a migration file. Run 'pnpm db:generate' and commit the result."
+            echo "::error::Schema changes detected without a migration file. Run 'pnpm db:generate' and commit the result."
             git diff packages/db/migrations/
             exit 1
           fi

@@ -235,7 +235,9 @@ export type PollChangeType =
   | 'npm.version_deprecated'
   | 'npm.version_unpublished'
   | 'npm.maintainer_changed'
-  | 'npm.dist_tag_updated';
+  | 'npm.dist_tag_updated'
+  | 'npm.new_tag'
+  | 'npm.tag_removed';
 
 export function normalizePollChange(
   changeType: PollChangeType,

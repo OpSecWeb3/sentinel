@@ -25,11 +25,14 @@ const configSchema = z.object({
 // Redis key helpers — ported from ChainAlert's windowed.ts
 // ---------------------------------------------------------------------------
 
-function windowKey(ruleId: string, groupValue?: string): string {
+function windowKey(orgId: string, ruleId: string, groupValue?: string): string {
+  // Both grouped and ungrouped use the same "wcount" prefix so that a rule
+  // switching between modes does not leave stale keys under a different
+  // namespace that are never pruned.
   if (groupValue) {
-    return `sentinel:wcount:${ruleId}:${groupValue}`;
+    return `sentinel:wcount:${orgId}:${ruleId}:${groupValue}`;
   }
-  return `sentinel:window:${ruleId}`;
+  return `sentinel:wcount:${orgId}:${ruleId}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -45,13 +48,14 @@ function windowKey(ruleId: string, groupValue?: string): string {
 
 async function checkWindowThreshold(
   redis: EvalContext['redis'],
+  orgId: string,
   ruleId: string,
   eventId: string,
   _timestamp: number,
   windowMs: number,
   threshold: number,
 ): Promise<boolean> {
-  const key = windowKey(ruleId);
+  const key = windowKey(orgId, ruleId);
   const now = Date.now();
 
   // 1. Add the new event (use Date.now() for both add and prune to avoid
@@ -73,6 +77,7 @@ async function checkWindowThreshold(
 
 async function checkGroupedWindowThreshold(
   redis: EvalContext['redis'],
+  orgId: string,
   ruleId: string,
   groupValue: string,
   eventId: string,
@@ -80,7 +85,7 @@ async function checkGroupedWindowThreshold(
   windowMs: number,
   threshold: number,
 ): Promise<{ triggered: boolean; count: number }> {
-  const key = windowKey(ruleId, groupValue);
+  const key = windowKey(orgId, ruleId, groupValue);
   const now = Date.now();
 
   // 1. Add the new event to the group's sorted set (use Date.now() for
@@ -158,6 +163,7 @@ export const windowedCountEvaluator: RuleEvaluator = {
 
       const { triggered, count } = await checkGroupedWindowThreshold(
         redis,
+        event.orgId,
         rule.id,
         groupValue,
         event.id,
@@ -196,6 +202,7 @@ export const windowedCountEvaluator: RuleEvaluator = {
     // Ungrouped variant
     const triggered = await checkWindowThreshold(
       redis,
+      event.orgId,
       rule.id,
       event.id,
       timestamp,

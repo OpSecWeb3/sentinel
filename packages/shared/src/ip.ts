@@ -10,9 +10,10 @@
  *                               forge when no proxy strips/overwrites them.
  */
 import type { Context } from 'hono';
+import { env } from './env.js';
 
 export function getClientIp(c: Context): string {
-  const trustedProxyCount = parseInt(process.env.TRUSTED_PROXY_COUNT ?? '0', 10);
+  const trustedProxyCount = env().TRUSTED_PROXY_COUNT;
 
   if (trustedProxyCount > 0) {
     const forwarded = c.req.header('X-Forwarded-For');

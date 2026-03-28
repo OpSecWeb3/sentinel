@@ -12,7 +12,7 @@ const configSchema = z.object({
   tagPatterns: z.array(z.string()).default(['*']),
   /** Change types to check. */
   changeTypes: z
-    .array(z.enum(['digest_change', 'new_tag', 'version_published']))
+    .array(z.enum(['digest_change', 'new_tag', 'tag_removed', 'version_published', 'dist_tag_updated', 'maintainer_changed']))
     .default(['version_published']),
   /**
    * Alert when a version contains preinstall, install, or postinstall scripts.
@@ -34,6 +34,9 @@ const HANDLED_EVENT_TYPES = new Set([
   'registry.docker.digest_change',
   'registry.docker.new_tag',
   'registry.npm.version_published',
+  'registry.npm.new_tag',
+  'registry.npm.tag_removed',
+  'registry.npm.dist_tag_updated',
 ]);
 
 // ---------------------------------------------------------------------------

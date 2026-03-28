@@ -48,10 +48,20 @@ const aggregationConfigSchema = z.object({
   groupByField: z.string().optional(),
 });
 
+// Cross-event condition for absence rules — links expected event fields to trigger event fields
+const absenceMatchConditionSchema = z.object({
+  field: z.string(),        // field on the expected event (e.g., "sender.login")
+  operator: z.enum(['==', '!=']),
+  triggerField: z.string(), // field on the trigger event (e.g., "sender.login")
+});
+
 // Absence config (Phase 3)
 const absenceConfigSchema = z.object({
   trigger: z.object({ eventFilter: eventFilterSchema }),
-  expected: z.object({ eventFilter: eventFilterSchema }),
+  expected: z.object({
+    eventFilter: eventFilterSchema,
+    matchConditions: z.array(absenceMatchConditionSchema).default([]),
+  }),
   graceMinutes: z.number().positive(),
 });
 
@@ -80,6 +90,7 @@ export type CrossStepCondition = z.infer<typeof crossStepConditionSchema>;
 export type CorrelationKeyField = z.infer<typeof correlationKeyFieldSchema>;
 export type AggregationConfig = z.infer<typeof aggregationConfigSchema>;
 export type AbsenceConfig = z.infer<typeof absenceConfigSchema>;
+export type AbsenceMatchCondition = z.infer<typeof absenceMatchConditionSchema>;
 
 // ---------------------------------------------------------------------------
 // Correlation rule row (from DB)

@@ -175,6 +175,9 @@ function evaluateBalanceConditionPure(
       const bps = (diff * 10000n) / previousValue;
       if (bps >= thresholdValue * 100n) {
         const direction = currentValue < previousValue ? 'drop' : 'rise';
+        // When bidirectional is false (the default), only trigger on drops.
+        // The old code fired on both drops and rises regardless of this flag (HIGH bug).
+        if (direction === 'rise' && !bidirectional) return { triggered: false };
         return {
           triggered: true,
           context: {

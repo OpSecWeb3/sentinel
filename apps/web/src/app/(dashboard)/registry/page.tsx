@@ -120,7 +120,7 @@ export default function RegistryOverviewPage() {
     { title: "images/", desc: "manage monitored Docker images", href: "/registry/images" },
     { title: "packages/", desc: "manage monitored npm packages", href: "/registry/packages" },
     { title: "templates/", desc: "detection template gallery", href: "/registry/templates" },
-    { title: "events/", desc: "release chain event log", href: "/registry/events" },
+    { title: "events/", desc: "registry event log", href: "/registry/events" },
   ];
 
   /* -- render -------------------------------------------------------- */

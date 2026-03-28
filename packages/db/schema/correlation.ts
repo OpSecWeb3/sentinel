@@ -3,7 +3,7 @@ import {
   integer, index,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { organizations, users } from './core.js';
+import { organizations, users } from './core';
 
 // ---------------------------------------------------------------------------
 // Shared column helpers (same as core.ts)

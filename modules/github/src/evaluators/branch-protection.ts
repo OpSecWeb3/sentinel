@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { minimatch } from 'minimatch';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
 import type { TemplateInput } from '@sentinel/shared/module';
 
@@ -34,10 +35,10 @@ export const branchProtectionEvaluator: RuleEvaluator = {
       return null;
     }
 
-    // Check branch filter
+    // Check branch filter — supports glob patterns (e.g. release/*) via minimatch
     if (config.watchBranches.length > 0) {
-      const pattern = payload.rule?.pattern ?? '';
-      if (!config.watchBranches.some((b) => b === pattern || b === '*')) {
+      const branchPattern = payload.rule?.pattern ?? payload.rule?.name ?? '';
+      if (!config.watchBranches.some((b) => minimatch(branchPattern, b))) {
         return null;
       }
     }

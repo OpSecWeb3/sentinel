@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { toFunctionSelector } from 'viem';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
 import { conditionSchema, evaluateConditions, type Condition } from './event-match.js';
 import { NETWORK_UI_FIELD, CONTRACT_UI_FIELD } from './_ui-shared.js';
@@ -60,8 +61,10 @@ export const functionCallMatchEvaluator: RuleEvaluator = {
 
     // ----- Selector matching -----
     const txSelector = payload.input.slice(0, 10).toLowerCase();
-    const ruleSelector = (config.selector ?? '').toLowerCase();
-    if (!ruleSelector) return null;
+    // config.selector is optional — derive it from functionSignature when absent.
+    // The old code returned null here, silently preventing rules without a
+    // pre-computed selector from ever firing (HIGH bug).
+    const ruleSelector = (config.selector ?? toFunctionSelector(config.functionSignature)).toLowerCase();
     if (txSelector !== ruleSelector) return null;
 
     // ----- Field conditions on decoded args -----

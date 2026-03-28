@@ -91,9 +91,13 @@ beforeAll(async () => {
     CREATE TABLE sessions (
       sid TEXT PRIMARY KEY,
       sess JSONB NOT NULL,
-      expire TIMESTAMPTZ NOT NULL
+      expire TIMESTAMPTZ NOT NULL,
+      user_id UUID,
+      org_id UUID
     );
     CREATE INDEX idx_sessions_expire ON sessions(expire);
+    CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+    CREATE INDEX idx_sessions_org_id ON sessions(org_id);
 
     CREATE TABLE api_keys (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -144,6 +148,7 @@ beforeAll(async () => {
       status TEXT NOT NULL DEFAULT 'active',
       priority INTEGER NOT NULL DEFAULT 50,
       action TEXT NOT NULL DEFAULT 'alert',
+      last_triggered_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
