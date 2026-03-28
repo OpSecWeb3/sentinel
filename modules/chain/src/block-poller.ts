@@ -8,6 +8,19 @@
  * In Sentinel, this runs as a BullMQ job handler (chain.block.poll)
  * rather than a long-running loop. The Sentinel scheduler invokes it
  * on a repeatable cadence per network.
+ *
+ * KNOWN LIMITATION — BullMQ scheduling jitter at fast block times:
+ * BullMQ repeatable jobs fire on a fixed interval set at registration time,
+ * not immediately after the previous poll completes. Under Redis load this
+ * introduces ~100-500ms scheduling jitter, and if a poll takes longer than
+ * the interval the next invocation is delayed rather than self-correcting.
+ * For Ethereum mainnet (12s blocks) this is acceptable — the cursor-gap
+ * logic handles any missed blocks regardless of timing. For chains with
+ * sub-second block times (Arbitrum ~250ms, Base ~2s at high throughput)
+ * this becomes a real constraint. At that point the block poller should be
+ * converted to a dedicated long-running loop (see ChainAlert's block-poller
+ * for the reference implementation) running alongside the BullMQ worker in
+ * the same process via Promise.all. The state poller stays BullMQ either way.
  */
 import { logger as rootLogger } from '@sentinel/shared/logger';
 import { eq, and, inArray, sql } from '@sentinel/db';
@@ -153,7 +166,9 @@ async function getCachedFnCallInfo(networkId: number): Promise<FnCallInfo> {
     ))
     .where(
       and(
-        eq(rules.ruleType, 'function-call-match'),
+        // Use canonical rule type string; legacy 'function-call-match' is never stored
+        // in the DB — all rules are written with the dot-separated canonical form.
+        eq(rules.ruleType, 'chain.function_call_match'),
         eq(rules.status, 'active'),
         eq(rules.moduleId, 'chain'),
       ),
@@ -168,6 +183,14 @@ async function getCachedFnCallInfo(networkId: number): Promise<FnCallInfo> {
 // ---------------------------------------------------------------------------
 // Network config loader
 // ---------------------------------------------------------------------------
+
+function getRpcUrls(chainKey: string): string[] | null {
+  const envVar = `RPC_${chainKey.toUpperCase()}`;
+  const value = process.env[envVar];
+  if (!value) return null;
+  const urls = value.split(',').map((s) => s.trim()).filter(Boolean);
+  return urls.length > 0 ? urls : null;
+}
 
 export async function loadNetworkConfig(
   networkSlug: string,
@@ -186,8 +209,12 @@ export async function loadNetworkConfig(
 
   const row = rows[0]!;
 
-  // Check for org-specific RPC config first
   let rpcUrls: string[] = row.rpcUrl.split(',').map((s) => s.trim()).filter(Boolean);
+
+  const envRpcUrls = getRpcUrls(row.chainKey);
+  if (envRpcUrls !== null) {
+    rpcUrls = envRpcUrls;
+  }
 
   if (orgId) {
     const orgRpc = await db
@@ -274,23 +301,36 @@ export async function pollOnce(
   // Check if any function-call-match rules exist for this network
   const fnCallInfo = await getCachedFnCallInfo(config.networkId);
 
-  const blockDataJobs: BlockData[] = [];
+  // Batch getLogs for the entire block range instead of one call per block
+  const fromBlock = lastBlock + 1n;
+  const allLogs = await client.getLogs({ fromBlock, toBlock: to });
 
-  for (let blockNum = lastBlock + 1n; blockNum <= to; blockNum++) {
-    const logs = await client.getLogs({
-      fromBlock: blockNum,
-      toBlock: blockNum,
-    });
+  // Group logs by block number for per-block assembly
+  const logsByBlock = new Map<string, RpcLog[]>();
+  for (const l of allLogs) {
+    const bn = l.blockNumber ?? String(fromBlock);
+    let arr = logsByBlock.get(bn);
+    if (!arr) {
+      arr = [];
+      logsByBlock.set(bn, arr);
+    }
+    arr.push(l);
+  }
 
-    // Conditionally fetch full transactions for function-call-match rules
-    let transactions: RpcTransaction[] | undefined;
-
-    if (fnCallInfo.has) {
-      const block = await client.getBlock(blockNum, true);
-
-      // Pre-filter: only include txs to monitored addresses
-      const fullTxs = block.transactions as RpcTransaction[];
-      transactions = fullTxs
+  // When function-call-match rules exist, fetch blocks with transactions in
+  // parallel instead of serially.
+  const txsByBlock = new Map<string, RpcTransaction[]>();
+  if (fnCallInfo.has) {
+    const blockNums: bigint[] = [];
+    for (let blockNum = fromBlock; blockNum <= to; blockNum++) {
+      blockNums.push(blockNum);
+    }
+    const blocks = await Promise.all(
+      blockNums.map((bn) => client.getBlock(bn, true).then((b) => ({ bn, b }))),
+    );
+    for (const { bn, b } of blocks) {
+      const fullTxs = b.transactions as RpcTransaction[];
+      const filtered = fullTxs
         .filter(
           (tx) => tx.to && fnCallInfo.addresses.has(tx.to.toLowerCase()),
         )
@@ -302,12 +342,21 @@ export async function pollOnce(
           value: tx.value,
           blockNumber: tx.blockNumber,
         }));
+      if (filtered.length > 0) {
+        txsByBlock.set(bn.toString(), filtered);
+      }
     }
+  }
 
+  const blockDataJobs: BlockData[] = [];
+  for (let blockNum = fromBlock; blockNum <= to; blockNum++) {
+    const bnStr = blockNum.toString();
+    const logs = logsByBlock.get(bnStr) ?? [];
+    const transactions = txsByBlock.get(bnStr);
     blockDataJobs.push({
       networkSlug: config.slug,
       chainId: config.chainId,
-      blockNumber: blockNum.toString(),
+      blockNumber: bnStr,
       logs: logs.map((l) => ({
         address: l.address,
         topics: l.topics,
@@ -317,7 +366,7 @@ export async function pollOnce(
         logIndex: l.logIndex,
         transactionIndex: l.transactionIndex,
       })),
-      ...(transactions && transactions.length > 0 ? { transactions } : {}),
+      ...(transactions ? { transactions } : {}),
     });
   }
 

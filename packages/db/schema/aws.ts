@@ -1,5 +1,5 @@
 import {
-  pgTable, text, uuid, timestamp, boolean, jsonb,
+  pgTable, text, uuid, timestamp, boolean, jsonb, integer,
   bigserial, index, uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -44,7 +44,7 @@ export const awsIntegrations = pgTable('aws_integrations', {
   errorMessage: text('error_message'),
   lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
   nextPollAt: timestamp('next_poll_at', { withTimezone: true }),
-  pollIntervalSeconds: text('poll_interval_seconds').notNull().default('60'),
+  pollIntervalSeconds: integer('poll_interval_seconds').notNull().default(60),
 
   createdAt,
   updatedAt,
@@ -64,7 +64,7 @@ export const awsIntegrations = pgTable('aws_integrations', {
 
 export const awsRawEvents = pgTable('aws_raw_events', {
   id: bigserial('id', { mode: 'bigint' }).primaryKey(),
-  orgId: uuid('org_id').notNull(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   integrationId: uuid('integration_id').notNull().references(() => awsIntegrations.id, { onDelete: 'cascade' }),
 
   // CloudTrail event identity

@@ -51,7 +51,16 @@ export const sessions = pgTable('sessions', {
   sid: text('sid').primaryKey(),
   sess: jsonb('sess').notNull(),
   expire: timestamp('expire', { withTimezone: true }).notNull(),
-}, (t) => [index('idx_sessions_expire').on(t.expire)]);
+  // Plaintext lookup columns — these are UUIDs (not secrets) and enable indexed
+  // deletion without decrypting every row.  Populated at session creation time.
+  // Nullable for backward compatibility with rows written before this migration.
+  userId: uuid('user_id'),
+  orgId: uuid('org_id'),
+}, (t) => [
+  index('idx_sessions_expire').on(t.expire),
+  index('idx_sessions_user_id').on(t.userId),
+  index('idx_sessions_org_id').on(t.orgId),
+]);
 
 export const apiKeys = pgTable('api_keys', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
@@ -101,13 +110,14 @@ export const detections = pgTable('detections', {
 export const rules = pgTable('rules', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   detectionId: uuid('detection_id').notNull().references(() => detections.id, { onDelete: 'cascade' }),
-  orgId: uuid('org_id').notNull().references(() => organizations.id),
+  orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   moduleId: text('module_id').notNull(),
   ruleType: text('rule_type').notNull(),
   config: jsonb('config').notNull(),
   status: text('status').notNull().default('active'),
   priority: integer('priority').notNull().default(50),
   action: text('action').notNull().default('alert'),
+  lastTriggeredAt: timestamp('last_triggered_at', { withTimezone: true }),
   createdAt,
   updatedAt,
 }, (t) => [
@@ -152,6 +162,18 @@ export const alerts = pgTable('alerts', {
 }, (t) => [
   index('idx_alerts_org').on(t.orgId),
   index('idx_alerts_detection').on(t.detectionId),
+  // P2: Prevent duplicate alerts for the same event+detection+rule combination.
+  uniqueIndex('uq_alerts_event_detection_rule')
+    .on(t.eventId, t.detectionId, t.ruleId)
+    .where(sql`event_id IS NOT NULL AND detection_id IS NOT NULL`),
+  // P2: Prevent duplicate correlated alerts for the same event+correlation rule.
+  // Note: the expression index on trigger_data->>'correlationRuleId' must be
+  // added via raw SQL in the migration since Drizzle doesn't support expression
+  // indexes natively. This schema-level index covers the eventId column; the
+  // migration will replace it with the full expression index.
+  uniqueIndex('uq_alerts_event_correlation')
+    .on(t.eventId)
+    .where(sql`trigger_type = 'correlated' AND event_id IS NOT NULL`),
 ]);
 
 // ---------------------------------------------------------------------------

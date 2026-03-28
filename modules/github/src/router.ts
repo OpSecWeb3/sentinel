@@ -4,6 +4,7 @@
  * and GitHub App OAuth installation callback flow.
  */
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import crypto, { createHmac, timingSafeEqual } from 'node:crypto';
 import { getDb } from '@sentinel/db';
@@ -16,35 +17,57 @@ import type { AppEnv } from '@sentinel/shared/hono-types';
 import { getClientIp } from '@sentinel/shared/ip';
 import { getInstallationDetails } from './github-api.js';
 import { syncOptionsSchema } from './sync.js';
+import type IORedis from 'ioredis';
 
 export const githubRouter = new Hono<AppEnv>();
 
 // ---------------------------------------------------------------------------
-// In-memory rate limiter for webhook endpoint (Fix #2: 100 req/min per IP)
+// Redis-backed rate limiter for webhook endpoint.
+// Uses the shared Redis connection injected via setWebhookRateLimitRedis()
+// so that limits are enforced across all worker processes. Falls back to an
+// in-memory Map only in test/development when Redis is unavailable.
 // ---------------------------------------------------------------------------
 
-const webhookRateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const WEBHOOK_RATE_LIMIT = 100;
-const WEBHOOK_RATE_WINDOW_MS = 60_000;
+let _rateLimitRedis: IORedis | undefined;
 
-function isWebhookRateLimited(ip: string): boolean {
+/** Call once at startup (from the API entrypoint) to share the Redis connection. */
+export function setWebhookRateLimitRedis(redis: IORedis): void {
+  _rateLimitRedis = redis;
+}
+
+const WEBHOOK_RATE_LIMIT = 100;
+const WEBHOOK_RATE_WINDOW_SEC = 60;
+
+const _inMemoryFallback = new Map<string, { count: number; resetAt: number }>();
+
+async function isWebhookRateLimited(ip: string): Promise<boolean> {
+  if (process.env.DISABLE_RATE_LIMIT === 'true') return false;
+
+  const redis = _rateLimitRedis;
+  if (redis) {
+    // Atomic INCR + EXPIRE in a single round-trip (same pattern as API rate limiter)
+    const luaScript = `
+      local current = redis.call('INCR', KEYS[1])
+      if current == 1 then
+        redis.call('EXPIRE', KEYS[1], ARGV[1])
+      end
+      return current
+    `;
+    const key = `sentinel:rl:gh-webhook:ip:${ip}`;
+    const current = (await redis.eval(luaScript, 1, key, WEBHOOK_RATE_WINDOW_SEC)) as number;
+    return current > WEBHOOK_RATE_LIMIT;
+  }
+
+  // Fallback: in-memory limiter for tests / local dev without Redis
   const now = Date.now();
-  const entry = webhookRateLimitMap.get(ip);
+  const entry = _inMemoryFallback.get(ip);
   if (!entry || now >= entry.resetAt) {
-    webhookRateLimitMap.set(ip, { count: 1, resetAt: now + WEBHOOK_RATE_WINDOW_MS });
+    _inMemoryFallback.set(ip, { count: 1, resetAt: now + WEBHOOK_RATE_WINDOW_SEC * 1000 });
     return false;
   }
   entry.count++;
   return entry.count > WEBHOOK_RATE_LIMIT;
 }
-
-// Periodically clean up expired entries to prevent memory leaks
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of webhookRateLimitMap) {
-    if (now >= entry.resetAt) webhookRateLimitMap.delete(ip);
-  }
-}, 60_000).unref();
 
 // ---------------------------------------------------------------------------
 // State signing for OAuth CSRF protection (same pattern as Slack flow)
@@ -68,7 +91,11 @@ const MAX_STATE_AGE_MS = 10 * 60 * 1000; // 10 minutes
 // ---------------------------------------------------------------------------
 
 githubRouter.get('/app/callback', async (c) => {
-  const webUrl = env().ALLOWED_ORIGINS.split(',')[0]?.trim() ?? 'http://localhost:3000';
+  const firstOrigin = env().ALLOWED_ORIGINS.split(',')[0]?.trim();
+  if (!firstOrigin) {
+    throw new Error('ALLOWED_ORIGINS env var is empty — cannot determine redirect URL for GitHub callback');
+  }
+  const webUrl = firstOrigin;
 
   const installationIdParam = c.req.query('installation_id');
   const stateParam = c.req.query('state');
@@ -215,7 +242,7 @@ const manualSetupSchema = z.object({
   baseUrl: z.string().url().optional(), // for GitHub Enterprise Server
 });
 
-githubRouter.post('/app/setup', async (c) => {
+githubRouter.post('/app/setup', bodyLimit({ maxSize: 1 * 1024 * 1024 }), async (c) => {
   const orgId = c.get('orgId');
   const role = c.get('role');
   if (!orgId) return c.json({ error: 'Organisation required' }, 403);
@@ -285,16 +312,18 @@ githubRouter.post('/app/setup', async (c) => {
 // POST /modules/github/webhooks/:installationId — receive GitHub webhooks
 // ---------------------------------------------------------------------------
 
-githubRouter.post('/webhooks/:installationId', async (c) => {
+githubRouter.post(
+  '/webhooks/:installationId',
+  // CRIT-11: Enforce a hard 5 MB body limit regardless of whether Content-Length
+  // is present. The previous guard (`if (contentLength && ...)`) was skipped when
+  // the header was absent, allowing unbounded body reads via c.req.text().
+  // bodyLimit streams the body and aborts if the byte count exceeds maxSize,
+  // covering both the header-present fast-path and the chunked/no-header path.
+  bodyLimit({ maxSize: 5 * 1024 * 1024 }),
+  async (c) => {
   const clientIp = getClientIp(c);
-  if (isWebhookRateLimited(clientIp)) {
+  if (await isWebhookRateLimited(clientIp)) {
     return c.json({ error: 'Too many requests' }, 429);
-  }
-
-  // Fix #11: Reject oversized payloads before reading body (>5MB)
-  const contentLength = c.req.header('content-length');
-  if (contentLength && parseInt(contentLength, 10) > 5 * 1024 * 1024) {
-    return c.json({ error: 'Payload too large' }, 413);
   }
 
   const installationId = c.req.param('installationId');
@@ -406,7 +435,7 @@ const createInstallationSchema = z.object({
   events: z.array(z.string()).default([]),
 });
 
-githubRouter.post('/installations', async (c) => {
+githubRouter.post('/installations', bodyLimit({ maxSize: 1 * 1024 * 1024 }), async (c) => {
   const orgId = c.get('orgId');
   const role = c.get('role');
   if (!orgId) return c.json({ error: 'Organisation required' }, 403);
@@ -484,7 +513,7 @@ githubRouter.get('/repositories', async (c) => {
 });
 
 // POST /modules/github/installations/:id/sync — trigger a filtered repo sync
-githubRouter.post('/installations/:id/sync', async (c) => {
+githubRouter.post('/installations/:id/sync', bodyLimit({ maxSize: 1 * 1024 * 1024 }), async (c) => {
   const installationId = c.req.param('id');
   const orgId = c.get('orgId');
   const role = c.get('role');

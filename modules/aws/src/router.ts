@@ -126,7 +126,7 @@ awsRouter.post('/integrations', async (c) => {
     sqsQueueUrl: data.sqsQueueUrl ?? null,
     sqsRegion: data.sqsRegion,
     regions: data.regions,
-    pollIntervalSeconds: String(data.pollIntervalSeconds),
+    pollIntervalSeconds: data.pollIntervalSeconds,
     enabled: true,
     status: 'active',
   }).returning({
@@ -226,7 +226,7 @@ awsRouter.patch('/integrations/:id', async (c) => {
   if (d.sqsRegion !== undefined) updates.sqsRegion = d.sqsRegion;
   if (d.regions !== undefined) updates.regions = d.regions;
   if (d.enabled !== undefined) updates.enabled = d.enabled;
-  if (d.pollIntervalSeconds !== undefined) updates.pollIntervalSeconds = String(d.pollIntervalSeconds);
+  if (d.pollIntervalSeconds !== undefined) updates.pollIntervalSeconds = d.pollIntervalSeconds;
   if (d.roleArn !== undefined) updates.roleArn = d.roleArn;
   if (d.externalId !== undefined) updates.externalId = d.externalId;
 

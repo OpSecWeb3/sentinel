@@ -69,13 +69,29 @@ export function normalizeCloudTrailEvent(
   };
 }
 
+/**
+ * Deterministic fallback ID for EventBridge events missing the 'id' field.
+ */
+function deterministicExternalId(record: Record<string, unknown>): string {
+  const { createHash } = require('node:crypto') as typeof import('node:crypto');
+  const source = (record.source ?? record['detail-type'] ?? '') as string;
+  const time = (record.time ?? '') as string;
+  const account = (record.account ?? '') as string;
+  const detail = record.detail ? JSON.stringify(record.detail) : '';
+  return `eb-${createHash('sha256').update(`${source}|${time}|${account}|${detail}`).digest('hex').slice(0, 24)}`;
+}
+
 function normalizeEventBridgeEvent(
   record: Record<string, unknown>,
   orgId: string,
 ): NormalizedAwsEvent | null {
   const detailType = record['detail-type'] as string;
-  const eventType = EVENTBRIDGE_TYPE_MAP[detailType];
-  if (!eventType) return null;
+  const source = record.source as string ?? 'aws.events';
+  // Use the known mapping when available; otherwise derive a type from the
+  // source + detail-type so that unknown EventBridge events are still ingested
+  // instead of being silently dropped.
+  const eventType = EVENTBRIDGE_TYPE_MAP[detailType]
+    ?? `aws.${source.replace(/^aws\./, '')}.${detailType.replace(/\s+/g, '')}`;
 
   const id = record.id as string | undefined;
   const timeStr = record.time as string | undefined;
@@ -85,17 +101,19 @@ function normalizeEventBridgeEvent(
     moduleId: 'aws',
     eventType,
     orgId,
-    externalId: id ?? `eb-${Date.now()}`,
+    externalId: id ?? deterministicExternalId(record),
     payload: {
-      // Normalize into a shape the evaluators can work with consistently
+      // Raw fields first so that the normalised fields below always take
+      // precedence. Previously `...record` was last and could overwrite
+      // eventName, awsRegion, accountId, and userIdentity with raw values.
+      ...record,
+      // Normalised fields — these must come after the spread so they win.
       eventName: detailType,
       eventSource: record.source as string ?? 'aws.ec2',
       awsRegion: record.region as string ?? '',
       accountId: record.account as string ?? '',
       userIdentity: { type: 'AWSService', principalId: record.source as string },
       detail,
-      // Raw fields preserved
-      ...record,
     },
     occurredAt: timeStr ? new Date(timeStr) : new Date(),
   };

@@ -1,5 +1,5 @@
 import type { Job } from 'bullmq';
-import { getDb, eq, sql, isNotNull } from '@sentinel/db';
+import { getDb, eq, gt, asc, sql, isNotNull, and } from '@sentinel/db';
 import {
   organizations, slackInstallations, sessions,
 } from '@sentinel/db/schema/core';
@@ -7,6 +7,7 @@ import { githubInstallations } from '@sentinel/db/schema/github';
 import { rcArtifacts } from '@sentinel/db/schema/registry';
 import { infraCdnProviderConfigs } from '@sentinel/db/schema/infra';
 import { awsIntegrations } from '@sentinel/db/schema/aws';
+import type { AnyPgTable } from 'drizzle-orm/pg-core';
 import { decrypt, encrypt, needsReEncrypt } from '@sentinel/shared/crypto';
 import { QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { logger as rootLogger } from '@sentinel/shared/logger';
@@ -19,7 +20,7 @@ const _log = rootLogger.child({ component: 'key-rotation' });
  */
 interface RotationTarget {
   name: string;
-  table: Parameters<ReturnType<typeof getDb>['select']>[0] extends never ? never : any;
+  table: AnyPgTable;
   column: string;
 }
 
@@ -40,75 +41,160 @@ async function rotateColumn(target: RotationTarget): Promise<number> {
   const tbl = target.table as any;
   const col = tbl[target.column];
 
-  // Select rows where the encrypted column is non-null
-  const rows: { id: string; value: string }[] = await db
-    .select({ id: tbl.id, value: col })
-    .from(tbl)
-    .where(isNotNull(col))
-    .limit(BATCH_SIZE);
+  let totalRotated = 0;
+  let lastId = '';
 
-  let rotated = 0;
-  for (const row of rows) {
-    if (!row.value || !needsReEncrypt(row.value)) continue;
+  // Cursor-based pagination: use WHERE id > lastSeenId ORDER BY id ASC.
+  // This avoids the O(offset) scan penalty of OFFSET-based pagination and
+  // is stable under concurrent deletes (no rows are skipped or double-visited
+  // when rows before the cursor are removed between batches).
+  while (true) {
+    const rows: { id: string; value: string }[] = await db
+      .select({ id: tbl.id, value: col })
+      .from(tbl)
+      .where(lastId ? and(isNotNull(col), gt(tbl.id, lastId)) : isNotNull(col))
+      .orderBy(asc(tbl.id))
+      .limit(BATCH_SIZE);
 
-    try {
-      const plaintext = decrypt(row.value);
-      const reEncrypted = encrypt(plaintext);
+    if (rows.length === 0) break;
 
-      await db
-        .update(tbl)
-        .set({ [target.column]: reEncrypted })
-        .where(eq(tbl.id, row.id));
+    let batchRotated = 0;
+    for (const row of rows) {
+      if (!row.value || !needsReEncrypt(row.value)) continue;
 
-      rotated++;
-    } catch (err) {
-      _log.warn({ target: target.name, id: row.id, err }, 'Failed to re-encrypt row, skipping');
+      try {
+        const plaintext = decrypt(row.value);
+        const reEncrypted = encrypt(plaintext);
+
+        await db
+          .update(tbl)
+          .set({ [target.column]: reEncrypted })
+          .where(and(eq(tbl.id, row.id), eq(col, row.value)));
+
+        batchRotated++;
+      } catch (err) {
+        _log.warn({ target: target.name, id: row.id, err }, 'Failed to re-encrypt row, skipping');
+      }
     }
+
+    totalRotated += batchRotated;
+    lastId = rows[rows.length - 1].id;
+
+    // If this batch was smaller than BATCH_SIZE we have reached the last page.
+    if (rows.length < BATCH_SIZE) break;
   }
 
-  return rotated;
+  return totalRotated;
 }
 
 async function rotateSessions(): Promise<number> {
   const db = getDb();
-  const rows = await db.select().from(sessions).limit(BATCH_SIZE);
 
-  let rotated = 0;
-  for (const row of rows) {
-    const sess = row.sess as Record<string, unknown> | null;
-    if (!sess) continue;
+  // Filter at the SQL level to exclude sessions that are verifiably up to date:
+  // a session is eligible for rotation if it is either—
+  //   (a) a legacy plaintext session: the JSON object has no "_encrypted" key, OR
+  //   (b) an already-encrypted session whose ciphertext may be stale (encrypted
+  //       with the previous key): the JSON object has an "_encrypted" key.
+  //
+  // Case (b) cannot be further filtered at the SQL level because the schema
+  // stores no key-version column; we must load the ciphertext and call
+  // needsReEncrypt() to find out. We therefore page through all sessions that
+  // have "_encrypted" set as well, accepting that some will be skipped as
+  // already-current. Pagination prevents the batch from stalling indefinitely.
+  //
+  // Sessions with neither "_encrypted" nor "userId" are empty/unknown — they
+  // will be loaded but skipped in the loop below, which is harmless.
 
-    // Already encrypted with current format — check inner ciphertext
-    if (typeof sess._encrypted === 'string') {
-      if (!needsReEncrypt(sess._encrypted)) continue;
+  // Two passes in priority order:
+  //   1. Legacy sessions (no _encrypted key) — these always need work.
+  //   2. Encrypted sessions (have _encrypted key) — may or may not need re-key.
 
-      try {
-        const plaintext = decrypt(sess._encrypted);
-        const reEncrypted = encrypt(plaintext);
-        await db
-          .update(sessions)
-          .set({ sess: { _encrypted: reEncrypted } })
-          .where(eq(sessions.sid, row.sid));
-        rotated++;
-      } catch (err) {
-        _log.warn({ sid: row.sid, err }, 'Failed to re-encrypt session, skipping');
+  let totalRotated = 0;
+
+  // --- Pass 1: legacy plaintext sessions ---
+  // WHERE NOT (sess ? '_encrypted')
+  // Cursor-based pagination using sid (text PK, ordered ASC).
+  {
+    let lastSid = '';
+    while (true) {
+      const rows = await db
+        .select()
+        .from(sessions)
+        .where(lastSid
+          ? and(sql`NOT (${sessions.sess} ? '_encrypted')`, gt(sessions.sid, lastSid))
+          : sql`NOT (${sessions.sess} ? '_encrypted')`)
+        .orderBy(asc(sessions.sid))
+        .limit(BATCH_SIZE);
+
+      if (rows.length === 0) break;
+
+      let batchRotated = 0;
+      for (const row of rows) {
+        const sess = row.sess as Record<string, unknown> | null;
+        if (!sess || typeof sess.userId !== 'string') continue;
+
+        try {
+          const encrypted = encrypt(JSON.stringify({ userId: sess.userId, orgId: sess.orgId, role: sess.role }));
+          await db
+            .update(sessions)
+            .set({ sess: { _encrypted: encrypted } })
+            .where(eq(sessions.sid, row.sid));
+          batchRotated++;
+        } catch (err) {
+          _log.warn({ sid: row.sid, err }, 'Failed to encrypt legacy session, skipping');
+        }
       }
-    } else if (typeof sess.userId === 'string') {
-      // Legacy plaintext session — encrypt it
-      try {
-        const encrypted = encrypt(JSON.stringify({ userId: sess.userId, orgId: sess.orgId, role: sess.role }));
-        await db
-          .update(sessions)
-          .set({ sess: { _encrypted: encrypted } })
-          .where(eq(sessions.sid, row.sid));
-        rotated++;
-      } catch (err) {
-        _log.warn({ sid: row.sid, err }, 'Failed to encrypt legacy session, skipping');
-      }
+
+      totalRotated += batchRotated;
+      lastSid = rows[rows.length - 1].sid;
+      if (rows.length < BATCH_SIZE) break;
     }
   }
 
-  return rotated;
+  // --- Pass 2: already-encrypted sessions that may need re-keying ---
+  // WHERE sess ? '_encrypted'
+  // Cursor-based pagination using sid (text PK, ordered ASC).
+  {
+    let lastSid = '';
+    while (true) {
+      const rows = await db
+        .select()
+        .from(sessions)
+        .where(lastSid
+          ? and(sql`${sessions.sess} ? '_encrypted'`, gt(sessions.sid, lastSid))
+          : sql`${sessions.sess} ? '_encrypted'`)
+        .orderBy(asc(sessions.sid))
+        .limit(BATCH_SIZE);
+
+      if (rows.length === 0) break;
+
+      let batchRotated = 0;
+      for (const row of rows) {
+        const sess = row.sess as Record<string, unknown> | null;
+        if (!sess || typeof sess._encrypted !== 'string') continue;
+
+        if (!needsReEncrypt(sess._encrypted)) continue;
+
+        try {
+          const plaintext = decrypt(sess._encrypted);
+          const reEncrypted = encrypt(plaintext);
+          await db
+            .update(sessions)
+            .set({ sess: { _encrypted: reEncrypted } })
+            .where(eq(sessions.sid, row.sid));
+          batchRotated++;
+        } catch (err) {
+          _log.warn({ sid: row.sid, err }, 'Failed to re-encrypt session, skipping');
+        }
+      }
+
+      totalRotated += batchRotated;
+      lastSid = rows[rows.length - 1].sid;
+      if (rows.length < BATCH_SIZE) break;
+    }
+  }
+
+  return totalRotated;
 }
 
 export const keyRotationHandler: JobHandler = {

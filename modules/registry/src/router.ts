@@ -93,11 +93,25 @@ const updateArtifactSchema = z.object({
 
 /**
  * Verify HMAC-SHA256 signature on an incoming webhook body.
+ *
+ * Security notes:
+ * - Both sides are compared as raw bytes (not hex strings) so the length
+ *   guard is on byte length, not the hex-encoded string length.
+ * - `Buffer.from(signature, 'hex')` silently drops invalid hex nibbles in
+ *   Node.js, which would produce a shorter buffer and cause `timingSafeEqual`
+ *   to throw.  We validate that the caller-supplied signature is a well-formed
+ *   64-character lowercase hex string before decoding it.
  */
 function verifyHmacSha256(rawBody: string, signature: string, secret: string): boolean {
-  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-  if (expected.length !== signature.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(signature, 'hex'));
+  // A SHA-256 hex digest is always exactly 64 hex characters.
+  if (!/^[0-9a-f]{64}$/i.test(signature)) return false;
+
+  const expectedBytes = crypto.createHmac('sha256', secret).update(rawBody).digest();
+  const signatureBytes = Buffer.from(signature, 'hex');
+
+  // Both buffers are 32 bytes at this point; timingSafeEqual requires equal
+  // lengths and throws otherwise — the check above guarantees this.
+  return crypto.timingSafeEqual(expectedBytes, signatureBytes);
 }
 
 /**
@@ -210,7 +224,9 @@ registryRouter.post('/webhooks/docker', async (c) => {
   }
 
   // Fallback: if artifact not found in DB (e.g. first webhook before monitoring
-  // is configured), iterate orgs as before but limit scope
+  // is configured), iterate orgs to find a matching secret.
+  // SECURITY: Always iterate ALL orgs to prevent timing oracles that leak org
+  // count.  Do not break early on match — record the first match and continue.
   if (!matchedOrgId && !artifact) {
     const orgs = await db
       .select({
@@ -224,13 +240,13 @@ registryRouter.post('/webhooks/docker', async (c) => {
 
       try {
         const secret = decrypt(org.webhookSecretEncrypted);
-        if (verifyHmacSha256(rawBody, signature, secret)) {
+        const valid = verifyHmacSha256(rawBody, signature, secret);
+        if (valid && !matchedOrgId) {
           matchedOrgId = org.id;
-          break;
         }
       } catch (err) {
         log.debug({ err, orgId: org.id }, 'Docker webhook secret decryption failed during fallback');
-        continue;
+        // continue to next org — do not short-circuit
       }
     }
   }
@@ -313,7 +329,9 @@ registryRouter.post('/webhooks/npm', async (c) => {
     }
   }
 
-  // Fallback for unregistered artifacts
+  // Fallback for unregistered artifacts.
+  // SECURITY: Always iterate ALL orgs to prevent timing oracles that leak org
+  // count.  Do not break early on match — record the first match and continue.
   if (!matchedOrgId && !artifact) {
     const orgs = await db
       .select({
@@ -327,13 +345,13 @@ registryRouter.post('/webhooks/npm', async (c) => {
 
       try {
         const secret = decrypt(org.webhookSecretEncrypted);
-        if (verifyHmacSha256(rawBody, signature, secret)) {
+        const valid = verifyHmacSha256(rawBody, signature, secret);
+        if (valid && !matchedOrgId) {
           matchedOrgId = org.id;
-          break;
         }
       } catch (err) {
         log.debug({ err, orgId: org.id }, 'npm webhook secret decryption failed during fallback');
-        continue;
+        // continue to next org — do not short-circuit
       }
     }
   }
@@ -466,10 +484,26 @@ registryRouter.post('/images', async (c) => {
     }
   }
 
+  // Insert artifact into DB first so the poll job has a valid FK target
+  const db = getDb();
+  const artifactId = crypto.randomUUID();
+  const [inserted] = await db.insert(rcArtifacts).values({
+    id: artifactId,
+    orgId,
+    artifactType: 'docker_image',
+    name: body.name,
+    registry: 'docker_hub',
+    enabled: true,
+    tagWatchPatterns: body.tagPatterns,
+    tagIgnorePatterns: body.ignorePatterns,
+    pollIntervalSeconds: body.pollIntervalSeconds,
+    githubRepo: body.githubRepo ?? null,
+  }).returning();
+
   // Fix #10: Enqueue with try-catch
   const job = await safeEnqueue(QUEUE_NAMES.MODULE_JOBS, 'registry.poll', {
     artifact: {
-      id: crypto.randomUUID(),
+      id: inserted.id,
       orgId,
       name: body.name,
       registry: 'docker_hub',
@@ -490,6 +524,7 @@ registryRouter.post('/images', async (c) => {
   return c.json(
     {
       data: {
+        id: inserted.id,
         name: body.name,
         registry: 'docker_hub',
         tagPatterns: body.tagPatterns,
@@ -599,6 +634,7 @@ const addPackageSchema = z.object({
   ignorePatterns: z.array(z.string()).default([]),
   pollIntervalSeconds: z.coerce.number().int().min(60).default(300),
   githubRepo: z.string().regex(/^[^/]+\/[^/]+$/).optional(),
+  watchMode: z.enum(['dist-tags', 'versions']).default('versions'),
 });
 
 registryRouter.post('/packages', async (c) => {
@@ -622,10 +658,27 @@ registryRouter.post('/packages', async (c) => {
     }
   }
 
+  // Insert artifact into DB first so the poll job has a valid FK target
+  const db = getDb();
+  const artifactId = crypto.randomUUID();
+  const [inserted] = await db.insert(rcArtifacts).values({
+    id: artifactId,
+    orgId,
+    artifactType: 'npm_package',
+    name: body.name,
+    registry: 'npmjs',
+    enabled: true,
+    tagWatchPatterns: body.tagPatterns,
+    tagIgnorePatterns: body.ignorePatterns,
+    watchMode: body.watchMode,
+    pollIntervalSeconds: body.pollIntervalSeconds,
+    githubRepo: body.githubRepo ?? null,
+  }).returning();
+
   // Fix #10: Enqueue with try-catch
   const job = await safeEnqueue(QUEUE_NAMES.MODULE_JOBS, 'registry.poll', {
     artifact: {
-      id: crypto.randomUUID(),
+      id: inserted.id,
       orgId,
       name: body.name,
       registry: 'npmjs',
@@ -636,6 +689,7 @@ registryRouter.post('/packages', async (c) => {
       lastPolledAt: null,
       storedVersions: {},
       metadata: {},
+      watchMode: body.watchMode,
     },
   });
 
@@ -646,6 +700,7 @@ registryRouter.post('/packages', async (c) => {
   return c.json(
     {
       data: {
+        id: inserted.id,
         name: body.name,
         registry: 'npmjs',
         tagPatterns: body.tagPatterns,

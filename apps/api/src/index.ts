@@ -8,6 +8,7 @@ import { initSentry, captureException, setupGlobalHandlers } from '@sentinel/sha
 import type { AppEnv } from '@sentinel/shared/hono-types';
 import { getDb, sql } from '@sentinel/db';
 import { setSharedConnection } from '@sentinel/shared/queue';
+import { setSharedRedis, getSharedRedis } from './redis.js';
 
 import { requestContext, enrichLogger } from './middleware/request-context.js';
 import { sessionMiddleware } from './middleware/session.js';
@@ -24,9 +25,16 @@ import { integrationsRouter } from './routes/integrations.js';
 import { eventsRouter } from './routes/events.js';
 import { auditLogRouter } from './routes/audit-log.js';
 import { correlationRulesRouter } from './routes/correlation-rules.js';
+import { modulesMetadataRouter, setModules } from './routes/modules-metadata.js';
+import { notificationDeliveriesRouter } from './routes/notification-deliveries.js';
+import { infraAnalyticsRouter } from './routes/infra-analytics.js';
+import { awsAnalyticsRouter } from './routes/aws-analytics.js';
+import { chainAnalyticsRouter } from './routes/chain-analytics.js';
+import { registryAnalyticsRouter } from './routes/registry-analytics.js';
+import { githubAnalyticsRouter } from './routes/github-analytics.js';
 
 // Module imports
-import { GitHubModule } from '@sentinel/module-github';
+import { GitHubModule, setWebhookRateLimitRedis } from '@sentinel/module-github';
 import { RegistryModule } from '@sentinel/module-registry';
 import { ChainModule } from '@sentinel/module-chain';
 import { InfraModule } from '@sentinel/module-infra';
@@ -42,14 +50,19 @@ import { AwsModule } from '@sentinel/module-aws';
 const config = env();
 const log = createLogger({ service: 'sentinel-api', level: config.LOG_LEVEL });
 
-// ── Shared Redis connection for BullMQ queues ────────────────────────────
+// ── Shared Redis connection for BullMQ queues and rate limiter ───────────
 {
   const IORedis = (await import('ioredis')).default;
   const redis = new IORedis(config.REDIS_URL, {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
   });
+  // Register with BullMQ queue factory
   setSharedConnection(redis);
+  // Register with API-internal consumers (rate limiter, health check)
+  setSharedRedis(redis);
+  // Register with GitHub module webhook rate limiter
+  setWebhookRateLimitRedis(redis);
 }
 
 await initSentry({
@@ -97,9 +110,11 @@ app.use('*', async (c, next) => {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
     return next();
   }
-  // Skip CSRF check for API-key/notify-key authenticated requests and webhook paths
+  // Skip CSRF check for API-key/notify-key authenticated requests and webhook paths.
+  // Use segment-boundary matching to prevent substring bypass (e.g. a path
+  // containing "callback" in a parameter name).
   const path = c.req.path;
-  if (path.includes('/webhooks/') || path.includes('/callback') || path.includes('/ci/notify')) {
+  if (path.includes('/webhooks/') || path.endsWith('/callback') || path.includes('/ci/notify')) {
     return next();
   }
   // If the request uses a Bearer token (API key / notify key), skip CSRF header check
@@ -143,16 +158,10 @@ app.get('/health', async (c) => {
     healthy = false;
   }
 
-  // Redis check
+  // Redis check — reuse the shared connection; it is already established so
+  // ping() reflects the true liveness of Redis without a new TCP handshake.
   try {
-    const IORedis = (await import('ioredis')).default;
-    const redis = new IORedis(config.REDIS_URL, {
-      maxRetriesPerRequest: 1,
-      connectTimeout: 2000,
-      lazyConnect: true,
-    });
-    await redis.ping();
-    await redis.quit();
+    await getSharedRedis().ping();
   } catch (err) {
     log.debug({ err }, 'Health check: Redis unreachable');
     checks.redis = 'error';
@@ -186,6 +195,13 @@ app.route('/api/channels', channelsRouter);
 app.route('/api/events', eventsRouter);
 app.route('/api/audit-log', auditLogRouter);
 app.route('/api/correlation-rules', correlationRulesRouter);
+app.route('/api/modules/metadata', modulesMetadataRouter);
+app.route('/api/notification-deliveries', notificationDeliveriesRouter);
+app.route('/api/infra', infraAnalyticsRouter);
+app.route('/api/aws', awsAnalyticsRouter);
+app.route('/api/chain', chainAnalyticsRouter);
+app.route('/api/registry', registryAnalyticsRouter);
+app.route('/api/github', githubAnalyticsRouter);
 
 // ── Module routes ───────────────────────────────────────────────────────
 
@@ -193,7 +209,7 @@ app.route('/api/correlation-rules', correlationRulesRouter);
 app.use('/modules/*', async (c, next) => {
   const path = c.req.path;
   // Skip auth for webhook and OAuth callback endpoints
-  if (path.includes('/webhooks/') || path.includes('/callback') || path.includes('/ci/notify')) {
+  if (path.includes('/webhooks/') || path.endsWith('/callback') || path.includes('/ci/notify')) {
     return next();
   }
   if (!c.get('userId')) {
@@ -206,6 +222,7 @@ app.use('/modules/*', async (c, next) => {
 });
 
 const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule, AwsModule];
+setModules(modules);
 for (const mod of modules) {
   app.route(`/modules/${mod.id}`, mod.router);
 }
@@ -214,6 +231,10 @@ for (const mod of modules) {
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) {
+    // If the exception carries a pre-built Response (e.g. validation errors
+    // with structured details), return it directly.
+    const res = err.getResponse();
+    if (res.body) return res;
     return c.json({ error: err.message }, err.status);
   }
   const reqLogger = c.get('logger') ?? log;
@@ -226,9 +247,10 @@ app.notFound((c) => c.json({ error: 'Not found' }, 404));
 
 // ── Start server ────────────────────────────────────────────────────────
 
-const port = config.PORT;
-log.info({ port }, 'Starting Sentinel API');
-
-serve({ fetch: app.fetch, port });
+if (process.env.NODE_ENV !== 'test') {
+  const port = config.PORT;
+  log.info({ port }, 'Starting Sentinel API');
+  serve({ fetch: app.fetch, port });
+}
 
 export default app;

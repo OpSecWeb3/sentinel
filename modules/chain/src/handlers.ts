@@ -11,6 +11,7 @@
  */
 import type { Job } from 'bullmq';
 import { logger as rootLogger } from '@sentinel/shared/logger';
+import { env } from '@sentinel/shared/env';
 import { eq, and, inArray, or, isNull, lt, desc, gte, sql } from '@sentinel/db';
 import { getDb } from '@sentinel/db';
 import { events, rules, detections } from '@sentinel/db/schema/core';
@@ -233,7 +234,7 @@ export const blockPollHandler: JobHandler = {
 
     // Load network config with optional org-specific RPC override
     const config = await loadNetworkConfig(networkSlug, orgId);
-    const client = createRpcClient(config.rpcUrls, config.chainId);
+    const client = createRpcClient(config.rpcUrls, config.chainId, { rotationWindowHours: env().RPC_ROTATION_HOURS || undefined });
 
     // Poll once: fetch new blocks, extract logs/txs.
     // Cursor is NOT advanced inside pollOnce -- we advance it only after
@@ -485,7 +486,7 @@ export const statePollHandler: JobHandler = {
       return;
     }
 
-    const client = createRpcClient(rule.rpcUrls, rule.chainId);
+    const client = createRpcClient(rule.rpcUrls, rule.chainId, { rotationWindowHours: env().RPC_ROTATION_HOURS || undefined });
     const now = Date.now();
 
     // Execute the RPC call based on rule type
@@ -548,11 +549,11 @@ export const statePollHandler: JobHandler = {
 
     if (!evalResult.triggered) return;
 
-    // Cooldown check
+    // Cooldown check — scoped to the specific rule (not the parent detection)
+    // to match the centralised RuleEngine's approach (see rule-engine.ts).
     const [det] = await db
       .select({
         cooldownMinutes: detections.cooldownMinutes,
-        lastTriggeredAt: detections.lastTriggeredAt,
         channelIds: detections.channelIds,
       })
       .from(detections)
@@ -563,16 +564,16 @@ export const statePollHandler: JobHandler = {
       const cooldownMs = det.cooldownMinutes * 60 * 1000;
       const cooldownThreshold = new Date(Date.now() - cooldownMs);
       const [acquired] = await db
-        .update(detections)
+        .update(rules)
         .set({ lastTriggeredAt: new Date() })
         .where(and(
-          eq(detections.id, rule.detectionId),
+          eq(rules.id, rule.id),
           or(
-            isNull(detections.lastTriggeredAt),
-            lt(detections.lastTriggeredAt, cooldownThreshold),
+            isNull(rules.lastTriggeredAt),
+            lt(rules.lastTriggeredAt, cooldownThreshold),
           ),
         ))
-        .returning({ id: detections.id });
+        .returning({ id: rules.id });
       if (!acquired) {
         log.debug({ ruleId }, 'state poll rule triggered but on cooldown');
         return;
@@ -785,42 +786,6 @@ async function loadContractAbis(
   return map;
 }
 
-// ---------------------------------------------------------------------------
-// Detection cooldown loader (batch -- avoids N+1 queries)
-// ---------------------------------------------------------------------------
-
-interface DetectionCooldownInfo {
-  cooldownMinutes: number;
-  lastTriggeredAt: Date | null;
-  channelIds: string[];
-}
-
-async function loadDetectionCooldowns(
-  detectionIds: string[],
-): Promise<Map<string, DetectionCooldownInfo>> {
-  if (detectionIds.length === 0) return new Map();
-
-  const db = getDb();
-  const rows = await db
-    .select({
-      id: detections.id,
-      cooldownMinutes: detections.cooldownMinutes,
-      lastTriggeredAt: detections.lastTriggeredAt,
-      channelIds: detections.channelIds,
-    })
-    .from(detections)
-    .where(inArray(detections.id, detectionIds));
-
-  const map = new Map<string, DetectionCooldownInfo>();
-  for (const row of rows) {
-    map.set(row.id, {
-      cooldownMinutes: row.cooldownMinutes,
-      lastTriggeredAt: row.lastTriggeredAt,
-      channelIds: (row.channelIds as string[]) ?? [],
-    });
-  }
-  return map;
-}
 
 // ---------------------------------------------------------------------------
 // Rule loading helpers (adapted from ChainAlert's event-matcher)
@@ -953,8 +918,10 @@ async function loadActiveFnCallRules(
 
   return rows.flatMap((r) => {
     const config = r.config as Record<string, unknown>;
-    const cfgNetworkId = config.networkId as number | undefined;
-    if (cfgNetworkId !== undefined && cfgNetworkId !== networkId) return [];
+    const cfgNetworkId = config.networkId !== undefined ? Number(config.networkId) : undefined;
+    // config.networkId stores the Ethereum chain ID (e.g. 1 for mainnet), not the DB row ID.
+    // Compare against chainId, not networkId (which is the DB sequential primary key).
+    if (cfgNetworkId !== undefined && cfgNetworkId !== chainId) return [];
 
     const functionSignature = config.functionSignature as string | undefined;
     if (!functionSignature) {
@@ -1535,7 +1502,7 @@ export const contractVerifyHandler: JobHandler = {
       // 1. Fetch ABI from explorer
       // When chainId is present, fetchContractAbi uses Etherscan V2 (explorerApi is ignored).
       // When only explorerApi is present, it uses that URL directly.
-      const etherscanApiKey = process.env.ETHERSCAN_API_KEY ?? undefined;
+      const etherscanApiKey = env().ETHERSCAN_API_KEY;
       const { abi, contractName, storageLayout } = await fetchContractAbi(network.explorerApi ?? '', address, { chainId: network.chainId ?? undefined, apiKey: etherscanApiKey });
 
       // 2. Check ERC-1967 proxy slot
@@ -1545,7 +1512,11 @@ export const contractVerifyHandler: JobHandler = {
 
       if (network.rpcUrl) {
         try {
-          const client = createRpcClient([network.rpcUrl], network.chainId);
+          const client = createRpcClient(
+            network.rpcUrl.split(',').map((s: string) => s.trim()).filter(Boolean),
+            network.chainId,
+            { rotationWindowHours: env().RPC_ROTATION_HOURS || undefined },
+          );
           const implSlot = await client.getStorageAt(
             address,
             WELL_KNOWN_SLOTS.ERC1967_IMPLEMENTATION.slot,

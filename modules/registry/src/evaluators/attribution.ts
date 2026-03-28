@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { minimatch } from 'minimatch';
+import path from 'node:path';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
 import type { TemplateInput } from '@sentinel/shared/module';
 
@@ -12,7 +13,7 @@ const configSchema = z.object({
   tagPatterns: z.array(z.string()).default(['*']),
   /** Change types to gate on attribution. */
   changeTypes: z
-    .array(z.enum(['digest_change', 'new_tag', 'new_version']))
+    .array(z.enum(['digest_change', 'new_tag', 'new_version', 'dist_tag_updated', 'tag_removed']))
     .default(['digest_change']),
   /**
    * 'must_match'     -- alert if attribution does NOT match the allowed set.
@@ -35,6 +36,9 @@ const HANDLED_EVENT_TYPES = new Set([
   'registry.docker.digest_change',
   'registry.docker.new_tag',
   'registry.npm.version_published',
+  'registry.npm.new_tag',
+  'registry.npm.tag_removed',
+  'registry.npm.dist_tag_updated',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -110,11 +114,17 @@ export const attributionEvaluator: RuleEvaluator = {
       attribution?.status === 'verified' || attribution?.status === 'inferred';
 
     // Check each dimension: workflow, actor, branch
+    //
+    // `attribution.workflow` is the full path supplied by GitHub Actions, e.g.
+    // ".github/workflows/deploy.yml".  The allowlist stores bare filenames
+    // (e.g. "deploy.yml").  We extract the basename before comparing so that
+    // a workflow named "evil-deploy.yml" cannot bypass a "deploy.yml" entry
+    // (which the previous `endsWith` check permitted).
+    const workflowBasename =
+      attribution?.workflow != null ? path.basename(attribution.workflow) : null;
     const workflowOk =
       config.workflows.length === 0 ||
-      config.workflows.some(
-        (w) => attribution?.workflow != null && attribution.workflow.endsWith(w),
-      );
+      (workflowBasename != null && config.workflows.includes(workflowBasename));
 
     const actorOk =
       config.actors.length === 0 ||

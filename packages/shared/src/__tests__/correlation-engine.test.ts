@@ -60,10 +60,70 @@ function createRedisMock() {
       return 'OK';
     }),
 
-    del: vi.fn(async (key: string) => {
-      store.delete(key);
-      return 1;
+    del: vi.fn(async (...keys: string[]) => {
+      let count = 0;
+      for (const key of keys) {
+        if (store.delete(key)) count++;
+      }
+      return count;
     }),
+
+    /**
+     * Minimal Lua eval mock that handles:
+     *  - SEQ_ADVANCE_LUA (compare-and-swap on sequence instances)
+     *  - AGG_INCR_LUA / AGG_SADD_LUA (aggregation counters)
+     *
+     * The mock identifies the script by inspecting the Lua source text.
+     */
+    eval: vi.fn(async (script: string, _numKeys: number, key: string, ...argv: string[]) => {
+      // SEQ_ADVANCE_LUA — CAS on sequence instance
+      if (script.includes('currentStepIndex')) {
+        const raw = store.get(key);
+        if (!raw) return -1;
+        try {
+          const instance = JSON.parse(raw);
+          const expected = Number(argv[0]);
+          if (instance.currentStepIndex !== expected) return 0;
+          // CAS success — write new value
+          store.set(key, argv[1]);
+          return 1;
+        } catch {
+          return -1;
+        }
+      }
+
+      // AGG_INCR_LUA
+      if (script.includes('INCR')) {
+        const current = Number(store.get(key) ?? '0') + 1;
+        store.set(key, String(current));
+        const threshold = Number(argv[0]);
+        if (current >= threshold) {
+          store.delete(key);
+          return [current, 1];
+        }
+        return [current, 0];
+      }
+
+      // AGG_SADD_LUA
+      if (script.includes('SADD')) {
+        const setStr = store.get(key) ?? '[]';
+        const set: string[] = JSON.parse(setStr);
+        if (!set.includes(argv[0])) set.push(argv[0]);
+        store.set(key, JSON.stringify(set));
+        const threshold = Number(argv[1]);
+        if (set.length >= threshold) {
+          store.delete(key);
+          return [set.length, 1];
+        }
+        return [set.length, 0];
+      }
+
+      return null;
+    }),
+
+    zadd: vi.fn(async () => 1),
+    zrem: vi.fn(async () => 1),
+    pttl: vi.fn(async (key: string) => store.has(key) ? 60000 : -2),
 
     pipeline: vi.fn(() => {
       const cmds: Array<() => void> = [];
@@ -220,6 +280,11 @@ beforeEach(() => {
   redis = createRedisMock();
   db = createDbMock();
   engine = new CorrelationEngine({ redis, db } as unknown as CorrelationEngineConfig);
+  // Clear the module-level rule cache to prevent cross-test contamination.
+  // The cache is shared across all engine instances in a process (by design),
+  // but tests use different rule configs per test case.
+  engine.invalidateCache('org-1');
+  engine.invalidateCache('org-2');
 });
 
 // ===========================================================================
@@ -459,6 +524,7 @@ describe('Correlation Key', () => {
       expect.any(String),
       'PX',
       expect.any(Number),
+      'NX',
     );
   });
 
@@ -483,6 +549,7 @@ describe('Correlation Key', () => {
       expect.any(String),
       'PX',
       expect.any(Number),
+      'NX',
     );
   });
 
@@ -544,12 +611,14 @@ describe('Correlation Key', () => {
       expect.any(String),
       'PX',
       expect.any(Number),
+      'NX',
     );
     expect(redis.set).toHaveBeenCalledWith(
       `sentinel:corr:seq:rule-1:${hashB}`,
       expect.any(String),
       'PX',
       expect.any(Number),
+      'NX',
     );
   });
 
@@ -564,7 +633,7 @@ describe('Correlation Key', () => {
 
     const expectedHash = computeKeyHash('repo=org/repo with spaces & special=chars|pipe');
     const seqKey = `sentinel:corr:seq:rule-1:${expectedHash}`;
-    expect(redis.set).toHaveBeenCalledWith(seqKey, expect.any(String), 'PX', expect.any(Number));
+    expect(redis.set).toHaveBeenCalledWith(seqKey, expect.any(String), 'PX', expect.any(Number), 'NX');
   });
 
   it('alias defaults to field path when not specified', async () => {
@@ -585,10 +654,13 @@ describe('Correlation Key', () => {
       expect.any(String),
       'PX',
       expect.any(Number),
+      'NX',
     );
   });
 
-  it('no correlationKey uses orgId as fallback', async () => {
+  it('empty correlationKey returns null — rule is skipped', async () => {
+    // When correlationKey is empty the engine defensively returns null
+    // (the schema requires min 1 key, so this is a safety check).
     const rule = makeRule({
       config: {
         ...makeTwoStepConfig(),
@@ -598,15 +670,12 @@ describe('Correlation Key', () => {
     db._selectChain.orderBy.mockResolvedValue([rule]);
 
     const event = makeEvent();
-    await engine.evaluate(event);
+    const result = await engine.evaluate(event);
 
-    const expectedHash = createHash('sha256').update('org-1').digest('hex').slice(0, 16);
-    expect(redis.set).toHaveBeenCalledWith(
-      `sentinel:corr:seq:rule-1:${expectedHash}`,
-      expect.any(String),
-      'PX',
-      expect.any(Number),
-    );
+    // Rule is skipped — no instance created
+    expect(result.startedRuleIds.size).toBe(0);
+    expect(result.advancedRuleIds.size).toBe(0);
+    expect(result.candidates).toHaveLength(0);
   });
 });
 
@@ -693,6 +762,22 @@ describe('Sequence Evaluation - New Instance', () => {
     expect(instance.matchedSteps[0].actor).toBe('bob-sender');
   });
 
+  it('actor extracted from sender object with login property (GitHub-style)', async () => {
+    const rule = makeRule();
+    db._selectChain.orderBy.mockResolvedValue([rule]);
+
+    const event = makeEvent({
+      payload: { sender: { login: 'gh-user' }, repository: { full_name: 'acme/repo' } },
+    });
+    await engine.evaluate(event);
+
+    const keyHash = computeKeyHash('repo=acme/repo');
+    const savedJson = redis._store.get(`sentinel:corr:seq:rule-1:${keyHash}`);
+    const instance: CorrelationInstance = JSON.parse(savedJson!);
+
+    expect(instance.matchedSteps[0].actor).toBe('gh-user');
+  });
+
   it('multiple rules: event matches step 0 of two rules - two instances', async () => {
     const rule1 = makeRule({ id: 'rule-1' });
     const rule2 = makeRule({ id: 'rule-2', name: 'Another rule' });
@@ -732,6 +817,7 @@ describe('Sequence Evaluation - New Instance', () => {
       expect.any(String),
       'PX',
       1_800_000,
+      'NX',
     );
   });
 
@@ -1458,6 +1544,7 @@ describe('Edge Cases', () => {
       expect.any(String),
       'PX',
       43200 * 60_000,
+      'NX',
     );
   });
 

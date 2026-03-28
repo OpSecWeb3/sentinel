@@ -15,6 +15,7 @@ import { requireScope } from '../middleware/scope.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { correlationRuleConfigSchema } from '@sentinel/shared/correlation-types';
 import type { CorrelationInstance } from '@sentinel/shared/correlation-types';
+import { getSharedRedis } from '../redis.js';
 
 const router = new Hono<AppEnv>();
 router.use('*', requireAuth, requireOrg);
@@ -245,12 +246,20 @@ router.delete('/:id', requireRole('admin'), requireScope('api:write'), validate(
   const userId = c.get('userId');
   const db = getDb();
 
-  const [result] = await db.update(correlationRules)
-    .set({ status: 'deleted' })
+  // Verify the rule exists, belongs to this org, and is not already deleted
+  const [existing] = await db.select({ id: correlationRules.id, name: correlationRules.name, status: correlationRules.status })
+    .from(correlationRules)
     .where(and(eq(correlationRules.id, id), eq(correlationRules.orgId, orgId)))
-    .returning({ id: correlationRules.id, name: correlationRules.name });
+    .limit(1);
 
-  if (!result) return c.json({ error: 'Correlation rule not found' }, 404);
+  if (!existing) return c.json({ error: 'Correlation rule not found' }, 404);
+  if (existing.status === 'deleted') return c.json({ data: { id: existing.id, name: existing.name, status: 'deleted' } });
+
+  await db.update(correlationRules)
+    .set({ status: 'deleted' })
+    .where(and(eq(correlationRules.id, id), eq(correlationRules.orgId, orgId)));
+
+  const result = existing;
 
   // Audit log
   await db.insert(auditLog).values({
@@ -264,21 +273,15 @@ router.delete('/:id', requireRole('admin'), requireScope('api:write'), validate(
 
   // Clean up any active Redis instances for this rule
   try {
-    const IORedis = (await import('ioredis')).default;
-    const { env } = await import('@sentinel/shared/env');
-    const redis = new IORedis(env().REDIS_URL, { maxRetriesPerRequest: null, enableReadyCheck: false });
-    try {
-      let cursor = '0';
-      do {
-        const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `sentinel:corr:*:${id}:*`, 'COUNT', 100);
-        cursor = nextCursor;
-        if (keys.length > 0) {
-          await redis.del(...keys);
-        }
-      } while (cursor !== '0');
-    } finally {
-      await redis.quit();
-    }
+    const redis = getSharedRedis();
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `sentinel:corr:*:${id}:*`, 'COUNT', 100);
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        await redis.del(...keys);
+      }
+    } while (cursor !== '0');
   } catch (err) {
     const reqLogger = c.get('logger');
     reqLogger.error({ err, correlationRuleId: id }, 'Failed to clean up Redis instances');
@@ -305,11 +308,8 @@ router.get('/:id/instances', requireScope('api:read'), validate('param', idParam
   if (!rule) return c.json({ error: 'Correlation rule not found' }, 404);
 
   // Scan Redis for active instances
-  const IORedis = (await import('ioredis')).default;
-  const { env } = await import('@sentinel/shared/env');
-  const redis = new IORedis(env().REDIS_URL, { maxRetriesPerRequest: null, enableReadyCheck: false });
-
   try {
+    const redis = getSharedRedis();
     const instances: CorrelationInstance[] = [];
     let cursor = '0';
 
@@ -317,17 +317,19 @@ router.get('/:id/instances', requireScope('api:read'), validate('param', idParam
       const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `sentinel:corr:*:${id}:*`, 'COUNT', 100);
       cursor = nextCursor;
 
-      for (const key of keys) {
-        const raw = await redis.get(key);
-        if (raw) {
-          try {
-            const instance: CorrelationInstance = JSON.parse(raw);
-            // Only return instances belonging to this org
-            if (instance.orgId === orgId) {
-              instances.push(instance);
+      if (keys.length > 0) {
+        const pipeline = redis.pipeline();
+        for (const key of keys) pipeline.get(key);
+        const results = await pipeline.exec();
+        for (const result of results ?? []) {
+          const raw = result?.[1] as string | null;
+          if (raw) {
+            try {
+              const instance: CorrelationInstance = JSON.parse(raw);
+              if (instance.orgId === orgId) instances.push(instance);
+            } catch {
+              // Skip malformed entries
             }
-          } catch {
-            // Skip malformed entries
           }
         }
       }
@@ -337,8 +339,10 @@ router.get('/:id/instances', requireScope('api:read'), validate('param', idParam
       data: instances,
       meta: { total: instances.length },
     });
-  } finally {
-    await redis.quit();
+  } catch (err) {
+    const reqLogger = c.get('logger');
+    reqLogger.error({ err, correlationRuleId: id }, 'Failed to fetch correlation instances from Redis');
+    return c.json({ error: 'Failed to fetch active instances' }, 503);
   }
 });
 
@@ -361,11 +365,8 @@ router.delete('/:id/instances', requireRole('admin', 'editor'), requireScope('ap
   if (!rule) return c.json({ error: 'Correlation rule not found' }, 404);
 
   // Scan and delete Redis instances
-  const IORedis = (await import('ioredis')).default;
-  const { env } = await import('@sentinel/shared/env');
-  const redis = new IORedis(env().REDIS_URL, { maxRetriesPerRequest: null, enableReadyCheck: false });
-
   try {
+    const redis = getSharedRedis();
     let cursor = '0';
     let deletedCount = 0;
 
@@ -373,19 +374,33 @@ router.delete('/:id/instances', requireRole('admin', 'editor'), requireScope('ap
       const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `sentinel:corr:*:${id}:*`, 'COUNT', 100);
       cursor = nextCursor;
 
-      // Filter to only delete instances belonging to this org
-      for (const key of keys) {
-        const raw = await redis.get(key);
-        if (raw) {
-          try {
-            const instance: CorrelationInstance = JSON.parse(raw);
-            if (instance.orgId === orgId) {
-              await redis.del(key);
-              deletedCount++;
+      // Fetch all key values in one pipeline, then delete in bulk
+      if (keys.length > 0) {
+        const pipeline = redis.pipeline();
+        for (const key of keys) {
+          pipeline.get(key);
+        }
+        const results = await pipeline.exec();
+
+        const keysToDelete: string[] = [];
+        if (results) {
+          for (let i = 0; i < keys.length; i++) {
+            const [err, raw] = results[i] as [Error | null, string | null];
+            if (err || !raw) continue;
+            try {
+              const instance: CorrelationInstance = JSON.parse(raw);
+              if (instance.orgId === orgId) {
+                keysToDelete.push(keys[i]);
+              }
+            } catch {
+              // Skip malformed entries
             }
-          } catch {
-            // Skip malformed entries
           }
+        }
+
+        if (keysToDelete.length > 0) {
+          await redis.del(...keysToDelete);
+          deletedCount += keysToDelete.length;
         }
       }
     } while (cursor !== '0');
@@ -401,8 +416,10 @@ router.delete('/:id/instances', requireRole('admin', 'editor'), requireScope('ap
     });
 
     return c.json({ data: { deletedCount } });
-  } finally {
-    await redis.quit();
+  } catch (err) {
+    const reqLogger = c.get('logger');
+    reqLogger.error({ err, correlationRuleId: id }, 'Failed to clear correlation instances from Redis');
+    return c.json({ error: 'Failed to clear active instances' }, 503);
   }
 });
 

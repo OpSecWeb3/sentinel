@@ -268,6 +268,131 @@ export const templates: DetectionTemplate[] = [
     ],
   },
 
+  // ── Balance Low ─────────────────────────────────────────────────────────
+  {
+    slug: 'chain-balance-low',
+    name: 'Balance Low Alert',
+    description:
+      'Alert when the native or token balance of an address falls below a minimum threshold. Useful for ensuring operational wallets, relayers, and treasury contracts maintain minimum liquidity.',
+    category: 'balance',
+    severity: 'medium',
+    inputs: [
+      NETWORK_INPUT,
+      { ...CONTRACT_REQUIRED_INPUT, label: 'Address to monitor', help: 'Address whose balance to watch.' },
+      {
+        key: 'tokenAddress',
+        label: 'Token address',
+        type: 'address',
+        required: false,
+        placeholder: '0x...',
+        help: 'ERC-20 token to track. Leave empty for native ETH/MATIC balance.',
+      },
+      {
+        key: 'pollIntervalMs',
+        label: 'Poll interval (ms)',
+        type: 'number',
+        required: false,
+        default: 60000,
+        min: 10000,
+      },
+      {
+        key: 'threshold',
+        label: 'Minimum balance',
+        type: 'text',
+        required: true,
+        placeholder: '1000000000000000000',
+        help: 'Alert when balance drops below this amount (in base units, e.g. wei).',
+      },
+    ],
+    rules: [
+      {
+        ruleType: 'chain.balance_track',
+        config: {
+          asset: '{{tokenAddress}}',
+          pollIntervalMs: '{{pollIntervalMs}}',
+          condition: {
+            type: 'threshold_below',
+            value: '{{threshold}}',
+          },
+        },
+        action: 'alert',
+      },
+    ],
+  },
+
+  // ── Custom Function Call ────────────────────────────────────────────────
+  {
+    slug: 'chain-custom-function-call',
+    name: 'Custom Function Call Monitor',
+    description:
+      'Alert when a specific function is called on a contract by matching the 4-byte selector in transaction calldata. Useful for detecting admin functions, parameter changes, and operations that emit no events.',
+    category: 'custom',
+    severity: 'high',
+    inputs: [
+      NETWORK_INPUT,
+      CONTRACT_REQUIRED_INPUT,
+      {
+        key: 'functionSignature',
+        label: 'Function signature',
+        type: 'text',
+        required: true,
+        placeholder: 'transfer(address,uint256)',
+        help: 'Solidity function signature to match (e.g. setFee(uint256), pause()).',
+      },
+      {
+        key: 'functionName',
+        label: 'Function name',
+        type: 'text',
+        required: false,
+        placeholder: 'transfer',
+        help: 'Human-readable function name for display.',
+      },
+      {
+        key: 'filterField',
+        label: 'Filter field (optional)',
+        type: 'text',
+        required: false,
+        placeholder: 'amount',
+        help: 'Decoded function argument to filter on. Leave empty to match all calls.',
+      },
+      {
+        key: 'filterOp',
+        label: 'Operator',
+        type: 'select',
+        required: false,
+        showIf: 'filterField',
+        options: FILTER_OP_OPTIONS,
+      },
+      {
+        key: 'filterValue',
+        label: 'Filter value',
+        type: 'text',
+        required: false,
+        showIf: 'filterField',
+        placeholder: '0',
+      },
+    ],
+    rules: [
+      {
+        ruleType: 'chain.function_call_match',
+        config: {
+          functionSignature: '{{functionSignature}}',
+          functionName: '{{functionName}}',
+          contractAddress: '{{contractAddress}}',
+          conditions: [
+            {
+              field: '{{filterField}}',
+              operator: '{{filterOp}}',
+              value: '{{filterValue}}',
+              skipIfEmpty: true,
+            },
+          ],
+        },
+        action: 'alert',
+      },
+    ],
+  },
+
   // ── Custom ─────────────────────────────────────────────────────────────
   {
     slug: 'chain-custom-event',

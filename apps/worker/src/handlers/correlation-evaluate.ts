@@ -4,10 +4,9 @@
  * creates correlated alerts, and enqueues notification dispatch.
  */
 import type { Job } from 'bullmq';
-import { getDb } from '@sentinel/db';
+import { getDb, eq, and, sql } from '@sentinel/db';
 import { events, alerts } from '@sentinel/db/schema/core';
 import { correlationRules } from '@sentinel/db/schema/correlation';
-import { eq } from '@sentinel/db';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { CorrelationEngine } from '@sentinel/shared/correlation-engine';
 import type { NormalizedEvent } from '@sentinel/shared/rules';
@@ -51,6 +50,9 @@ export function createCorrelationHandler(redis: Redis, log?: Logger): JobHandler
 
       for (const candidate of result.candidates) {
         try {
+          // Use ON CONFLICT DO NOTHING backed by the DB unique constraint
+          // (uq_alerts_event_correlation) instead of a SELECT-then-INSERT
+          // guard which was racy under concurrent job retries.
           const [alert] = await db.insert(alerts).values({
             orgId: candidate.orgId,
             detectionId: null,
@@ -64,17 +66,43 @@ export function createCorrelationHandler(redis: Redis, log?: Logger): JobHandler
               ...candidate.triggerData,
               correlationRuleId: candidate.correlationRuleId,
             },
-          }).returning();
+          })
+            .onConflictDoNothing()
+            .returning();
 
-          // Update lastTriggeredAt on the correlation rule
-          await db.update(correlationRules)
-            .set({ lastTriggeredAt: new Date() })
-            .where(eq(correlationRules.id, candidate.correlationRuleId));
+          let alertId: string;
 
-          // Enqueue notification dispatch
-          await alertsQueue.add('alert.dispatch', { alertId: String(alert.id) });
+          if (!alert) {
+            // Duplicate suppressed by constraint — still re-enqueue dispatch
+            // in case that was the step that failed on the previous attempt.
+            const [existing] = await db
+              .select({ id: alerts.id })
+              .from(alerts)
+              .where(
+                and(
+                  eq(alerts.eventId, normalizedEvent.id),
+                  eq(alerts.triggerType, 'correlated'),
+                  sql`${alerts.triggerData}->>'correlationRuleId' = ${candidate.correlationRuleId}`,
+                ),
+              )
+              .limit(1);
 
-          _log.info({ alertId: alert.id, correlationRuleId: candidate.correlationRuleId, correlationType: candidate.triggerData.correlationType }, 'Created correlated alert');
+            if (!existing) continue; // shouldn't happen, but guard defensively
+            alertId = String(existing.id);
+            _log.warn({ alertId, correlationRuleId: candidate.correlationRuleId }, 'Correlated alert already exists, re-enqueueing dispatch');
+          } else {
+            alertId = String(alert.id);
+
+            // Update lastTriggeredAt on the correlation rule
+            await db.update(correlationRules)
+              .set({ lastTriggeredAt: new Date() })
+              .where(eq(correlationRules.id, candidate.correlationRuleId));
+
+            _log.info({ alertId, correlationRuleId: candidate.correlationRuleId, correlationType: candidate.triggerData.correlationType }, 'Created correlated alert');
+          }
+
+          // Enqueue notification dispatch (idempotent re-enqueue on retry)
+          await alertsQueue.add('alert.dispatch', { alertId });
         } catch (err) {
           _log.error({ err, correlationRuleId: candidate.correlationRuleId }, 'Failed to create correlated alert');
         }

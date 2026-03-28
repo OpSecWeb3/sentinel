@@ -7,7 +7,7 @@ import { Hono } from 'hono';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { getDb } from '@sentinel/db';
-import { notificationChannels } from '@sentinel/db/schema/core';
+import { notificationChannels, slackInstallations } from '@sentinel/db/schema/core';
 import { eq, and, isNull } from '@sentinel/db';
 import type { AppEnv } from '@sentinel/shared/hono-types';
 import { requireAuth, requireOrg, requireRole } from '../middleware/rbac.js';
@@ -17,6 +17,7 @@ import { sendSlackMessage, type SlackAlertPayload } from '@sentinel/notification
 import { sendEmailNotification } from '@sentinel/notifications/email';
 import { sendWebhookNotification } from '@sentinel/notifications/webhook';
 import { encrypt, decrypt } from '@sentinel/shared/crypto';
+import { env } from '@sentinel/shared/env';
 
 const router = new Hono<AppEnv>();
 router.use('*', requireAuth, requireOrg);
@@ -25,7 +26,7 @@ router.use('*', requireAuth, requireOrg);
 // Schemas
 // ---------------------------------------------------------------------------
 
-const channelTypeEnum = z.enum(['email', 'webhook']);
+const channelTypeEnum = z.enum(['email', 'webhook', 'slack']);
 
 const emailConfigSchema = z.object({
   recipients: z.array(z.string().email('Each recipient must be a valid email'))
@@ -38,9 +39,14 @@ const webhookConfigSchema = z.object({
   headers: z.record(z.string().max(256), z.string().max(4096)).optional(),
 });
 
+const slackConfigSchema = z.object({
+  channelId: z.string().min(1, 'Slack channel ID is required'),
+});
+
 const configSchemaByType: Record<string, z.ZodSchema> = {
   email: emailConfigSchema,
   webhook: webhookConfigSchema,
+  slack: slackConfigSchema,
 };
 
 const BLOCKED_HEADERS = [
@@ -86,7 +92,7 @@ const updateBodySchema = z.object({
 const idParamSchema = z.object({ id: z.string().uuid() });
 const listQuerySchema = z.object({
   type: channelTypeEnum.optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
 
@@ -129,7 +135,7 @@ router.post('/', requireRole('admin', 'editor'), requireScope('api:write'), vali
   const db = getDb();
 
   // Reject email channels when SMTP is not configured
-  if (body.type === 'email' && !process.env.SMTP_URL) {
+  if (body.type === 'email' && !env().SMTP_URL) {
     return c.json({ error: 'Email notifications require SMTP_URL to be configured. Contact your administrator.' }, 400);
   }
 
@@ -270,7 +276,7 @@ router.delete('/:id', requireRole('admin'), requireScope('api:write'), validate(
 // POST /channels/:id/test — send test notification
 // ---------------------------------------------------------------------------
 
-router.post('/:id/test', requireScope('api:write'), validate('param', idParamSchema), async (c) => {
+router.post('/:id/test', requireRole('admin', 'editor'), requireScope('api:write'), validate('param', idParamSchema), async (c) => {
   const { id } = getValidated<z.infer<typeof idParamSchema>>(c, 'param');
   const orgId = c.get('orgId');
   const db = getDb();
@@ -292,7 +298,7 @@ router.post('/:id/test', requireScope('api:write'), validate('param', idParamSch
   try {
     switch (channel.type) {
       case 'email': {
-        if (!process.env.SMTP_URL) {
+        if (!env().SMTP_URL) {
           return c.json({ error: 'Email notifications require SMTP_URL to be configured. Contact your administrator.' }, 400);
         }
         const recipients = (config.recipients ?? []) as string[];
@@ -309,6 +315,20 @@ router.post('/:id/test', requireScope('api:write'), validate('param', idParamSch
           { url, secret, headers: config.headers as Record<string, string> },
           { alert: testAlert },
         );
+        break;
+      }
+      case 'slack': {
+        const channelId = config.channelId as string;
+        if (!channelId) throw new Error('No Slack channel ID configured');
+        const slackInstall = await db
+          .select({ botToken: slackInstallations.botToken })
+          .from(slackInstallations)
+          .where(eq(slackInstallations.orgId, orgId))
+          .limit(1)
+          .then((rows) => rows[0]);
+        const botToken = slackInstall ? decrypt(slackInstall.botToken) : process.env.SLACK_BOT_TOKEN;
+        if (!botToken) throw new Error('No Slack bot token found. Install the Slack app or set SLACK_BOT_TOKEN.');
+        await sendSlackMessage(botToken, channelId, testAlert);
         break;
       }
       default:

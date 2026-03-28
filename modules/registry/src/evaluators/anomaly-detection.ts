@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { minimatch } from 'minimatch';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
 import type { TemplateInput } from '@sentinel/shared/module';
+import { logger } from '@sentinel/shared/logger';
 
 // ---------------------------------------------------------------------------
 // Config schema
@@ -19,6 +20,8 @@ const configSchema = z.object({
         'tag_removed',
         'new_version',
         'version_unpublished',
+        'dist_tag_updated',
+        'version_published',
       ]),
     )
     .default(['digest_change', 'new_tag', 'tag_removed']),
@@ -76,6 +79,9 @@ const HANDLED_EVENT_TYPES = new Set([
   'registry.docker.tag_removed',
   'registry.npm.version_published',
   'registry.npm.version_unpublished',
+  'registry.npm.new_tag',
+  'registry.npm.tag_removed',
+  'registry.npm.dist_tag_updated',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -177,13 +183,34 @@ export const anomalyDetectionEvaluator: RuleEvaluator = {
 
     // ── Time window check ────────────────────────────────────────────────
     if (config.allowedHoursStart && config.allowedHoursEnd) {
-      const outsideWindow = isOutsideTimeWindow(
-        event.occurredAt,
-        config.allowedHoursStart,
-        config.allowedHoursEnd,
-        config.timezone,
-        config.allowedDays,
-      );
+      let outsideWindow: boolean;
+      try {
+        outsideWindow = isOutsideTimeWindow(
+          event.occurredAt,
+          config.allowedHoursStart,
+          config.allowedHoursEnd,
+          config.timezone,
+          config.allowedDays,
+        );
+      } catch (err) {
+        // A misconfigured timezone must not silently disable the off-hours
+        // check. Log a warning and surface an alert so the operator notices.
+        logger.warn(
+          { err, timezone: config.timezone, ruleId: rule.id },
+          'anomaly-detection: invalid timezone in rule config — off-hours check cannot run',
+        );
+        return {
+          orgId: event.orgId,
+          detectionId: rule.detectionId,
+          ruleId: rule.id,
+          eventId: event.id,
+          severity: 'medium',
+          title: `Misconfigured timezone in off-hours rule for ${payload.artifact}`,
+          description: `Rule "${rule.id}" specifies an invalid timezone "${config.timezone}". The off-hours check could not be evaluated. Please correct the rule configuration.`,
+          triggerType: 'immediate',
+          triggerData: event.payload,
+        };
+      }
       if (outsideWindow) {
         return {
           orgId: event.orgId,
@@ -223,6 +250,12 @@ export const anomalyDetectionEvaluator: RuleEvaluator = {
 // Time window helper
 // ---------------------------------------------------------------------------
 
+/**
+ * Returns true when the event timestamp falls outside the allowed window.
+ * Throws if the timezone string is invalid so that the caller can distinguish
+ * a misconfigured timezone (which should alert) from "inside window" (which
+ * should not). Never silently returns false on error.
+ */
 function isOutsideTimeWindow(
   timestamp: Date,
   startTime: string,
@@ -230,46 +263,51 @@ function isOutsideTimeWindow(
   timezone: string,
   allowedDays: number[],
 ): boolean {
+  // Validate the timezone before use so that a bad string throws with a clear
+  // message rather than producing a cryptic Intl error later.
+  // Validate timezone by attempting to use it — supportedValuesOf() omits
+  // aliases like UTC and Etc/* that DateTimeFormat accepts just fine.
   try {
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-      weekday: 'short',
-    });
-    const parts = formatter.formatToParts(timestamp);
-    const hour = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10);
-    const minute = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10);
-    const weekday = parts.find((p) => p.type === 'weekday')?.value ?? '';
-
-    const dayMap: Record<string, number> = {
-      Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7,
-    };
-    const isoDay = dayMap[weekday] ?? 0;
-
-    // Day check
-    if (!allowedDays.includes(isoDay)) return true;
-
-    // Time check
-    const [startH, startM] = startTime.split(':').map(Number);
-    const [endH, endM] = endTime.split(':').map(Number);
-    const eventMinutes = hour * 60 + minute;
-    const startMinutes = startH * 60 + startM;
-    const endMinutes = endH * 60 + endM;
-
-    // Fix #13: Handle midnight-crossing windows (e.g. 22:00 - 06:00)
-    if (startMinutes > endMinutes) {
-      // Window crosses midnight: event is INSIDE if >= start OR <= end
-      const insideWindow = eventMinutes >= startMinutes || eventMinutes <= endMinutes;
-      return !insideWindow;
-    }
-
-    return eventMinutes < startMinutes || eventMinutes > endMinutes;
+    Intl.DateTimeFormat('en-US', { timeZone: timezone });
   } catch {
-    // If timezone parsing fails, don't block -- pass through
-    return false;
+    throw new RangeError(`Invalid IANA timezone: "${timezone}"`);
   }
+
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    weekday: 'short',
+  });
+  const parts = formatter.formatToParts(timestamp);
+  const hour = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10);
+  const minute = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10);
+  const weekday = parts.find((p) => p.type === 'weekday')?.value ?? '';
+
+  const dayMap: Record<string, number> = {
+    Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7,
+  };
+  const isoDay = dayMap[weekday] ?? 0;
+
+  // Day check
+  if (!allowedDays.includes(isoDay)) return true;
+
+  // Time check
+  const [startH, startM] = startTime.split(':').map(Number);
+  const [endH, endM] = endTime.split(':').map(Number);
+  const eventMinutes = hour * 60 + minute;
+  const startMinutes = startH * 60 + startM;
+  const endMinutes = endH * 60 + endM;
+
+  // Fix #13: Handle midnight-crossing windows (e.g. 22:00 - 06:00)
+  if (startMinutes > endMinutes) {
+    // Window crosses midnight: event is INSIDE if >= start OR <= end
+    const insideWindow = eventMinutes >= startMinutes || eventMinutes <= endMinutes;
+    return !insideWindow;
+  }
+
+  return eventMinutes < startMinutes || eventMinutes > endMinutes;
 }
 
 // ---------------------------------------------------------------------------

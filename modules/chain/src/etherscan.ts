@@ -17,6 +17,50 @@ export interface FetchContractAbiOptions {
   apiKey?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Internal retry helper — no external dependencies
+// ---------------------------------------------------------------------------
+
+/**
+ * Executes `fn` up to `maxAttempts` times, waiting `baseDelayMs * 2^attempt`
+ * between failures (exponential backoff). Only retries on network-level errors
+ * or 5xx responses; 4xx responses (including API-level errors) are not retried
+ * because they are deterministic.
+ */
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  maxAttempts = 3,
+  baseDelayMs = 500,
+  perAttemptTimeoutMs = 15_000,
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, baseDelayMs * 2 ** (attempt - 1)),
+      );
+    }
+    try {
+      // Create a fresh timeout signal per attempt so a slow first attempt
+      // does not consume the budget for subsequent retries.
+      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(perAttemptTimeoutMs) });
+      // Only retry on server errors (5xx); all other status codes are final.
+      if (res.status >= 500) {
+        lastError = new Error(`Explorer API returned ${res.status}`);
+        continue;
+      }
+      return res;
+    } catch (err) {
+      // Network-level failure (timeout, DNS, etc.) — always retry.
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+
+// ---------------------------------------------------------------------------
+
 /**
  * Fetch a contract's ABI from an Etherscan-compatible explorer API.
  * Supports Etherscan V2 (when chainId is provided) and legacy explorer URLs.
@@ -30,7 +74,14 @@ export async function fetchContractAbi(
   opts?: FetchContractAbiOptions,
 ): Promise<EtherscanAbiResult> {
   const buildUrl = (action: 'getabi' | 'getsourcecode'): URL => {
-    if (opts?.chainId) {
+    // Use the Etherscan V2 unified endpoint only when:
+    //   (a) a chainId is provided, AND
+    //   (b) the caller has NOT explicitly provided a custom explorerApi URL.
+    //
+    // Previously, a non-empty explorerApi was silently ignored whenever
+    // chainId was set, which made it impossible for callers to route through
+    // a custom or self-hosted explorer (e.g. Blockscout, private chains).
+    if (opts?.chainId && !explorerApi) {
       // Etherscan V2 unified endpoint
       const url = new URL('https://api.etherscan.io/v2/api');
       url.searchParams.set('chainid', String(opts.chainId));
@@ -43,11 +94,18 @@ export async function fetchContractAbi(
       return url;
     }
 
-    // Legacy: use the user-provided explorer URL
+    // Use the caller-supplied explorerApi URL (legacy or custom explorer).
+    // If a chainId is also present we still honour the user-provided base URL;
+    // callers that truly want the V2 endpoint should leave explorerApi empty.
     const url = new URL(explorerApi);
     url.searchParams.set('module', 'contract');
     url.searchParams.set('action', action);
     url.searchParams.set('address', address);
+    if (opts?.chainId && !url.searchParams.has('chainid')) {
+      // Forward chainId so Etherscan-compatible explorers that support the
+      // multi-chain parameter can also benefit from it.
+      url.searchParams.set('chainid', String(opts.chainId));
+    }
     if (opts?.apiKey && !url.searchParams.has('apikey')) {
       url.searchParams.set('apikey', opts.apiKey);
     }
@@ -56,10 +114,13 @@ export async function fetchContractAbi(
 
   const url = buildUrl('getabi');
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: 'application/json' },
-    signal: AbortSignal.timeout(15_000),
-  });
+  // Primary ABI fetch — up to 3 attempts with exponential backoff.
+  // Each individual attempt has its own 15-second timeout so a hung
+  // connection does not consume all retries at once.
+  const res = await fetchWithRetry(
+    url.toString(),
+    { headers: { Accept: 'application/json' } },
+  );
 
   if (!res.ok) {
     throw new Error(`Explorer API returned ${res.status}`);
@@ -83,10 +144,10 @@ export async function fetchContractAbi(
   try {
     const srcUrl = buildUrl('getsourcecode');
 
-    const srcRes = await fetch(srcUrl.toString(), {
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(15_000),
-    });
+    const srcRes = await fetchWithRetry(
+      srcUrl.toString(),
+      { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000) },
+    );
 
     if (srcRes.ok) {
       const srcData = (await srcRes.json()) as {

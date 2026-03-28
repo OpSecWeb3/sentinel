@@ -10,7 +10,7 @@
  */
 import type { Job } from 'bullmq';
 import { getDb, sql } from '@sentinel/db';
-import { eq, isNull, or, and } from '@sentinel/db';
+import { eq, isNull, or, and, inArray } from '@sentinel/db';
 import { rcArtifacts, rcArtifactVersions } from '@sentinel/db/schema/registry';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { createLogger } from '@sentinel/shared/logger';
@@ -50,12 +50,24 @@ export const pollSweepHandler: JobHandler = {
 
     const moduleJobsQueue = getQueue(QUEUE_NAMES.MODULE_JOBS);
 
+    // Batch-load all stored versions for every due artifact in a single query
+    // instead of issuing one SELECT per artifact (N+1 pattern).
+    const artifactIds = enabledDue.map((a) => a.id);
+    const allVersionRows = await db
+      .select()
+      .from(rcArtifactVersions)
+      .where(inArray(rcArtifactVersions.artifactId, artifactIds));
+
+    // Group version rows by artifactId for O(1) lookup below.
+    const versionsByArtifactId = new Map<string, typeof allVersionRows>();
+    for (const row of allVersionRows) {
+      const list = versionsByArtifactId.get(row.artifactId) ?? [];
+      list.push(row);
+      versionsByArtifactId.set(row.artifactId, list);
+    }
+
     for (const artifact of enabledDue) {
-      // Load stored versions for this artifact
-      const dbVersions = await db
-        .select()
-        .from(rcArtifactVersions)
-        .where(eq(rcArtifactVersions.artifactId, artifact.id));
+      const dbVersions = versionsByArtifactId.get(artifact.id) ?? [];
 
       const storedVersions = new Map(
         dbVersions.map((v) => [

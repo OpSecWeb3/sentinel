@@ -11,13 +11,21 @@ export const sessionCleanupHandler: JobHandler = {
 
   async process(_job: Job) {
     const db = getDb();
-    const result = await db.execute(
-      sql`DELETE FROM sessions WHERE expire < now()`,
-    );
-    const deleted = Number((result as unknown as { rowCount?: number })?.rowCount ?? 0);
+    let totalDeleted = 0;
+    let batchDeleted: number;
 
-    if (deleted > 0) {
-      _log.info({ deleted }, 'Expired sessions cleaned up');
+    do {
+      const result = await db.execute(
+        sql`DELETE FROM sessions WHERE sid IN (
+          SELECT sid FROM sessions WHERE expire < now() LIMIT 1000
+        )`,
+      );
+      batchDeleted = Number((result as unknown as { rowCount?: number })?.rowCount ?? 0);
+      totalDeleted += batchDeleted;
+    } while (batchDeleted >= 1000);
+
+    if (totalDeleted > 0) {
+      _log.info({ deleted: totalDeleted }, 'Expired sessions cleaned up');
     }
   },
 };

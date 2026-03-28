@@ -596,9 +596,9 @@ function getBuiltinTemplates(): DetectionTemplate[] {
     },
     {
       slug: "registry-full-security",
-      name: "Full Release Chain Security",
+      name: "Full Registry Security",
       description:
-        "Enable all release chain security monitors in one detection. Covers Docker digest/tag changes, npm version and maintainer changes, signature and provenance enforcement, CI attribution checks, and anomaly detection.",
+        "Enable all registry security monitors in one detection. Covers Docker digest/tag changes, npm version and maintainer changes, signature and provenance enforcement, CI attribution checks, and anomaly detection.",
       category: "comprehensive",
       severity: "critical",
       ruleCount: 8,

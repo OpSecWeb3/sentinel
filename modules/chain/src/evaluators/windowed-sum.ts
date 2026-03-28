@@ -29,11 +29,11 @@ const configSchema = z.object({
 // Redis key helpers
 // ---------------------------------------------------------------------------
 
-function sumKey(ruleId: string, groupValue?: string): string {
+function sumKey(orgId: string, ruleId: string, groupValue?: string): string {
   if (groupValue) {
-    return `sentinel:wsum:${ruleId}:${groupValue}`;
+    return `sentinel:wsum:${orgId}:${ruleId}:${groupValue}`;
   }
-  return `sentinel:wsum:${ruleId}`;
+  return `sentinel:wsum:${orgId}:${ruleId}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +63,7 @@ function compare(sum: bigint, threshold: bigint, op: string): boolean {
 
 async function checkWindowedSum(
   redis: EvalContext['redis'],
+  orgId: string,
   ruleId: string,
   eventId: string,
   value: string,
@@ -71,7 +72,7 @@ async function checkWindowedSum(
   operator: string,
   groupValue?: string,
 ): Promise<{ triggered: boolean; sum: bigint; count: number }> {
-  const key = sumKey(ruleId, groupValue);
+  const key = sumKey(orgId, ruleId, groupValue);
   const now = Date.now();
 
   // Member format: "eventId:value" — value is the raw bigint string
@@ -84,8 +85,8 @@ async function checkWindowedSum(
   const cutoff = now - windowMs;
   await redis.zremrangebyscore(key, '-inf', cutoff);
 
-  // 3. Fetch all remaining members and sum their values
-  const members = await redis.zrange(key, 0, -1);
+  // 3. Fetch only members still within the window and sum their values
+  const members = await redis.zrangebyscore(key, cutoff, '+inf');
   let sum = 0n;
   for (const m of members) {
     const colonIdx = m.lastIndexOf(':');
@@ -180,6 +181,7 @@ export const windowedSumEvaluator: RuleEvaluator = {
 
     const { triggered, sum, count } = await checkWindowedSum(
       redis,
+      event.orgId,
       rule.id,
       event.id,
       valueStr,

@@ -32,7 +32,10 @@ function recentValuesKey(ruleId: string): string {
 async function getPreviousState(redis: EvalContext['redis'], ruleId: string): Promise<bigint | null> {
   const raw = await redis.get(prevStateKey(ruleId));
   if (raw === null) return null;
-  return BigInt(/^[0-9a-fA-F]+$/.test(raw) && raw.length > 10 ? `0x${raw}` : raw);
+  // Values are always stored as decimal strings by setPreviousState (via bigint.toString()).
+  // Never re-interpret them as hex — a long all-digit decimal like "12345678901" would
+  // otherwise be misread as a hex literal, producing a wildly wrong number (CRIT-10).
+  return BigInt(raw);
 }
 
 async function setPreviousState(redis: EvalContext['redis'], ruleId: string, value: bigint): Promise<void> {
@@ -208,7 +211,11 @@ export const statePollEvaluator: RuleEvaluator = {
     };
 
     const raw = payload.value;
-    const currentValue = BigInt(/^[0-9a-fA-F]+$/.test(raw) && raw.length > 10 ? `0x${raw}` : raw);
+    // BigInt() natively handles both 0x-prefixed hex strings (e.g. "0x1a2b…") and
+    // plain decimal strings.  The old regex `/^[0-9a-fA-F]+$/` incorrectly matched
+    // pure decimal strings (digits are valid hex chars) and prepended "0x", turning
+    // e.g. decimal "12345678901" into hex 0x12345678901 = 78,187,493,121 (CRIT-10).
+    const currentValue = BigInt(raw);
     const thresholdValue = config.value !== undefined ? BigInt(config.value) : undefined;
 
     // Retrieve previous state value from Redis

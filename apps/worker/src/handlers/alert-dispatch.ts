@@ -82,23 +82,34 @@ export const alertDispatchHandler: JobHandler = {
       title: alert.title,
       severity: alert.severity,
       description: alert.description ?? undefined,
-      module: (alert.triggerData as Record<string, unknown>)?.moduleId as string ?? 'unknown',
+      module: typeof alert.triggerData === 'object' && alert.triggerData !== null && 'moduleId' in alert.triggerData && typeof (alert.triggerData as Record<string, unknown>).moduleId === 'string'
+        ? (alert.triggerData as Record<string, unknown>).moduleId as string
+        : 'unknown',
       eventType: alert.triggerType,
-      timestamp: new Date(alert.createdAt).toISOString(),
+      timestamp: (alert.createdAt instanceof Date ? alert.createdAt : new Date(String(alert.createdAt))).toISOString(),
     };
 
-    // Skip channels that already succeeded on a previous attempt
+    // Skip channels that already succeeded on a previous attempt.
+    // Delivery records store the notification channel UUID for configured channels
+    // and the Slack workspace channel ID (e.g. C0XXXXXX) for direct Slack dispatches.
+    // Track each population separately so the lookups use the correct ID type.
     const previousDeliveries = await db.select({ channelId: notificationDeliveries.channelId })
       .from(notificationDeliveries)
       .where(and(
         eq(notificationDeliveries.alertId, BigInt(alertId)),
         eq(notificationDeliveries.status, 'sent'),
       ));
+    // UUIDs of notification channels that were already delivered successfully.
     const alreadySent = new Set(previousDeliveries.map((d) => d.channelId));
     channels = channels.filter((c) => !alreadySent.has(c.id));
 
-    // If the direct Slack channel was already sent, skip it
-    const skipDirectSlack = detection?.slackChannelId ? alreadySent.has(detection.slackChannelId) : false;
+    // If the direct Slack channel was already sent, skip it.
+    // Use detection.slackChannelId (the Slack workspace channel ID) directly,
+    // because that is the value stored as channelId in the delivery record for
+    // the direct Slack path — NOT a notification channel UUID.
+    const skipDirectSlack = detection?.slackChannelId
+      ? alreadySent.has(detection.slackChannelId)
+      : false;
 
     // Resolve module-specific Slack formatter
     const moduleId = alertPayload.module;
@@ -123,22 +134,31 @@ export const alertDispatchHandler: JobHandler = {
           ? 'failed'
           : 'partial';
 
-    await db.update(alerts)
-      .set({ notificationStatus: status, notifications: results })
-      .where(eq(alerts.id, BigInt(alertId)));
+    // Write delivery records and update the alert status atomically.
+    // Inserting deliveries first (before the status update) ensures that a crash
+    // between the two writes cannot leave the alert marked 'sent' with no audit
+    // trail. Wrapping both in a transaction ensures either all delivery rows and
+    // the status update commit together, or none do — preventing partial delivery
+    // records on retry.
+    await db.transaction(async (tx) => {
+      if (results.length > 0) {
+        await tx.insert(notificationDeliveries).values(
+          results.map((result) => ({
+            alertId: BigInt(alertId),
+            channelId: result.channelId,
+            channelType: result.type,
+            status: result.status,
+            statusCode: result.statusCode ?? null,
+            responseTimeMs: result.responseTimeMs ?? null,
+            error: result.error ?? null,
+            sentAt: result.status === 'sent' ? new Date() : null,
+          })),
+        );
+      }
 
-    // Write per-channel delivery records
-    for (const result of results) {
-      await db.insert(notificationDeliveries).values({
-        alertId: BigInt(alertId),
-        channelId: result.channelId,
-        channelType: result.type,
-        status: result.status,
-        statusCode: result.statusCode ?? null,
-        responseTimeMs: result.responseTimeMs ?? null,
-        error: result.error ?? null,
-        sentAt: result.status === 'sent' ? new Date() : null,
-      });
-    }
+      await tx.update(alerts)
+        .set({ notificationStatus: status, notifications: results })
+        .where(eq(alerts.id, BigInt(alertId)));
+    });
   },
 };

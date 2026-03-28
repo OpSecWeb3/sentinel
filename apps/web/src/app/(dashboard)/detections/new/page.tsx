@@ -1081,9 +1081,9 @@ function getBuiltinRegistryTemplates(): Template[] {
     },
     {
       slug: "registry-full-security",
-      name: "Full Release Chain Security",
+      name: "Full Registry Security",
       description:
-        "Enable all release chain security monitors: Docker, npm, signatures, provenance, CI attribution, and anomaly detection.",
+        "Enable all registry security monitors: Docker, npm, signatures, provenance, CI attribution, and anomaly detection.",
       category: "comprehensive",
       severity: "critical",
       rules: [{ ruleType: "registry.digest_change", action: "alert" }],

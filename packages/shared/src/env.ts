@@ -40,6 +40,24 @@ const envSchema = z.object({
   SMTP_URL: z.string().optional(),
   SMTP_FROM: z.string().default('alerts@sentinel.dev'),
 
+  // Chain module: RPC load balancing
+  // Rotate primary RPC provider every N hours. Set to 0 to disable rotation.
+  // 0 disables rotation; callers guard against division-by-zero.
+  RPC_ROTATION_HOURS: z.coerce.number().int().nonnegative().default(10),
+
+  // Etherscan (optional — used by chain module for ABI lookups)
+  ETHERSCAN_API_KEY: z.string().optional(),
+
+  // GitHub personal access token (optional — used by registry module for API rate limits)
+  GITHUB_TOKEN: z.string().optional(),
+
+  // Reverse-proxy trust: number of trusted proxies in front of the API server.
+  // Used to extract the real client IP from X-Forwarded-For.
+  TRUSTED_PROXY_COUNT: z.coerce.number().int().nonnegative().default(0),
+
+  // Disable rate limiting (test/dev only)
+  DISABLE_RATE_LIMIT: z.enum(['true', 'false']).default('false'),
+
   // Observability (optional)
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   SENTRY_DSN: z.string().url().optional(),

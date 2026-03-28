@@ -62,6 +62,9 @@ export function setupGlobalHandlers(log: Logger): void {
   process.on('uncaughtException', (err) => {
     log.fatal({ err }, 'Uncaught exception');
     captureException(err);
+    // In test mode, let the test runner handle uncaught exceptions instead of
+    // calling process.exit which vitest intercepts and turns into a test failure.
+    if (process.env.NODE_ENV === 'test') return;
     // Give Sentry time to flush, then exit
     if (_sentry && _initialized) {
       _sentry.close(2000).finally(() => process.exit(1));

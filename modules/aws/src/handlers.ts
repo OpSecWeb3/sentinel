@@ -6,7 +6,7 @@
  * aws.poll-sweep     — scheduled sweep that enqueues poll jobs for due integrations
  */
 import type { Job } from 'bullmq';
-import { getDb, eq, sql, and, lte } from '@sentinel/db';
+import { getDb, eq, sql, and, lte, or, isNull } from '@sentinel/db';
 import { events } from '@sentinel/db/schema/core';
 import { awsIntegrations, awsRawEvents } from '@sentinel/db/schema/aws';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
@@ -80,7 +80,7 @@ export const pollSweepHandler: JobHandler = {
 
   async process(_job: Job) {
     const db = getDb();
-    const now = new Date();
+    const now = new Date().toISOString();
 
     const due = await db
       .select({ id: awsIntegrations.id, orgId: awsIntegrations.orgId })
@@ -89,6 +89,13 @@ export const pollSweepHandler: JobHandler = {
         and(
           eq(awsIntegrations.enabled, true),
           eq(awsIntegrations.status, 'active'),
+          or(
+            isNull(awsIntegrations.lastPolledAt),
+            lte(
+              sql`${awsIntegrations.lastPolledAt} + (${awsIntegrations.pollIntervalSeconds} * interval '1 second')`,
+              now,
+            ),
+          ),
         ),
       );
 
@@ -98,7 +105,7 @@ export const pollSweepHandler: JobHandler = {
     await Promise.all(
       due.map((row) =>
         queue.add('aws.sqs.poll', { integrationId: row.id, orgId: row.orgId }, {
-          jobId: `aws-poll-${row.id}-${Math.floor(now.getTime() / 60_000)}`,
+          jobId: `aws-poll-${row.id}-${Math.floor(Date.now() / 60_000)}`,
           removeOnComplete: { age: 300 },
           removeOnFail: { age: 3600 },
         }),
@@ -319,7 +326,10 @@ async function storeRawEvent(
 ): Promise<void> {
   const principal = extractPrincipal(record);
   // Native EventBridge events use 'id'; CloudTrail events use 'eventID'
-  const eventId = (record.eventID ?? record.id ?? `eb-${Date.now()}-${Math.random()}`) as string;
+  // Deterministic fallback: derive an ID from content so duplicate processing
+  // of the same event hits the onConflictDoNothing() dedup correctly.
+  // Previously used `Date.now()-Math.random()` which created a new ID every time.
+  const eventId = (record.eventID ?? record.id ?? deterministicEventId(record)) as string;
 
   // Upsert — skip if already stored (idempotent)
   // Support both CloudTrail events and native EventBridge events
@@ -357,6 +367,24 @@ async function storeRawEvent(
     rawPayload: record,
     eventTime,
   }).onConflictDoNothing();
+}
+
+/**
+ * Build a deterministic event ID from the record content so that duplicate
+ * deliveries of the same event are de-duplicated by the DB unique constraint.
+ */
+function deterministicEventId(record: Record<string, unknown>): string {
+  const { createHash } = require('node:crypto') as typeof import('node:crypto');
+  // Use fields that uniquely identify an EventBridge event even when 'id' is missing
+  const source = (record.source ?? record['detail-type'] ?? '') as string;
+  const time = (record.time ?? record.eventTime ?? '') as string;
+  const account = (record.account ?? '') as string;
+  const detail = record.detail ? JSON.stringify(record.detail) : '';
+  const hash = createHash('sha256')
+    .update(`${source}|${time}|${account}|${detail}`)
+    .digest('hex')
+    .slice(0, 24);
+  return `eb-${hash}`;
 }
 
 async function getRawEventId(

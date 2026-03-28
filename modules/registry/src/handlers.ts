@@ -4,6 +4,7 @@
  * Follows the same JobHandler pattern as the GitHub module.
  */
 import { logger as rootLogger } from '@sentinel/shared/logger';
+import { env } from '@sentinel/shared/env';
 import type { Job } from 'bullmq';
 import { getDb } from '@sentinel/db';
 import { events, rules } from '@sentinel/db/schema/core';
@@ -13,7 +14,7 @@ import {
   rcArtifactVersions,
   rcCiNotifications,
 } from '@sentinel/db/schema/registry';
-import { eq, and } from '@sentinel/db';
+import { eq, and, desc } from '@sentinel/db';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { getChildResults } from '@sentinel/shared/fan-out';
 import {
@@ -320,14 +321,15 @@ export const pollHandler: JobHandler = {
       ]),
     );
 
-    // Also load lastPolledAt from rcArtifacts if not in job payload
-    if (!artifact.lastPolledAt) {
+    // Always load watchMode from DB; also load lastPolledAt if not in job payload
+    {
       const [dbArtifact] = await db
-        .select({ lastPolledAt: rcArtifacts.lastPolledAt })
+        .select({ lastPolledAt: rcArtifacts.lastPolledAt, watchMode: rcArtifacts.watchMode })
         .from(rcArtifacts)
         .where(eq(rcArtifacts.id, artifact.id))
         .limit(1);
-      if (dbArtifact?.lastPolledAt) {
+      artifact.watchMode = (dbArtifact?.watchMode as 'dist-tags' | 'versions') ?? 'versions';
+      if (!artifact.lastPolledAt && dbArtifact?.lastPolledAt) {
         artifact.lastPolledAt = dbArtifact.lastPolledAt;
       }
     }
@@ -337,6 +339,113 @@ export const pollHandler: JobHandler = {
     log.info({ artifact: artifact.name }, 'Poll complete');
   },
 };
+
+// ---------------------------------------------------------------------------
+// GitHub workflow run search helper
+// ---------------------------------------------------------------------------
+
+interface GitHubWorkflowRun {
+  id: number;
+  head_sha: string;
+  actor: { login: string };
+  path: string;
+  name: string;
+  head_branch: string;
+  conclusion: string;
+}
+
+interface GitHubRunsResponse {
+  workflow_runs: GitHubWorkflowRun[];
+}
+
+function makeGitHubHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  const ghToken = env().GITHUB_TOKEN;
+  if (ghToken) {
+    headers['Authorization'] = `Bearer ${ghToken}`;
+  }
+  return headers;
+}
+
+function isRunMatch(
+  run: GitHubWorkflowRun,
+  workflows: string[],
+  actors: string[],
+  branches: string[],
+): boolean {
+  if (run.conclusion !== 'success') return false;
+
+  const workflowOk =
+    workflows.length === 0 ||
+    workflows.some((w) => run.path.endsWith(w) || run.name === w);
+  const actorOk =
+    actors.length === 0 || actors.includes(run.actor.login);
+  const branchOk =
+    branches.length === 0 || branches.includes(run.head_branch);
+
+  return workflowOk && actorOk && branchOk;
+}
+
+/**
+ * Search GitHub Actions for a recent workflow run matching the given criteria.
+ *
+ * When `workflows` is non-empty, first queries the workflow-specific endpoint
+ * for each workflow (up to 3) for efficiency. Falls back to the broad
+ * /actions/runs endpoint if no match is found or if workflows is empty.
+ */
+async function searchGitHubRuns(params: {
+  githubRepo: string;
+  workflows: string[];
+  actors: string[];
+  branches: string[];
+}): Promise<GitHubWorkflowRun | null> {
+  const { githubRepo, workflows, actors, branches } = params;
+  const headers = makeGitHubHeaders();
+  const createdSince = `>=${new Date(Date.now() - 10 * 60 * 1000).toISOString()}`;
+
+  // Path 1: workflow-specific queries (more efficient, fewer results to scan)
+  if (workflows.length > 0) {
+    const workflowsToQuery = workflows.slice(0, 3); // Cap at 3 to avoid rate limiting
+    for (const workflowFile of workflowsToQuery) {
+      try {
+        const url = `https://api.github.com/repos/${githubRepo}/actions/workflows/${encodeURIComponent(workflowFile)}/runs?${new URLSearchParams({
+          status: 'completed',
+          per_page: '10',
+          created: createdSince,
+        })}`;
+
+        const response = await fetch(url, { headers });
+        if (response.ok) {
+          const data = (await response.json()) as GitHubRunsResponse;
+          const match = data.workflow_runs.find((run) =>
+            isRunMatch(run, workflows, actors, branches),
+          );
+          if (match) return match;
+        }
+      } catch (err) {
+        log.debug({ err, workflowFile }, 'Workflow-specific GitHub search failed, trying next');
+      }
+    }
+  }
+
+  // Path 2: broad search (fallback, or when workflows is empty)
+  const broadUrl = `https://api.github.com/repos/${githubRepo}/actions/runs?${new URLSearchParams({
+    status: 'completed',
+    per_page: '20',
+    created: createdSince,
+  })}`;
+
+  const response = await fetch(broadUrl, { headers });
+  if (!response.ok) return null;
+
+  const data = (await response.json()) as GitHubRunsResponse;
+  return data.workflow_runs.find((run) =>
+    isRunMatch(run, workflows, actors, branches),
+  ) ?? null;
+}
 
 // ---------------------------------------------------------------------------
 // registry.attribution
@@ -410,57 +519,10 @@ export const attributionHandler: JobHandler = {
         const actors = (config.actors as string[]) ?? [];
         const branches = (config.branches as string[]) ?? [];
 
-        // Search GitHub API for recent workflow runs that could have produced this artifact
         try {
-          const ghApiBase = `https://api.github.com/repos/${githubRepo}/actions/runs`;
-          const params = new URLSearchParams({
-            status: 'completed',
-            per_page: '20',
-            created: `>=${new Date(Date.now() - 10 * 60 * 1000).toISOString()}`,
-          });
+          const matchingRun = await searchGitHubRuns({ githubRepo, workflows, actors, branches });
 
-          const ghResponse = await fetch(`${ghApiBase}?${params}`, {
-            headers: {
-              Accept: 'application/vnd.github+json',
-              'X-GitHub-Api-Version': '2022-11-28',
-              ...(process.env.GITHUB_TOKEN
-                ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }
-                : {}),
-            },
-          });
-
-          if (ghResponse.ok) {
-            const ghData = (await ghResponse.json()) as {
-              workflow_runs: Array<{
-                id: number;
-                head_sha: string;
-                actor: { login: string };
-                path: string;
-                name: string;
-                head_branch: string;
-                conclusion: string;
-              }>;
-            };
-
-            // Find a matching run
-            const matchingRun = ghData.workflow_runs.find((run) => {
-              if (run.conclusion !== 'success') return false;
-
-              const workflowOk =
-                workflows.length === 0 ||
-                workflows.some(
-                  (w) => run.path.endsWith(w) || run.name === w,
-                );
-              const actorOk =
-                actors.length === 0 || actors.includes(run.actor.login);
-              const branchOk =
-                branches.length === 0 ||
-                branches.includes(run.head_branch);
-
-              return workflowOk && actorOk && branchOk;
-            });
-
-            if (matchingRun) {
+          if (matchingRun) {
               const updatedPayload = {
                 ...payload,
                 attribution: {
@@ -488,7 +550,6 @@ export const attributionHandler: JobHandler = {
 
               log.info({ eventId, runId: matchingRun.id }, 'Attribution inferred from GitHub run');
               return;
-            }
           }
         } catch (err) {
           log.warn({ err }, 'GitHub API search failed for attribution');
@@ -584,6 +645,7 @@ export const ciNotifyHandler: JobHandler = {
           eq(events.moduleId, 'registry'),
         ),
       )
+      .orderBy(desc(events.receivedAt))
       .limit(50);
 
     // Fix #4: Require digest matching -- p.newDigest must equal digest

@@ -196,9 +196,9 @@ export const templates: DetectionTemplate[] = [
   // ── Comprehensive ───────────────────────────────────────────────────
   {
     slug: 'registry-full-security',
-    name: 'Full Release Chain Security',
+    name: 'Full Registry Security',
     description:
-      'Enable all release chain security monitors in one detection. Covers Docker digest/tag changes, npm version and maintainer changes, signature and provenance enforcement, CI attribution checks, and anomaly detection.',
+      'Enable all registry security monitors in one detection. Covers Docker digest/tag changes, npm version and maintainer changes, signature and provenance enforcement, CI attribution checks, and anomaly detection.',
     category: 'comprehensive',
     severity: 'critical',
     rules: [
@@ -646,6 +646,211 @@ export const templates: DetectionTemplate[] = [
         config: {
           tagPatterns: ['*'],
           changeTypes: ['dist_tag_removed'],
+        },
+        action: 'alert',
+      },
+    ],
+  },
+
+  // ── npm Maintainer Change ─────────────────────────────────────────
+  {
+    slug: 'rc-npm-maintainer-change',
+    name: 'npm Maintainer Change',
+    description:
+      'Alert when maintainers are added or removed from a monitored npm package. Maintainer changes can indicate package takeover or ownership transfer.',
+    category: 'package-security',
+    severity: 'high',
+    rules: [
+      {
+        ruleType: 'registry.npm_checks',
+        config: {
+          tagPatterns: ['*'],
+          changeTypes: ['maintainer_changed'],
+        },
+        action: 'alert',
+      },
+    ],
+  },
+
+  // ── npm Require Provenance ────────────────────────────────────────
+  {
+    slug: 'rc-npm-require-provenance',
+    name: 'npm Require Provenance',
+    description:
+      'Alert when a published npm package version lacks a SLSA provenance attestation. Provenance proves which source and build system produced the artifact.',
+    category: 'supply-chain',
+    severity: 'critical',
+    rules: [
+      {
+        ruleType: 'registry.security_policy',
+        config: {
+          artifactType: 'npm_package',
+          tagPatterns: ['*'],
+          changeTypes: ['version_published'],
+          requireProvenance: true,
+        },
+        action: 'alert',
+      },
+    ],
+  },
+
+  // ── npm Tag Require CI ────────────────────────────────────────────
+  {
+    slug: 'rc-npm-tag-require-ci',
+    name: 'npm Tag Require CI',
+    description:
+      'Alert when an npm dist-tag change or new tag is not attributed to a verified CI workflow. Catches manual publishes that bypass your CI/CD pipeline.',
+    category: 'supply-chain',
+    severity: 'high',
+    rules: [
+      {
+        ruleType: 'registry.attribution',
+        config: {
+          artifactType: 'npm_package',
+          tagPatterns: ['*'],
+          changeTypes: ['digest_change', 'new_tag'],
+          attributionCondition: 'must_match',
+          workflows: [],
+          actors: [],
+          branches: [],
+        },
+        action: 'alert',
+      },
+    ],
+  },
+
+  // ── npm Tag Install Scripts ───────────────────────────────────────
+  {
+    slug: 'rc-npm-tag-install-scripts',
+    name: 'npm Tag Install Scripts',
+    description:
+      'Alert when a dist-tag points to a version containing install scripts. Install scripts are a common supply chain attack vector.',
+    category: 'package-security',
+    severity: 'critical',
+    rules: [
+      {
+        ruleType: 'registry.npm_checks',
+        config: {
+          tagPatterns: ['*'],
+          changeTypes: ['new_tag', 'digest_change'],
+          checkInstallScripts: true,
+        },
+        action: 'alert',
+      },
+    ],
+  },
+
+  // ── npm Tag Require Provenance ────────────────────────────────────
+  {
+    slug: 'rc-npm-tag-require-provenance',
+    name: 'npm Tag Require Provenance',
+    description:
+      'Alert when an npm dist-tag change points to a version without SLSA provenance. Ensures all tag movements reference provenance-attested builds.',
+    category: 'supply-chain',
+    severity: 'critical',
+    rules: [
+      {
+        ruleType: 'registry.security_policy',
+        config: {
+          artifactType: 'npm_package',
+          tagPatterns: ['*'],
+          changeTypes: ['new_tag', 'digest_change', 'dist_tag_updated'],
+          requireProvenance: true,
+        },
+        action: 'alert',
+      },
+    ],
+  },
+
+  // ── npm Tag Major Version Jump ────────────────────────────────────
+  {
+    slug: 'rc-npm-tag-major-jump',
+    name: 'npm Tag Major Version Jump',
+    description:
+      'Alert when a dist-tag is moved to a version with a major semver increment. Unexpected major jumps on release channels can indicate breaking changes or package takeover.',
+    category: 'package-security',
+    severity: 'high',
+    rules: [
+      {
+        ruleType: 'registry.npm_checks',
+        config: {
+          tagPatterns: ['*'],
+          changeTypes: ['new_tag', 'digest_change'],
+          checkMajorVersionJump: true,
+        },
+        action: 'alert',
+      },
+    ],
+  },
+
+  // ── npm Tag Rapid Change ──────────────────────────────────────────
+  {
+    slug: 'rc-npm-tag-rapid-change',
+    name: 'npm Tag Rapid Change',
+    description:
+      'Alert when npm dist-tags change faster than expected. Rapid tag movements may indicate a compromised automation pipeline or an attack in progress.',
+    category: 'package-security',
+    severity: 'high',
+    rules: [
+      {
+        ruleType: 'registry.anomaly_detection',
+        config: {
+          tagPatterns: ['*'],
+          changeTypes: ['new_tag', 'digest_change', 'dist_tag_updated'],
+          maxChanges: 3,
+          windowMinutes: 30,
+        },
+        action: 'alert',
+      },
+    ],
+  },
+
+  // ── npm Tag Off-Hours ─────────────────────────────────────────────
+  {
+    slug: 'rc-npm-tag-off-hours',
+    name: 'npm Tag Off-Hours',
+    description:
+      'Alert when npm dist-tags are changed outside of business hours. Off-hours tag movements may indicate unauthorized access or compromised credentials.',
+    category: 'package-security',
+    severity: 'high',
+    inputs: [
+      {
+        key: 'startHour',
+        label: 'Business hours start (HH:MM)',
+        type: 'text',
+        required: true,
+        default: '09:00',
+        placeholder: '09:00',
+        help: 'Tag changes outside this window will trigger an alert.',
+      },
+      {
+        key: 'endHour',
+        label: 'Business hours end (HH:MM)',
+        type: 'text',
+        required: true,
+        default: '18:00',
+        placeholder: '18:00',
+      },
+      {
+        key: 'timezone',
+        label: 'Timezone',
+        type: 'text',
+        required: false,
+        default: 'UTC',
+        placeholder: 'UTC',
+        help: 'IANA timezone name (e.g. America/New_York, Europe/London).',
+      },
+    ],
+    rules: [
+      {
+        ruleType: 'registry.anomaly_detection',
+        config: {
+          tagPatterns: ['*'],
+          changeTypes: ['new_tag', 'digest_change', 'dist_tag_updated'],
+          allowedHoursStart: '{{startHour}}',
+          allowedHoursEnd: '{{endHour}}',
+          timezone: '{{timezone}}',
+          allowedDays: [1, 2, 3, 4, 5],
         },
         action: 'alert',
       },

@@ -20,6 +20,8 @@ const configSchema = z.object({
         'new_version',
         'version_unpublished',
         'maintainer_changed',
+        'dist_tag_updated',
+        'version_published',
       ]),
     )
     .default(['digest_change', 'new_tag', 'tag_removed']),
@@ -41,6 +43,9 @@ const HANDLED_EVENT_TYPES = new Set([
   'registry.npm.version_published',
   'registry.npm.version_unpublished',
   'registry.npm.maintainer_changed',
+  'registry.npm.new_tag',
+  'registry.npm.tag_removed',
+  'registry.npm.dist_tag_updated',
 ]);
 
 // ---------------------------------------------------------------------------
