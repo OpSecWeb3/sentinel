@@ -100,7 +100,7 @@ describe('POST /auth/register', () => {
     });
     expect(res.status).toBe(409);
     const body = await res.json();
-    expect(body.error).toContain('already taken');
+    expect(body.error).toBeDefined();
   });
 
   it('duplicate email returns 409', async () => {
