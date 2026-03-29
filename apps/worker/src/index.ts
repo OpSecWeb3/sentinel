@@ -139,7 +139,8 @@ async function main() {
   // ── Dead-letter queue for permanently failed jobs ────────────────────
   const deadLetterQueue = getQueue('sentinel-dead-letter');
   const DLQ_FALLBACK_PATH = '/tmp/sentinel-dead-letter.ndjson';
-  const { appendFileSync } = await import('node:fs');
+  const DLQ_FALLBACK_MAX_BYTES = 10 * 1024 * 1024; // 10 MB cap
+  const { appendFileSync, statSync } = await import('node:fs');
 
   // ── Metrics ─────────────────────────────────────────────────────────
   const { jobsProcessedTotal, jobDuration, deadLetterTotal, queueDepth } = await import('@sentinel/shared/metrics');
@@ -194,17 +195,25 @@ async function main() {
               attemptsMade,
             });
             try {
-              const payload = JSON.stringify({
-                originalQueue: queueName,
-                jobName,
-                jobId: job?.id,
-                data: job?.data,
-                error: err?.message,
-                failedAt: new Date().toISOString(),
-                attemptsMade,
-              });
-              appendFileSync(DLQ_FALLBACK_PATH, payload + '\n');
-            } catch { /* filesystem fallback is best-effort */ }
+              const fileSize = (() => { try { return statSync(DLQ_FALLBACK_PATH).size; } catch { return 0; } })();
+              if (fileSize >= DLQ_FALLBACK_MAX_BYTES) {
+                log.error({ jobName, jobId: job?.id, fileSizeBytes: fileSize }, 'DLQ fallback file at size cap — job payload dropped');
+              } else {
+                const payload = JSON.stringify({
+                  originalQueue: queueName,
+                  jobName,
+                  jobId: job?.id,
+                  data: job?.data,
+                  error: err?.message,
+                  failedAt: new Date().toISOString(),
+                  attemptsMade,
+                });
+                appendFileSync(DLQ_FALLBACK_PATH, payload + '\n');
+                log.warn({ jobName, jobId: job?.id, fileSizeBytes: fileSize }, 'Job payload written to DLQ fallback file');
+              }
+            } catch (fsErr) {
+              log.error({ fsErr, jobName, jobId: job?.id }, 'DLQ fallback file write failed — job payload lost');
+            }
           }
         })();
       }

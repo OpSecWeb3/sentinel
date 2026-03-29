@@ -65,6 +65,7 @@ export const alertDispatchHandler: JobHandler = {
         .from(notificationChannels)
         .where(and(
           inArray(notificationChannels.id, channelIds),
+          eq(notificationChannels.orgId, alert.orgId),
           eq(notificationChannels.enabled, true),
           isNull(notificationChannels.deletedAt),
         ));
