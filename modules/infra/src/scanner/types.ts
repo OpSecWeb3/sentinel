@@ -152,6 +152,7 @@ export interface WhoisChange {
 }
 
 export interface CtLogEntry {
+  crtShId: number;
   issuerName: string;
   commonName: string;
   nameValue: string;

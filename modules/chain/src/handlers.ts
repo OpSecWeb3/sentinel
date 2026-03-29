@@ -499,20 +499,36 @@ export const blockProcessHandler: JobHandler = {
 
     // -----------------------------------------------------------------------
     // Batch insert all normalized events (Fix #12: avoid N+1 DB queries)
+    // Dedup: filter out events whose externalId already exists (job retries)
     // -----------------------------------------------------------------------
     if (allNormalizedValues.length > 0) {
-      const insertedEvents = await db
-        .insert(events)
-        .values(allNormalizedValues.map((v) => v.normalized))
-        .returning();
+      // Guard against duplicate inserts on BullMQ retries: check which
+      // externalIds already exist in the events table.
+      const candidateIds = allNormalizedValues.map((v) => v.normalized.externalId);
+      const existingRows = await db
+        .select({ externalId: events.externalId })
+        .from(events)
+        .where(inArray(events.externalId, candidateIds));
+      const existingIds = new Set(existingRows.map((r) => r.externalId));
 
-      matchedEventCount = insertedEvents.length;
+      const newValues = allNormalizedValues.filter(
+        (v) => !existingIds.has(v.normalized.externalId),
+      );
 
-      // Enqueue event.evaluate for each matched event.
-      // The event-processing handler owns cooldown checking and alert creation.
-      for (let i = 0; i < insertedEvents.length; i++) {
-        const event = insertedEvents[i]!;
-        await eventsQueue.add('event.evaluate', { eventId: event.id });
+      if (newValues.length > 0) {
+        const insertedEvents = await db
+          .insert(events)
+          .values(newValues.map((v) => v.normalized))
+          .returning();
+
+        matchedEventCount = insertedEvents.length;
+
+        // Enqueue event.evaluate for each matched event.
+        // The event-processing handler owns cooldown checking and alert creation.
+        for (let i = 0; i < insertedEvents.length; i++) {
+          const event = insertedEvents[i]!;
+          await eventsQueue.add('event.evaluate', { eventId: event.id });
+        }
       }
     }
 

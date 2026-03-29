@@ -25,8 +25,9 @@ import {
   infraWhoisChanges,
   infraFindingSuppressions,
   infraReachabilityChecks,
+  infraCtLogEntries,
 } from '@sentinel/db/schema/infra';
-import { eq, and, lte, desc } from '@sentinel/db';
+import { eq, and, lte, desc, inArray } from '@sentinel/db';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { getChildResults } from '@sentinel/shared/fan-out';
 import type { ScanCallbacks, ScanResult } from './scanner/orchestrator.js';
@@ -35,6 +36,116 @@ import type { FindingSuppression } from './scanner/scoring.js';
 import { normalizeScanResult, normalizeProbeResult } from './normalizer.js';
 
 const log = rootLogger.child({ component: 'infra' });
+
+// ---------------------------------------------------------------------------
+// Event deduplication helpers
+// ---------------------------------------------------------------------------
+
+interface NormalizedEventInput {
+  eventType: string;
+  payload: Record<string, unknown>;
+}
+
+/**
+ * Filters out discovery events that have already been seen in previous scans.
+ *
+ * - `infra.ct.new_entry`: upserts into `infraCtLogEntries`; only emits events
+ *   for genuinely new rows (those not already in the table).
+ * - `infra.subdomain.discovered`: checks `infraHosts` for existing subdomains;
+ *   only emits for genuinely new ones and auto-registers them.
+ *
+ * All other event types pass through unchanged.
+ */
+async function dedupDiscoveryEvents(
+  normalized: NormalizedEventInput[],
+  orgId: string,
+  hostId: string,
+): Promise<NormalizedEventInput[]> {
+  const db = getDb();
+
+  // -- CT entry dedup: upsert into infraCtLogEntries, keep only genuinely new --
+  const ctEvents = normalized.filter((e) => e.eventType === 'infra.ct.new_entry');
+  const newCrtShIds = new Set<number>();
+
+  if (ctEvents.length > 0) {
+    for (const evt of ctEvents) {
+      const crtShId = evt.payload.crtShId as number | null;
+      if (crtShId == null) continue;
+
+      const [inserted] = await db
+        .insert(infraCtLogEntries)
+        .values({
+          hostId,
+          crtShId: BigInt(crtShId),
+          serialNumber: (evt.payload.serialNumber as string) ?? '',
+          issuer: (evt.payload.issuerName as string) ?? '',
+          commonName: (evt.payload.commonName as string) ?? '',
+          notBefore: evt.payload.notBefore ? new Date(evt.payload.notBefore as string) : null,
+          notAfter: evt.payload.notAfter ? new Date(evt.payload.notAfter as string) : null,
+          entryTimestamp: evt.payload.entryTimestamp ? new Date(evt.payload.entryTimestamp as string) : null,
+          isNew: true,
+          firstSeenAt: new Date(),
+        })
+        .onConflictDoNothing()
+        .returning({ crtShId: infraCtLogEntries.crtShId });
+
+      if (inserted) {
+        newCrtShIds.add(crtShId);
+      }
+    }
+  }
+
+  // -- Subdomain dedup: check infraHosts for existing subdomains --
+  const subdomainEvents = normalized.filter((e) => e.eventType === 'infra.subdomain.discovered');
+  const newSubdomains = new Set<string>();
+
+  if (subdomainEvents.length > 0) {
+    const candidateHostnames = subdomainEvents.map((e) => e.payload.subdomain as string);
+
+    // Batch-check which already exist
+    const existingRows = await db
+      .select({ hostname: infraHosts.hostname })
+      .from(infraHosts)
+      .where(
+        and(eq(infraHosts.orgId, orgId), inArray(infraHosts.hostname, candidateHostnames)),
+      );
+    const existingHostnames = new Set(existingRows.map((r) => r.hostname));
+
+    for (const evt of subdomainEvents) {
+      const subdomain = evt.payload.subdomain as string;
+      if (!existingHostnames.has(subdomain)) {
+        newSubdomains.add(subdomain);
+      }
+    }
+
+    // Auto-register genuinely new subdomains
+    for (const subdomain of newSubdomains) {
+      await db
+        .insert(infraHosts)
+        .values({
+          orgId,
+          hostname: subdomain,
+          isRoot: false,
+          parentId: hostId,
+          source: 'crt_sh',
+          isActive: true,
+        })
+        .onConflictDoNothing();
+    }
+  }
+
+  // -- Filter: only pass through genuinely new discovery events --
+  return normalized.filter((evt) => {
+    if (evt.eventType === 'infra.ct.new_entry') {
+      const crtShId = evt.payload.crtShId as number | null;
+      return crtShId != null && newCrtShIds.has(crtShId);
+    }
+    if (evt.eventType === 'infra.subdomain.discovered') {
+      return newSubdomains.has(evt.payload.subdomain as string);
+    }
+    return true;
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Shared ScanCallbacks factory
@@ -358,9 +469,11 @@ export const scanHandler: JobHandler = {
       callbacks,
     );
 
-    // Normalize scan results into platform events and enqueue for evaluation
+    // Normalize scan results into platform events, dedup discovery events,
+    // and enqueue for evaluation
     const db = getDb();
-    const normalized = normalizeScanResult(result, orgId);
+    const allNormalized = normalizeScanResult(result, orgId);
+    const normalized = await dedupDiscoveryEvents(allNormalized, orgId, hostId);
     const eventsQueue = getQueue(QUEUE_NAMES.EVENTS);
 
     for (const evt of normalized) {
@@ -380,7 +493,7 @@ export const scanHandler: JobHandler = {
     }
 
     log.info(
-      { jobId: job.id, hostname, status: result.status, score: result.score ?? null, eventCount: normalized.length },
+      { jobId: job.id, hostname, status: result.status, score: result.score ?? null, eventCount: normalized.length, dedupFiltered: allNormalized.length - normalized.length },
       'scan job complete',
     );
   },
@@ -605,9 +718,10 @@ export const scanAggregateHandler: JobHandler = {
 
     await callbacks.saveScanResult(aggregatedResult);
 
-    // Normalize and enqueue for rule evaluation
+    // Normalize, dedup discovery events, and enqueue for rule evaluation
     const db = getDb();
-    const normalized = normalizeScanResult(aggregatedResult, orgId);
+    const allNormalized = normalizeScanResult(aggregatedResult, orgId);
+    const normalized = await dedupDiscoveryEvents(allNormalized, orgId, hostId);
     const eventsQueue = getQueue(QUEUE_NAMES.EVENTS);
 
     for (const evt of normalized) {
@@ -627,7 +741,7 @@ export const scanAggregateHandler: JobHandler = {
     }
 
     log.info(
-      { hostname, successCount, totalSteps: stepResults.length, status, eventCount: normalized.length },
+      { hostname, successCount, totalSteps: stepResults.length, status, eventCount: normalized.length, dedupFiltered: allNormalized.length - normalized.length },
       'scan.aggregate complete',
     );
   },
