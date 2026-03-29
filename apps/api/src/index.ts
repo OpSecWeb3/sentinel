@@ -231,6 +231,15 @@ app.use('/modules/*', async (c, next) => {
   if (!c.get('orgId')) {
     throw new HTTPException(403, { message: 'Organisation membership required' });
   }
+  // Enforce API key scopes for module routes.
+  // Cookie sessions keep role-based behavior inside module routers.
+  if (c.get('apiKeyId')) {
+    const scopes = c.get('scopes') ?? [];
+    const requiredScope = ['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) ? 'api:read' : 'api:write';
+    if (!scopes.includes(requiredScope)) {
+      throw new HTTPException(403, { message: `Scope "${requiredScope}" required` });
+    }
+  }
   return next();
 });
 
