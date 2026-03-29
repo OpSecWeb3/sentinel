@@ -10,25 +10,26 @@ const mono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL("https://sentinel.dev"),
   title: {
-    default: "Sentinel — Smart Contract Governance & Upgrade Management",
+    default: "Sentinel — Security Monitoring & Threat Detection",
     template: "%s — Sentinel",
   },
   description:
-    "Secure smart contract upgrade management and governance. Timelocks, multisig approvals, role-based access control, and automated safety checks for on-chain upgrades.",
+    "Real-time security monitoring across blockchain, infrastructure, GitHub, and AWS. Detect threats, trigger alerts, and manage incidents with automated detection rules and multi-channel notifications.",
   keywords: [
-    "smart contract governance",
-    "contract upgrade management",
-    "timelock controller",
-    "multisig approvals",
-    "on-chain governance",
+    "security monitoring",
+    "threat detection",
+    "blockchain monitoring",
     "smart contract security",
-    "upgrade safety",
-    "proxy management",
-    "web3 governance",
+    "infrastructure monitoring",
+    "on-chain alerts",
+    "web3 security",
+    "DeFi security",
+    "automated alerting",
   ],
   authors: [{ name: "Sentinel" }],
   creator: "Sentinel",
   category: "Technology",
+  manifest: "/manifest.webmanifest",
   icons: {
     icon: [
       { url: "/favicon.svg", type: "image/svg+xml" },
@@ -40,15 +41,15 @@ export const metadata: Metadata = {
     type: "website",
     siteName: "Sentinel",
     locale: "en_US",
-    title: "Sentinel — Smart Contract Governance & Upgrade Management",
+    title: "Sentinel — Security Monitoring & Threat Detection",
     description:
-      "Secure smart contract upgrade management and governance. Timelocks, multisig approvals, role-based access control, and automated safety checks.",
+      "Real-time security monitoring across blockchain, infrastructure, GitHub, and AWS. Detect threats and get instant alerts via Slack, email, or webhooks.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Sentinel — Smart Contract Governance & Upgrade Management",
+    title: "Sentinel — Security Monitoring & Threat Detection",
     description:
-      "Secure smart contract upgrade management and governance. Timelocks, multisig approvals, role-based access control, and automated safety checks.",
+      "Real-time security monitoring across blockchain, infrastructure, GitHub, and AWS. Detect threats and get instant alerts via Slack, email, or webhooks.",
   },
   robots: {
     index: true,
@@ -70,7 +71,7 @@ const jsonLd = {
   url: "https://sentinel.dev",
   logo: "https://sentinel.dev/favicon.svg",
   description:
-    "Secure smart contract upgrade management and governance platform.",
+    "Real-time security monitoring and threat detection across blockchain, infrastructure, GitHub, and AWS.",
 };
 
 export default function RootLayout({
