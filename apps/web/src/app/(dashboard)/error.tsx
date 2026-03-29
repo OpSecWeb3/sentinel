@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import * as Sentry from "@sentry/nextjs";
 
-export default function Error({
+export default function DashboardError({
   error,
   reset,
 }: {
@@ -18,14 +18,14 @@ export default function Error({
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6 px-4 text-center">
       <div className="space-y-2">
         <p className="font-mono text-sm text-destructive">
-          [ERR] UNHANDLED_EXCEPTION
+          [ERR] DASHBOARD_ERROR
         </p>
         <h1 className="font-mono text-lg text-foreground">
           Something went wrong
         </h1>
         <p className="max-w-md font-mono text-sm text-muted-foreground">
-          An unexpected error occurred. This has been logged. You can retry the
-          operation or navigate back.
+          An error occurred while loading this page. The navigation sidebar is
+          still available — you can switch to another section or retry.
         </p>
         {error.digest && (
           <p className="font-mono text-xs text-muted-foreground">
