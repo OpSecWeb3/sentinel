@@ -152,6 +152,31 @@ The worker is the Sentinel background processing service. It connects to Redis v
 
 ---
 
+## Security and infrastructure terms
+
+**Certificate Transparency (CT)**
+Certificate Transparency is a public logging framework for TLS certificates. Certificate Authorities are required to publish all issued certificates to CT logs. The Sentinel Infrastructure module monitors CT logs for newly issued certificates matching your monitored domains, enabling early detection of unauthorized certificates, potential phishing domains, or certificate misissuance.
+
+**CloudTrail**
+AWS CloudTrail is an AWS service that records API calls and management events across your AWS account. The Sentinel AWS module ingests CloudTrail events by polling Amazon SQS queues where CloudTrail delivers event notifications. This allows Sentinel to detect security-relevant AWS activity such as IAM changes, security group modifications, or unauthorized API calls.
+
+**Container Digest**
+A container digest is a content-addressable SHA-256 hash that uniquely identifies a specific container image manifest. Unlike mutable tags (such as `latest`), a digest is immutable and guarantees that the image content has not changed. The Registry module uses digest comparison to detect unauthorized modifications to container images.
+
+**JSONB**
+JSONB (JSON Binary) is a PostgreSQL data type that stores JSON data in a decomposed binary format. Sentinel uses JSONB columns for flexible schema fields such as event payloads, audit log details, rule configurations, and detection settings. JSONB supports indexing and efficient querying of nested fields.
+
+**RBAC (Role-Based Access Control)**
+RBAC is an access control model where permissions are assigned to roles rather than individual users. Sentinel implements RBAC with three roles: **admin** (full access to all features), **editor** (can create and modify detections and channels), and **viewer** (read-only access). Each user's role is stored in their organization membership and enforced by middleware on every API request.
+
+**SLSA (Supply-chain Levels for Software Artifacts)**
+SLSA is a security framework that defines increasing levels of software supply chain integrity guarantees. The Sentinel Registry module evaluates packages against SLSA criteria, checking for provenance attestations, build system verification, and other supply chain security indicators. SLSA compliance checks help detect packages that may have been tampered with during the build or publish process.
+
+**TLS (Transport Layer Security)**
+TLS is the cryptographic protocol that secures HTTPS connections. The Sentinel Infrastructure module monitors TLS certificates on your registered hosts, alerting you when certificates are approaching expiry or when certificate properties change unexpectedly. The API service enforces HSTS (HTTP Strict Transport Security) headers in production to require TLS connections.
+
+---
+
 ## Technology terms
 
 **BullMQ**
@@ -170,7 +195,7 @@ Hono is a lightweight web framework for TypeScript and Node.js. Sentinel uses Ho
 Pino is a low-overhead structured JSON logging library for Node.js. Both the API and worker services use Pino to emit structured log lines with fields such as `service`, `requestId`, `queue`, `jobName`, and `level`. See the [Log locations](troubleshooting/log-locations.md) page for details on interpreting Pino output.
 
 **PostgreSQL**
-PostgreSQL is the relational database used by Sentinel for all persistent data: users, organizations, sessions, API keys, detections, rules, events, alerts, notification channels, audit logs, correlation rules, and module-specific tables. The worker connects with a pool of up to 20 connections. Sessions are stored encrypted in the `sessions` table and expire after 7 days; an hourly cleanup job purges expired rows.
+PostgreSQL is the relational database used by Sentinel for all persistent data: users, organizations, sessions, API keys, detections, rules, events, alerts, notification channels, audit logs, correlation rules, and module-specific tables. The worker connects with a pool of up to 50 connections. Sessions are stored encrypted in the `sessions` table and expire after 7 days; an hourly cleanup job purges expired rows.
 
 **Redis**
 Redis is the in-memory data store used by Sentinel for job queues (BullMQ), rate limiting (atomic Lua counters), cooldown locks (SET NX PX), and correlation state (sequence instances, aggregation counters, absence timers, sorted set indexes). Each BullMQ worker gets its own dedicated Redis connection to avoid head-of-line blocking.

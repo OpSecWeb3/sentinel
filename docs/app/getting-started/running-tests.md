@@ -25,13 +25,13 @@ These default ports (5434 for PostgreSQL, 6380 for Redis) match the dev Docker C
 Start the infrastructure services:
 
 ```bash
-docker compose up postgres redis -d
+docker compose -f docker-compose.dev.yml up postgres redis -d
 ```
 
 Wait for both services to become healthy, then create the test database:
 
 ```bash
-docker exec -it sentinel-postgres-1 psql -U sentinel -c "CREATE DATABASE sentinel_test;"
+docker exec -it sentinel-postgres psql -U sentinel -c "CREATE DATABASE sentinel_test;"
 ```
 
 The test setup (`test/helpers/setup.ts`) handles schema creation automatically. It drops and recreates the `public` schema, then pushes all Drizzle table definitions directly -- you do not need to run migrations before running tests.
@@ -105,6 +105,16 @@ Use watch mode during active development. Vitest re-runs affected tests whenever
 pnpm test:watch
 ```
 
+## Running tests in Docker
+
+The development Docker Compose file includes a `test` service (activated via the `test` profile) that runs the full test suite inside a container with pre-configured environment variables:
+
+```bash
+pnpm test:docker
+```
+
+This runs `docker compose -f docker-compose.dev.yml --profile test run --rm test`, which starts the `test` container alongside the Postgres and Redis services, executes `vitest run`, and removes the container on exit.
+
 ## Replicating the CI environment locally
 
 The CI pipeline runs tests against freshly provisioned PostgreSQL and Redis containers (without TLS, with well-known credentials matching the defaults in `vitest.config.ts`). The rate-limit middleware is disabled in tests via the `DISABLE_RATE_LIMIT=true` environment variable, which is set by default in the test environment.
@@ -113,11 +123,11 @@ To replicate the exact CI conditions:
 
 ```bash
 # Ensure Docker containers match the dev port configuration
-docker compose up postgres redis -d
+docker compose -f docker-compose.dev.yml up postgres redis -d
 
 # Drop and recreate the test database for a clean slate
-docker exec -it sentinel-postgres-1 psql -U sentinel -c "DROP DATABASE IF EXISTS sentinel_test;"
-docker exec -it sentinel-postgres-1 psql -U sentinel -c "CREATE DATABASE sentinel_test;"
+docker exec -it sentinel-postgres psql -U sentinel -c "DROP DATABASE IF EXISTS sentinel_test;"
+docker exec -it sentinel-postgres psql -U sentinel -c "CREATE DATABASE sentinel_test;"
 
 # Run the full test suite (rate limiting is disabled via DISABLE_RATE_LIMIT in test env)
 DISABLE_RATE_LIMIT=true pnpm test
@@ -138,6 +148,8 @@ The root `vitest.config.ts` injects the following environment variables for all 
 | `ENCRYPTION_KEY` | `0123456789abcdef...` (64 hex chars) | Fixed test encryption key for AES-256-GCM. |
 | `ALLOWED_ORIGINS` | `http://localhost:3000` | CORS origin for test requests. |
 | `SMTP_FROM` | `test@sentinel.dev` | Sender address for email test assertions. |
+| `SMTP_URL` | `smtp://localhost:1025` | SMTP server for email delivery tests. |
+| `DISABLE_RATE_LIMIT` | `true` | Disables Redis-backed rate limiting to prevent counter accumulation across test runs. |
 
 These values are injected automatically. You do not need to set them in your `.env` file or export them manually.
 
@@ -150,6 +162,19 @@ pnpm exec vitest run --coverage
 ```
 
 The report is written to `coverage/` at the repository root. Open `coverage/index.html` in a browser to inspect per-file coverage.
+
+### Coverage thresholds
+
+The root `vitest.config.ts` enforces the following minimum coverage thresholds. CI fails if any threshold is not met:
+
+| Metric | Threshold |
+|---|---|
+| Lines | 49% |
+| Functions | 62% |
+| Branches | 79% |
+| Statements | 49% |
+
+The coverage provider is V8 (native instrumentation, no Babel transform). The `apps/web/src/` directory is excluded from coverage because the frontend is tested via end-to-end tests, not unit tests.
 
 ## Writing new tests
 

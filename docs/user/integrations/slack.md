@@ -1,133 +1,188 @@
-# Slack integration
+# Slack Integration
 
-This guide explains how to connect Sentinel to your Slack workspace so that alerts are delivered to Slack channels in real time.
+This guide explains how to connect Slack to Sentinel so that security alerts
+are delivered to your team's channels in real time.
 
-## What the Slack integration provides
+## Prerequisites
 
-When Slack is connected, Sentinel can send alert notifications to one or more Slack channels. Each notification includes the alert title, severity, module, and a link back to the alert detail view in Sentinel. You can route different detections and correlation rules to different channels -- for example, critical GitHub alerts to a `#security-critical` channel and low-severity infrastructure alerts to a `#security-audit` channel.
+- A Sentinel account with the **Admin** role in your organization.
+- Permission to install Slack apps in your Slack workspace (Slack admin or
+  workspace owner approval may be required).
+- The Sentinel server must have `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET`
+  environment variables configured. If you see "Slack not configured on this
+  server," contact your Sentinel administrator.
+
+## Connecting Slack
+
+1. Open the Sentinel web console and navigate to **Settings**.
+2. In the **Slack** section, click **Connect Slack**.
+3. Sentinel redirects you to the Slack OAuth authorization page.
+4. Select the Slack workspace where you want to receive alerts.
+5. Review the requested permissions and click **Allow**.
+6. Slack redirects you back to Sentinel. A success banner confirms the
+   connection.
+
+Sentinel stores an encrypted bot token that allows it to post messages to
+channels the bot has been invited to. Only one Slack workspace can be connected
+per Sentinel organization at a time. Connecting a new workspace replaces the
+previous connection.
+
+### OAuth permissions
 
 Sentinel requests the following Slack OAuth scopes:
 
 | Scope | Purpose |
 |---|---|
 | `chat:write` | Post alert messages to channels |
-| `channels:read` | List and search public channels for channel selection |
-| `groups:read` | List and search private channels the bot has been invited to |
+| `channels:read` | List public channels for the channel picker |
+| `groups:read` | List private channels for the channel picker |
 
-## Prerequisites
+The bot does not read message history, manage users, or modify channel
+settings.
 
-- You have the **admin** role in your Sentinel organization (admin role is required to connect or disconnect Slack).
-- Your Sentinel server administrator has configured the `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` environment variables.
-- You have permission to add apps to the target Slack workspace.
+## Selecting channels for notifications
 
-## Step 1: Connect your Slack workspace
+After connecting Slack, you can assign notification channels at two levels:
 
-1. In Sentinel, navigate to **Settings** and select **Channels**.
-2. Click **Add Slack** (or **Connect Slack Workspace** if no workspace is currently connected).
-3. Sentinel generates an HMAC-signed OAuth state parameter for CSRF protection and redirects you to Slack's authorization page.
-4. Sign in to Slack with an account that has permission to add apps to the workspace.
-5. Review the permissions Sentinel requests and click **Allow**.
-6. Slack redirects you back to Sentinel. Sentinel exchanges the authorization code for a bot token, encrypts the token at rest, and stores the workspace connection.
-7. Your workspace name and ID now appear under **Settings > Channels**.
+### Per-detection channel assignment
 
-> **Note:** Only one Slack workspace can be connected per Sentinel organization. If you need to send alerts to channels in a different workspace, disconnect the current workspace first and reconnect the new one.
+1. Navigate to a detection's detail page (for example, **GitHub > Detections >
+   Repository Visibility Monitor**).
+2. In the **Notifications** section, search for a Slack channel by name.
+3. Select the channel from the dropdown.
+4. Click **Save**.
 
-> **Security note:** The OAuth state parameter expires after 10 minutes. Sentinel also validates that the user who initiated the flow still has an active membership in the organization before storing the token. If the user's membership is revoked between initiating the flow and completing it, the connection is rejected.
+All alerts fired by that detection will be posted to the selected channel.
 
-## Step 2: Choose channels for alerts
+### Notification channels (advanced)
 
-After connecting your Slack workspace, you assign Slack channels to individual detections and correlation rules. When a detection or correlation rule fires, Sentinel sends the alert to the assigned Slack channel.
+Sentinel also supports creating named notification channels that can be shared
+across multiple detections:
 
-### Assigning a Slack channel when creating a detection
+1. Navigate to **Settings > Notification Channels**.
+2. Click **Create Channel**.
+3. Set **Type** to **Slack**.
+4. Enter the Slack channel ID (the channel picker searches by name and returns
+   the ID automatically).
+5. Click **Save**.
 
-1. Navigate to **Detections** and click **New Detection** (or edit an existing detection).
-2. In the detection form, locate the **Slack Channel** field.
-3. Begin typing the channel name. Sentinel searches your connected workspace for matching channels (minimum 2 characters). Both public and private channels are included in the search results.
-4. Select the target channel from the dropdown.
-5. Save the detection.
-
-### Assigning a Slack channel to a correlation rule
-
-Correlation rules support the same Slack channel assignment. When editing a correlation rule, select the target channel in the **Slack Channel** field.
+You can then reference this notification channel when creating or editing
+detections.
 
 ### Searching for channels
 
-The channel search queries the Slack API using the `conversations.list` endpoint with a client-side filter. Results include:
+The channel search endpoint queries the Slack API in real time. Type at least
+two characters to see results. Sentinel searches both public and private
+channels (the bot must be a member of private channels to post to them).
 
-- Public channels visible to the Sentinel bot.
-- Private channels the Sentinel bot has been invited to.
+Results are limited to 50 channels. If your workspace has many channels, use a
+more specific search term.
 
-Up to 50 matching channels are returned per search. If you do not see the expected channel, confirm the bot has been invited to it (for private channels) or that the channel name matches your search query.
+## What Slack messages look like
 
-> **Important:** For private channels, you must manually invite the Sentinel Slack bot before it can post messages. In Slack, open the target channel, type `/invite @SentinelBot` (replace `SentinelBot` with the name of your Sentinel Slack app), and press Enter.
+When a detection fires, Sentinel posts a structured message to the assigned
+channel containing:
 
-## Alert message format in Slack
+- **Title** -- the alert name (for example, "Repository Visibility Monitor").
+- **Severity** -- color-coded: critical (red), high (orange), medium (yellow),
+  low (gray).
+- **Description** -- a summary of what triggered the alert.
+- **Module** -- which Sentinel module generated the alert (for example,
+  "github", "chain", "aws").
+- **Event type** -- the specific event that triggered the detection.
+- **Timestamp** -- when the event occurred (ISO 8601).
 
-When an alert fires and is routed to a Slack channel, Sentinel posts a message containing:
+### Test notifications
 
-- **Alert title**: A concise description of what was detected.
-- **Severity badge**: The alert severity level (critical, high, medium, or low).
-- **Module**: The module that generated the alert (for example, GitHub, Chain, Registry, AWS, Infra).
-- **Detection name**: The name of the detection or correlation rule that triggered the alert.
-- **Link**: A direct URL to the alert detail page in Sentinel.
-- **Trigger data**: Key contextual fields from the triggering event, formatted for quick triage.
+Before relying on a channel for production alerts, send a test message:
 
-Messages are posted using the bot token. The bot's display name and avatar are configured in your Slack app settings.
+1. Navigate to **Settings > Notification Channels**.
+2. Locate the Slack channel and click **Test**.
+3. Sentinel sends a test notification with the title "Test Notification from
+   Sentinel."
+4. Verify the message appears in the expected Slack channel.
+
+If the test fails, Sentinel returns a 502 error. Check that:
+
+- The Sentinel bot has been invited to the target channel.
+- The Slack connection is still active (token has not been revoked).
+
+## Customizing Slack alert format
+
+Sentinel uses a standard Slack message format for all alerts. Customization
+is available through notification channel configuration:
+
+- **Webhook-based channels** allow you to configure custom HTTP headers and
+  route alerts through a middleware service that reformats messages before
+  forwarding to Slack.
+- **Slack-type channels** post directly using the Slack API and use the
+  built-in format.
+
+To fully customize message formatting, create a **Webhook** notification
+channel that points to a Slack-compatible incoming webhook URL or your own
+middleware endpoint, and apply your formatting logic there.
 
 ## Disconnecting Slack
 
-Only users with the **admin** role can disconnect the Slack integration.
+1. Navigate to **Settings**.
+2. In the **Slack** section, click **Disconnect**.
+3. Confirm the action.
 
-1. In Sentinel, navigate to **Settings** and select **Channels**.
-2. Click **Disconnect Slack**.
+Disconnecting Slack:
 
-When the workspace is disconnected:
+- Deletes the encrypted bot token from Sentinel.
+- Clears Slack channel references from all detections and correlation rules.
+  These detections continue to run but will not send Slack notifications until
+  a new channel is assigned.
 
-- The encrypted bot token is deleted from the database.
-- All Slack channel references on detections and correlation rules are cleared (set to null).
-- Future alerts are not delivered to Slack until a new workspace is connected and channels are re-assigned.
-
-> **Warning:** Disconnecting Slack immediately clears all Slack channel assignments on every detection and correlation rule in your organization. You must reassign channels after reconnecting.
-
-## Viewing connection status
-
-To check whether Slack is currently connected:
-
-1. Navigate to **Settings** and select **Channels**.
-2. The connection status shows whether a workspace is connected, including the team name, team ID, and the date the connection was established.
-
-Alternatively, make a GET request to the `/integrations/slack` API endpoint to retrieve the connection status programmatically.
+Only users with the **Admin** role can disconnect Slack.
 
 ## Troubleshooting
 
-### The Sentinel bot is not posting to the channel
+### "Slack is not connected" when searching channels
 
-1. Confirm the Sentinel bot is a member of the channel. For private channels, use `/invite @SentinelBot` in Slack.
-2. Check the alert's notification delivery record in Sentinel for an error message. Common Slack API errors include:
-   - `channel_not_found` -- the channel ID stored in the detection does not match a channel in the workspace.
-   - `not_in_channel` -- the bot has not been invited to the private channel.
-   - `token_revoked` -- the bot token has been revoked. Reconnect the workspace.
+Your organization does not have an active Slack connection. Follow the steps in
+"Connecting Slack" above.
 
-### Notifications stopped working after previously succeeding
+### "Failed to fetch channels from Slack" (HTTP 502)
 
-The most common cause is a revoked bot token. This can happen when:
+Sentinel received an error from the Slack API. Possible causes:
 
-- A Slack workspace admin revokes the Sentinel app's access.
-- The Slack app is uninstalled from the workspace.
+- The bot token was revoked. Disconnect and reconnect Slack.
+- The Slack workspace is on a plan that restricts API access.
+- Transient Slack API outage. Retry after a few minutes.
 
-To fix this:
+### Test notification fails
 
-1. In Sentinel, navigate to **Settings > Channels**.
-2. If the workspace still appears as connected, click **Disconnect Slack** to clear the stale token.
-3. Click **Add Slack** to reconnect and complete the OAuth flow again.
-4. Reassign Slack channels to your detections and correlation rules.
+1. Confirm the notification channel is **enabled** (disabled channels cannot
+   send tests).
+2. Verify the bot has been invited to the target Slack channel. Open the
+   channel in Slack and type `/invite @Sentinel` (or the bot's display name).
+3. Check that the Slack connection is still valid under **Settings > Slack**.
 
-### Channel search returns no results
+### OAuth callback lands on an error page
 
-- Ensure you have typed at least 2 characters in the search field. Sentinel requires a minimum query length.
-- Confirm the Sentinel bot has been added to any private channels you want to find.
-- Sentinel pages through up to 5 pages of Slack channel results (up to 1000 channels). If your workspace has more channels than this, the search may not find channels beyond that limit. Use a more specific search query.
+Check the `reason` query parameter in the redirect URL:
 
-### Alert delivery is delayed
+| Reason | Meaning |
+|---|---|
+| `missing_params` | Slack did not return an authorization code. Retry the flow. |
+| `invalid_state` or `invalid_signature` | The CSRF state token is malformed or tampered. Clear cookies and retry. |
+| `expired_state` | More than 10 minutes passed since you started the flow. Retry. |
+| `session_mismatch` | The logged-in user changed between starting and completing the OAuth flow. Log in with the original account and retry. |
+| `unauthorized` | The user who started the flow was removed from the Sentinel organization before completing it. |
+| `not_configured` | The Sentinel server does not have Slack credentials configured. Contact your administrator. |
+| `token_exchange_failed` | Slack rejected the authorization code. The code may have expired. Retry. |
 
-Sentinel delivers Slack notifications asynchronously through a job queue. Delays of more than a few minutes typically indicate a worker queue backlog, not a Slack connectivity issue. Check your Sentinel worker health and queue depth if you suspect congestion.
+### Messages are not delivered to a specific channel
+
+1. Verify the detection has a Slack channel assigned. Navigate to the
+   detection's detail page and check the **Notifications** section.
+2. Verify the bot is a member of the channel. Private channels require an
+   explicit `/invite`.
+3. Check the Sentinel worker logs for errors related to Slack message delivery.
+
+### "Cannot test a disabled channel"
+
+Enable the notification channel before sending a test. Navigate to **Settings >
+Notification Channels**, locate the channel, and toggle it to enabled.

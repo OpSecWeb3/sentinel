@@ -472,7 +472,7 @@ Performs a partial update. At least one field must be provided. You cannot updat
 | `description` | `string (max 1000) \| null` | New description. Send `null` to clear. |
 | `severity` | `"critical" \| "high" \| "medium" \| "low"` | New severity. |
 | `status` | `"active" \| "paused"` | Status transition. |
-| `config` | `CorrelationRuleConfig` | Replace config. Fully validated. In-flight instances are not affected; they continue evaluating against the old config until they expire. |
+| `config` | `CorrelationRuleConfig` | Replace config. Fully validated. In-flight Redis instances are purged when `config` or `status` is updated, because old instances carry state from the previous configuration and cannot be meaningfully continued. |
 | `channelIds` | `string[] (UUIDs)` | Replace channel associations. |
 | `slackChannelId` | `string \| null` | Update Slack channel ID. |
 | `slackChannelName` | `string \| null` | Update Slack channel name. |

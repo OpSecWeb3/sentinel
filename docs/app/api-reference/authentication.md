@@ -112,7 +112,7 @@ curl -s -c cookies.txt -X POST http://localhost:4000/auth/login \
 
 | Status | Body | Cause |
 |---|---|---|
-| `401 Unauthorized` | `{"error": "Invalid username or password"}` | Wrong credentials. Response timing is equalized via a dummy bcrypt comparison to prevent user-enumeration. |
+| `401 Unauthorized` | `{"error": "Invalid username or password"}` | Wrong credentials. Response timing is equalized via a dummy argon2id comparison to prevent user-enumeration. |
 | `423 Locked` | `{"error": "Account temporarily locked. Try again later."}` | Five consecutive failed login attempts trigger a 15-minute lockout |
 | `429 Too Many Requests` | `{"error": "Too many requests, please try again later"}` | Login rate limit exceeded (10 attempts per 15 minutes) |
 
@@ -179,7 +179,8 @@ Deletes the session from the database and clears the `sentinel.sid` cookie.
 **cURL example:**
 
 ```bash
-curl -s -c cookies.txt -b cookies.txt -X POST http://localhost:4000/auth/logout
+curl -s -c cookies.txt -b cookies.txt -X POST http://localhost:4000/auth/logout \
+  -H "X-Sentinel-Request: 1"
 ```
 
 **Response (`200 OK`):**

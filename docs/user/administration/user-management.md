@@ -21,18 +21,20 @@ Sentinel uses three roles to control access. Users are assigned a role when they
 | Create and edit detections | Yes | Yes | No |
 | Delete detections | Yes | Yes | No |
 | Manage notification channels | Yes | Yes | No |
-| Create and revoke own API keys | Yes | Yes | Yes |
-| View organization members | Yes | Yes | No |
+| View API keys | Yes | Yes | Yes |
+| Create and revoke API keys | Yes | Yes | No |
+| View organization members | Yes | No | No |
 | Invite members (manage invite secret) | Yes | No | No |
 | Change member roles | Yes | No | No |
 | Remove members | Yes | No | No |
-| Access organization settings | Yes | No | No |
-| Connect/disconnect Slack | Yes | No | No |
+| Access organization settings (admin tabs) | Yes | No | No |
+| Connect Slack | Yes | Yes | No |
+| Disconnect Slack | Yes | No | No |
 | Manage notify key | Yes | No | No |
 | Manage webhook secret | Yes | No | No |
-| Add/remove monitored artifacts | Yes | No | No |
-| Manage GitHub App installations | Yes | No | No |
-| Manage AWS integrations | Yes | No | No |
+| Add/remove monitored artifacts | Yes | Yes | No |
+| Manage GitHub App installations | Yes | Yes | No |
+| Manage AWS integrations | Yes | Yes | No |
 | Update monitored artifact configuration | Yes | Yes | No |
 | View audit log | Yes | No | No |
 | Delete organization | Yes | No | No |
@@ -145,7 +147,7 @@ Sentinel implements brute-force protection on the login endpoint:
 
 ### Timing-safe login responses
 
-Sentinel uses constant-time comparison for login responses to prevent user enumeration. When a login attempt is made with a username that does not exist, Sentinel still performs a bcrypt comparison against a dummy hash. This ensures that the response time is the same whether or not the username exists, preventing attackers from using timing differences to determine valid usernames.
+Sentinel uses constant-time comparison for login responses to prevent user enumeration. When a login attempt is made with a username that does not exist, Sentinel still performs an argon2id verification against a dummy hash. This ensures that the response time is the same whether or not the username exists, preventing attackers from using timing differences to determine valid usernames.
 
 ### Session management
 

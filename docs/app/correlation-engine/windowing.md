@@ -55,7 +55,7 @@ If the window expires before the sequence completes:
 
 Aggregation windows use sliding TTL behavior:
 
-- **Simple-count (INCR)**: The TTL is set on the first increment only. The `AGG_INCR_LUA` script sets `PEXPIRE` when `count == 1`, anchoring the window to the first event. Subsequent events do not extend the window.
+- **Simple-count (INCR)**: The TTL is refreshed on every increment. The `AGG_INCR_LUA` script calls `PEXPIRE` after every `INCR`, creating a sliding window that extends with each matching event.
 - **Distinct-count (SADD)**: The TTL is refreshed on every `SADD` operation via the `AGG_SADD_LUA` script. This means the window slides forward with each new distinct value.
 
 When the threshold is reached, the key is atomically deleted and the window resets. A new window starts with the next matching event.
@@ -222,7 +222,7 @@ The chain module provides three evaluators that use Redis sorted sets to track e
 
 Counts matching on-chain log events within a sliding window using `ZADD` + `ZREMRANGEBYSCORE` + `ZCARD`. Triggers when the count reaches or exceeds the threshold.
 
-**Redis key**: `sentinel:window:{ruleId}` or `sentinel:wcount:{ruleId}:{groupValue}` (when grouped).
+**Redis key**: `sentinel:wcount:{orgId}:{ruleId}` or `sentinel:wcount:{orgId}:{ruleId}:{groupValue}` (when grouped).
 
 **Algorithm**: Add event, prune stale entries, count remaining, set TTL.
 
@@ -238,7 +238,7 @@ Detects rate spikes by comparing a short observation window against a longer bas
 
 Sums a numeric decoded argument field across events within a sliding window. Supports BigInt-scale values. Members use composite encoding (`eventId:valueString`).
 
-**Redis key**: `sentinel:wsum:{ruleId}` or `sentinel:wsum:{ruleId}:{groupValue}`.
+**Redis key**: `sentinel:wsum:{orgId}:{ruleId}` or `sentinel:wsum:{orgId}:{ruleId}:{groupValue}`.
 
 **Algorithm**: Add event with encoded value, prune stale entries, fetch all members and sum values, compare against threshold.
 

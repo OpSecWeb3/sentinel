@@ -2,8 +2,8 @@
 
 Sentinel manages database migrations with [Drizzle Kit](https://orm.drizzle.team/docs/kit-overview).
 Migration files are plain SQL generated from the TypeScript schema definitions
-in `packages/db/schema/`. The workflow is: edit schema → generate SQL →
-review SQL → apply to the database.
+in `packages/db/schema/`. The workflow is: edit schema, generate SQL, review
+SQL, apply to the database.
 
 ## Configuration
 
@@ -24,12 +24,23 @@ export default defineConfig({
 
 Key points:
 
-- `schema` — glob pattern; Drizzle Kit introspects all `*.ts` files under
+- `schema` -- glob pattern; Drizzle Kit introspects all `*.ts` files under
   `packages/db/schema/` and produces a unified diff.
-- `out` — migration SQL files are written to `packages/db/migrations/`.
-- `dialect: 'postgresql'` — targets PostgreSQL 16 syntax.
-- `DATABASE_URL` — must be set in the environment before running any Drizzle
+- `out` -- migration SQL files are written to `packages/db/migrations/`.
+- `dialect: 'postgresql'` -- targets PostgreSQL 16 syntax.
+- `DATABASE_URL` -- must be set in the environment before running any Drizzle
   Kit command.
+
+## The Cardinal Rule
+
+**Never hand-write SQL migration files.** Always use Drizzle Kit to generate
+migrations from schema changes. Hand-written files that lack corresponding
+snapshot updates cause Drizzle Kit to produce duplicate statements on the next
+`generate` run, leading to migration failures.
+
+The only exception is `drizzle-kit generate --custom` (see
+[Custom Migrations](#custom-migrations)), which creates an empty SQL file
+**with** a proper snapshot entry, keeping the migration chain intact.
 
 ## Commands
 
@@ -51,7 +62,7 @@ incrementing four-digit prefix followed by a short descriptor slug, for
 example:
 
 ```
-0011_add_correlation_window_field.sql
+0001_add_correlation_window_field.sql
 ```
 
 **Always review the generated SQL before committing it.** Verify that:
@@ -83,43 +94,142 @@ pnpm db:studio
 Opens the Drizzle Studio browser UI connected to `DATABASE_URL`. Useful for
 inspecting data and running ad-hoc queries during development.
 
+## Migration Workflow
+
+### Step-by-step: schema change to applied migration
+
+1. **Edit the TypeScript schema** in the appropriate file under
+   `packages/db/schema/` (e.g. `core.ts`, `chain.ts`, `infra.ts`).
+
+2. **Run `pnpm db:generate`** from the monorepo root. Drizzle Kit diffs the
+   schema against its snapshot and produces a new SQL file plus an updated
+   snapshot in `migrations/meta/`.
+
+3. **Review the generated SQL** for correctness. Check for:
+   - `NOT NULL` columns without defaults on populated tables.
+   - Unintended drops or renames.
+   - Missing `IF NOT EXISTS` guards if idempotency matters.
+
+4. **Run `pnpm db:migrate`** to apply locally against your development database.
+
+5. **Commit both the `.sql` file and the `meta/` snapshot together** in the
+   same PR as the schema change. Never commit them separately; keeping them
+   together ensures the schema and migrations are always in sync.
+
+### Step-by-step: adding a new table
+
+1. Create or edit the appropriate schema file under `packages/db/schema/`.
+
+2. Export the new table from the schema file.
+
+3. If the file is new, add it to the imports and `schema` object in
+   `packages/db/index.ts`.
+
+4. Run `pnpm db:generate` to create the migration file.
+
+5. Review the generated SQL. Commit both the schema change and migration file.
+
+### Step-by-step: adding a column to an existing table
+
+1. Add the column definition to the appropriate table in `packages/db/schema/`.
+
+2. For `NOT NULL` columns on tables that may already contain data, add a
+   `default(...)` in the Drizzle definition:
+   ```typescript
+   newColumn: text('new_column').notNull().default('pending'),
+   ```
+
+3. Run `pnpm db:generate` and review the generated SQL (see
+   [Production Considerations](#production-considerations) for large-table
+   caveats).
+
+4. Commit both files together.
+
+## Custom Migrations
+
+For changes that `drizzle-kit generate` cannot produce -- data backfills,
+conditional DDL, expression indexes, or `CONCURRENTLY` operations -- use the
+custom migration command:
+
+```bash
+pnpm drizzle-kit generate --custom --name=description
+```
+
+This creates an empty SQL file **with** a proper snapshot entry in
+`migrations/meta/`, keeping the migration chain intact. You then write the SQL
+manually in the generated file.
+
+Guidelines for custom migrations:
+
+- Use `IF NOT EXISTS` / `IF EXISTS` guards for idempotency.
+- If the migration adds columns or tables, also update the TypeScript schema
+  in `packages/db/schema/*.ts` and run `pnpm db:generate` to update the
+  snapshot so Drizzle Kit knows the new baseline.
+- Always test the migration against a fresh database (via `pnpm test:integration`)
+  before merging.
+
 ## Migration Files
 
 ### Location and naming
 
 ```
 packages/db/
-├── drizzle.config.ts
-├── migrations/
-│   ├── meta/
-│   │   ├── _journal.json                # Drizzle Kit migration journal
-│   │   ├── 0000_snapshot.json           # Schema snapshot after 0000
-│   │   └── 0001_snapshot.json           # Schema snapshot after 0001
-│   ├── 0000_bouncy_killer_shrike.sql    # Full baseline (52 tables)
-│   └── 0001_bumpy_blonde_phantom.sql    # Duplicate-alert unique indexes
-└── schema/
-    ├── core.ts
-    ├── correlation.ts
-    ├── github.ts
-    ├── chain.ts
-    ├── registry.ts
-    ├── infra.ts
-    └── aws.ts
+  drizzle.config.ts
+  migrations/
+    meta/
+      _journal.json                # Drizzle Kit migration journal
+      0000_snapshot.json           # Schema snapshot after 0000
+    0000_sparkling_callisto.sql    # Full baseline (48 tables)
+  schema/
+    core.ts
+    correlation.ts
+    github.ts
+    chain.ts
+    registry.ts
+    infra.ts
+    aws.ts
 ```
 
 The four-digit numeric prefix determines application order. The slug suffix
 (generated by Drizzle Kit from a random word pair or manually renamed) is for
 human readability only and does not affect ordering.
 
-The current `0000` migration was consolidated on 2026-03-28 from a previously
-fragmented set of 12 migrations. It creates the complete schema in a single
-file. Migration `0001` is the first incremental migration from that baseline,
-adding unique indexes to the `alerts` table to prevent duplicate alert
-creation (part of the P2 concurrency audit fixes).
+### Snapshot files and their importance
 
-The `meta/` directory is managed by Drizzle Kit but may need manual edits
-for hand-written migrations (see
-[Hand-written Migrations](#hand-written-migrations)).
+The `migrations/meta/` directory contains two types of files:
+
+**`_journal.json`** -- the migration journal. Each entry records the migration
+index, version, timestamp, tag (filename without `.sql`), and whether
+breakpoints are enabled. Drizzle Kit uses this journal to determine which
+migrations exist and in what order they should run.
+
+```json
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1774802352271,
+      "tag": "0000_sparkling_callisto",
+      "breakpoints": true
+    }
+  ]
+}
+```
+
+**`NNNN_snapshot.json`** -- a full snapshot of the schema state after migration
+`NNNN` has been applied. Drizzle Kit compares the current TypeScript schema
+against the latest snapshot to determine what SQL to generate for the next
+migration. If a snapshot is missing or stale, Drizzle Kit generates incorrect
+or duplicate SQL statements.
+
+**Never delete or manually edit snapshot files** unless you are performing a
+pre-production consolidation (see
+[Pre-Production Reset Strategy](#pre-production-reset-strategy)). If the
+snapshot gets out of sync with reality, the safest fix is to re-run
+`pnpm db:generate` and verify the output.
 
 ### What a migration file looks like
 
@@ -186,7 +296,83 @@ To inspect the `__drizzle_migrations` tracking table directly:
 SELECT * FROM __drizzle_migrations ORDER BY created_at;
 ```
 
+## Three-Way Sync Check
+
+Migrations involve three things that must stay in sync. When anything seems
+off, check all three:
+
+```bash
+# 1. How many SQL files exist?
+ls packages/db/migrations/*.sql | wc -l
+
+# 2. How many journal entries?
+grep -c '"tag"' packages/db/migrations/meta/_journal.json
+
+# 3. How many rows in the DB tracking table?
+psql $DATABASE_URL -c "SELECT count(*) FROM drizzle.__drizzle_migrations;"
+```
+
+All three numbers must match. If they do not:
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| SQL file exists, not in journal | Hand-written migration without journal entry | Add entry to `_journal.json` |
+| In journal, not in DB table | Migration exists but was never applied | Run `pnpm db:migrate` |
+| In DB table, file deleted | File removed after being applied | Restore file or accept drift |
+
+**Run this check before every deploy and in CI.** CI runs this check
+automatically: it verifies that SQL file count equals journal entries equals
+applied DB rows. It also runs `pnpm db:generate` to detect uncommitted schema
+drift (if `generate` produces output, the schema and migrations are out of
+sync).
+
 ## Production Considerations
+
+### Additive-only migration policy
+
+Once Sentinel is deployed to production with real data, all migrations must be
+**additive-only**. This means migrations may only:
+
+- Add new tables
+- Add new nullable columns (or columns with a `DEFAULT`)
+- Add new indexes
+- Add new constraints
+
+Migrations must **never** do any of the following in the same deploy as the
+code that depends on the change:
+
+- Drop a column or table
+- Rename a column or table
+- Change a column type
+- Remove or tighten a constraint
+
+This policy exists because the deploy script auto-rolls back code-only deploys
+on health check failure. If the old code runs against the new schema, additive
+changes are invisible to it -- it just ignores the new columns. But destructive
+changes (drops, renames) break the old code immediately.
+
+### Two-deploy pattern for destructive changes
+
+If you need to drop a column, rename a table, or change a type, split it across
+two deploys:
+
+1. **Deploy 1 -- remove the dependency.** Update application code to stop
+   reading/writing the column. Deploy and verify.
+2. **Deploy 2 -- remove the column.** Write a migration that drops the now-unused
+   column. Deploy.
+
+This ensures there is never a window where running code references a schema
+object that no longer exists.
+
+**Example: renaming a column**
+
+```
+Deploy 1: Add new_name column (nullable), backfill from old_name, update code to read/write new_name
+Deploy 2: Drop old_name column
+```
+
+Never rename in place with `ALTER COLUMN ... RENAME TO` -- the old code will
+break if the deploy rolls back.
 
 ### Adding a NOT NULL column to a large table
 
@@ -194,7 +380,7 @@ Adding a `NOT NULL` column without a `DEFAULT` value to a large table will
 fail because existing rows cannot satisfy the constraint. Use one of these
 patterns instead:
 
-**Option A — add nullable, backfill, then constrain:**
+**Option A -- add nullable, backfill, then constrain:**
 
 ```sql
 -- Step 1: add as nullable (no table lock)
@@ -207,7 +393,7 @@ UPDATE detections SET new_column = 'default_value' WHERE new_column IS NULL;
 ALTER TABLE detections ALTER COLUMN new_column SET NOT NULL;
 ```
 
-**Option B — add with a DEFAULT:**
+**Option B -- add with a DEFAULT:**
 
 ```sql
 ALTER TABLE detections
@@ -235,9 +421,6 @@ ALTER TABLE t ALTER COLUMN col TYPE integer USING col::integer;
 ALTER TABLE t ALTER COLUMN col SET DEFAULT 60;
 ```
 
-This was hit in migration `0003` when converting
-`aws_integrations.poll_interval_seconds` from text to integer.
-
 ### Creating indexes on large tables
 
 By default, `CREATE INDEX` takes a share lock that blocks writes for the
@@ -247,7 +430,7 @@ you may want to use `CREATE INDEX CONCURRENTLY` to avoid blocking writes.
 
 **However: `drizzle-kit migrate` wraps each migration file in a transaction,
 and `CONCURRENTLY` cannot run inside a transaction.** This is a hard Postgres
-error — the migration will fail on any fresh database.
+error -- the migration will fail.
 
 **Pre-production (current state):** Use plain `CREATE INDEX` in migration
 files. The tables are small enough that the brief lock is negligible.
@@ -269,157 +452,16 @@ The recommended pattern:
    VALUES ('<sha256sum of the file>', <when from journal>);
    ```
 
-This was the approach used for migration `0001` during initial development
-(later simplified to plain `CREATE INDEX` since the table was empty).
-
-## Three-Way Sync Check
-
-Migrations involve three things that must stay in sync. When anything seems
-off, check all three:
-
-```bash
-# 1. How many SQL files exist?
-ls packages/db/migrations/*.sql | wc -l
-
-# 2. How many journal entries?
-grep -c '"tag"' packages/db/migrations/meta/_journal.json
-
-# 3. How many rows in the DB tracking table?
-psql $DATABASE_URL -c "SELECT count(*) FROM drizzle.__drizzle_migrations;"
-```
-
-All three numbers must match. If they don't:
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| File exists, not in journal | Hand-written migration without journal entry | Add entry to `_journal.json` |
-| In journal, not in DB table | Migration exists but was never applied | Run `pnpm db:migrate` |
-| In DB table, file deleted | File removed after being applied | Restore file or accept drift |
-
-**Run this check before every deploy and in CI.** Most migration bugs come
-down to one of these three things being out of sync.
-
 ## Current Migration History
 
 | Index | Tag | Description |
 |-------|-----|-------------|
-| `0000` | `bouncy_killer_shrike` | Consolidated baseline. Creates all 52 tables, foreign keys, and indexes. Generated by Drizzle Kit from the full schema after squashing the previous 12 incremental migrations. |
-| `0001` | `bumpy_blonde_phantom` | Hand-written. Adds two unique indexes to the `alerts` table to prevent duplicate alerts: `uq_alerts_event_detection_rule` (for rule-match alerts) and `uq_alerts_event_correlation` (expression index for correlated alerts using `trigger_data->>'correlationRuleId'`). Uses plain `CREATE INDEX` (not `CONCURRENTLY`) so it works inside `drizzle-kit migrate`'s transaction wrapper. Part of the P2 concurrency audit. |
-| `0002` | `session_lookup_columns` | Hand-written. Adds nullable `user_id` and `org_id` columns to the `sessions` table with indexes, enabling indexed deletion by user or org without full-table scan + per-row decryption. |
-| `0003` | `aws_schema_fixes` | Hand-written. Converts `aws_integrations.poll_interval_seconds` from text to integer, adds FK cascade on `aws_raw_events.org_id` and `rules.org_id`. |
+| `0000` | `sparkling_callisto` | Consolidated baseline. Creates all 48 tables, foreign keys, and indexes. Generated by Drizzle Kit from the full schema. |
 
-## Hand-written Migrations
-
-For changes drizzle-kit cannot generate (data backfills, conditional DDL,
-index-only changes, `CONCURRENTLY` operations):
-
-1. Create `NNNN_short_description.sql` with the next sequence number.
-2. **Add the entry to `_journal.json`** manually. Use the next `idx` value
-   and a `when` timestamp in epoch milliseconds:
-
-   ```json
-   {
-     "idx": 1,
-     "version": "7",
-     "when": 1711929600000,
-     "tag": "0001_short_description",
-     "breakpoints": true
-   }
-   ```
-
-3. If the migration adds columns or tables, also update
-   `packages/db/schema/*.ts` and run `pnpm db:generate` to update the
-   snapshot (drizzle-kit needs to know the new baseline).
-4. Use `IF NOT EXISTS` / `IF EXISTS` guards for idempotency.
-
-**If you skip step 2, `drizzle-kit migrate` will never apply the file.**
-This has been the source of migration bugs in this repo — a SQL file existed
-but was invisible to the tooling.
-
-## Schema Import Convention
-
-Schema files under `packages/db/schema/` must use bare imports without
-`.js` extensions:
-
-```typescript
-// Correct — works with drizzle-kit's CJS require()
-import { organizations } from './core';
-
-// Wrong — breaks drizzle-kit generate
-import { organizations } from './core.js';
-```
-
-Drizzle-kit resolves imports via CJS `require()`, which cannot handle
-`.js` extensions pointing to `.ts` files.
-
-## Pre-Production Reset Strategy
-
-Since Sentinel is pre-production, migrations can be consolidated when they
-become fragmented or drift accumulates:
-
-1. Back up existing migrations (optional safety net).
-2. Delete all `.sql` files and the snapshot in `migrations/meta/`.
-3. Empty `_journal.json`: `{"version":"7","dialect":"postgresql","entries":[]}`
-4. Run `pnpm db:generate` — produces a single `0000` with the full schema.
-5. Reset the DB tracking table:
-   ```sql
-   DELETE FROM drizzle.__drizzle_migrations;
-   INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
-   VALUES ('<sha256sum of new 0000.sql>', <when from journal>);
-   ```
-6. Run the three-way sync check to verify.
-
-**This is only safe pre-production.** Once there are real deployments with
-user data, every migration must be preserved and applied sequentially.
-The transition to production-safe migrations should happen before the first
-real deployment — at that point, the current `0000` becomes the permanent
-baseline and all future changes are incremental-only.
-
-## Additive-Only Migration Policy
-
-Once Sentinel is deployed to production with real data, all migrations must be
-**additive-only**. This means migrations may only:
-
-- Add new tables
-- Add new nullable columns (or columns with a `DEFAULT`)
-- Add new indexes
-- Add new constraints
-
-Migrations must **never** do any of the following in the same deploy as the
-code that depends on the change:
-
-- Drop a column or table
-- Rename a column or table
-- Change a column type
-- Remove or tighten a constraint
-
-This policy exists because the deploy script auto-rolls back code-only deploys
-on health check failure. If the old code runs against the new schema, additive
-changes are invisible to it — it just ignores the new columns. But destructive
-changes (drops, renames) break the old code immediately.
-
-### Two-deploy pattern for destructive changes
-
-If you need to drop a column, rename a table, or change a type, split it across
-two deploys:
-
-1. **Deploy 1 — remove the dependency.** Update application code to stop
-   reading/writing the column. Deploy and verify.
-2. **Deploy 2 — remove the column.** Write a migration that drops the now-unused
-   column. Deploy.
-
-This ensures there is never a window where running code references a schema
-object that no longer exists.
-
-### Example: renaming a column
-
-```
-Deploy 1: Add new_name column (nullable), backfill from old_name, update code to read/write new_name
-Deploy 2: Drop old_name column
-```
-
-Never rename in place with `ALTER COLUMN ... RENAME TO` — the old code will
-break if the deploy rolls back.
+The baseline migration was consolidated from a previously fragmented set of
+migrations. All prior incremental migrations (duplicate-alert unique indexes,
+session lookup columns, AWS schema fixes) have been folded into this single
+baseline.
 
 ## Rollback Strategy
 
@@ -437,7 +479,7 @@ For emergency situations where a migration has caused an outage and must be
 reversed immediately without going through the normal workflow:
 
 1. Connect to the database with a privileged user.
-2. Manually execute the inverse SQL (e.g. `ALTER TABLE … DROP COLUMN …`).
+2. Manually execute the inverse SQL (e.g. `ALTER TABLE ... DROP COLUMN ...`).
 3. Delete the corresponding row from `__drizzle_migrations` so Drizzle Kit
    no longer considers it applied.
 4. Delete the migration `.sql` file and regenerate the schema snapshot with
@@ -446,44 +488,28 @@ reversed immediately without going through the normal workflow:
 This manual procedure is a last resort. Prefer the forward-migration approach
 in all non-emergency cases.
 
-## Adding New Tables and Columns
+## Pre-Production Reset Strategy
 
-### Step-by-step: adding a new table
+Since Sentinel is pre-production, migrations can be consolidated when they
+become fragmented or drift accumulates:
 
-1. Create or edit the appropriate schema file under `packages/db/schema/`.
-   Follow the conventions described in [Schema Conventions](#schema-conventions).
-
-2. Export the new table from the schema file.
-
-3. If the file is new, add it to the exports in `packages/db/index.ts` and
-   include it in the `schema` object passed to `drizzle()`.
-
-4. Run `pnpm db:generate` from the monorepo root to create the migration file.
-
-5. Open the generated file in `packages/db/migrations/` and review the SQL.
-
-6. Commit both the schema change and the migration file in the same PR.
-   Do not commit them separately; keeping them together ensures the schema and
-   migrations are always in sync.
-
-7. The migration runs automatically on the next `pnpm db:migrate` (or on the
-   next production deploy).
-
-### Step-by-step: adding a column to an existing table
-
-1. Add the column definition to the appropriate table in `packages/db/schema/`.
-
-2. For `NOT NULL` columns on tables that may already contain data, add a
-   `default(...)` in the Drizzle definition:
-   ```typescript
-   newColumn: text('new_column').notNull().default('pending'),
+1. Back up existing migrations (optional safety net).
+2. Delete all `.sql` files and the snapshots in `migrations/meta/`.
+3. Empty `_journal.json`: `{"version":"7","dialect":"postgresql","entries":[]}`
+4. Run `pnpm db:generate` -- produces a single `0000` with the full schema.
+5. Reset the DB tracking table:
+   ```sql
+   DELETE FROM drizzle.__drizzle_migrations;
+   INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+   VALUES ('<sha256sum of new 0000.sql>', <when from journal>);
    ```
+6. Run the three-way sync check to verify.
 
-3. Run `pnpm db:generate` and review the generated SQL (see
-   [Production Considerations](#production-considerations) for large-table
-   caveats).
-
-4. Commit both files together.
+**This is only safe pre-production.** Once there are real deployments with
+user data, every migration must be preserved and applied sequentially.
+The transition to production-safe migrations should happen before the first
+real deployment -- at that point, the current `0000` becomes the permanent
+baseline and all future changes are incremental-only.
 
 ## Schema Conventions
 
@@ -569,6 +595,22 @@ PostgreSQL native arrays (`text[]`, `uuid[]`) are used for small, bounded
 collections that do not need to be queried individually. For collections that
 require per-element filtering or joining, use a separate junction table instead.
 
+## Schema Import Convention
+
+Schema files under `packages/db/schema/` must use bare imports without
+`.js` extensions:
+
+```typescript
+// Correct -- works with drizzle-kit's CJS require()
+import { organizations } from './core';
+
+// Wrong -- breaks drizzle-kit generate
+import { organizations } from './core.js';
+```
+
+Drizzle-kit resolves imports via CJS `require()`, which cannot handle
+`.js` extensions pointing to `.ts` files.
+
 ## Seeding
 
 Sentinel provides a seed script for populating reference data required by
@@ -590,6 +632,11 @@ inserts known blockchain network records into the `chain_networks` table using
 | Network | Chain ID | Block Time | RPC URLs |
 |---------|----------|------------|----------|
 | Ethereum Mainnet | 1 | 12,000 ms | `cloudflare-eth.com`, `eth.llamarpc.com`, `rpc.ankr.com/eth` |
+| Polygon | 137 | 2,000 ms | `polygon-rpc.com`, `rpc.ankr.com/polygon` |
+| Arbitrum One | 42161 | 250 ms | `arb1.arbitrum.io/rpc`, `rpc.ankr.com/arbitrum` |
+| Optimism | 10 | 2,000 ms | `mainnet.optimism.io`, `rpc.ankr.com/optimism` |
+| Base | 8453 | 2,000 ms | `mainnet.base.org`, `rpc.ankr.com/base` |
+| Ethereum Sepolia | 11155111 | 12,000 ms | `rpc.sepolia.org`, `rpc.ankr.com/eth_sepolia` |
 
 The `rpcUrl` column stores comma-separated URLs. The RPC client rotates across
 them hourly with automatic failover.

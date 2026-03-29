@@ -14,10 +14,11 @@ After completing first-user registration, Sentinel generated an **invite secret*
 
 To invite a team member:
 
-1. Navigate to **Settings** in the sidebar.
-2. Locate the **Invite Secret** section. If your invite secret is not visible, click to reveal it. Only admins can view the invite secret.
-3. Copy the invite secret and share it with the person you want to invite (for example, via a password manager or secure message).
-4. Tell them to go to the registration page at `/register`, enter their username, email, password, and the invite secret, then click **Register**.
+1. Share the invite secret with the person you want to invite (for example, via a password manager or secure message). If you need to retrieve the secret, navigate to **Settings** in the sidebar -- only admins can view it.
+2. Tell them to go to the registration page at `/register`.
+3. On the registration page, they should click the **join-org** mode toggle at the top of the form.
+4. They enter their **username**, **email**, **password**, and paste the **invite secret** into the invite secret field.
+5. Click **Register**.
 
 Once they register, their account is immediately part of your organization with the **viewer** role. You can then change their role as described in the next section.
 
@@ -73,49 +74,58 @@ To change a team member's role:
 
 You cannot change your own role. Sentinel also prevents you from demoting the last admin -- at least one admin must exist in the organization at all times.
 
-When you change a member's role, all of their active sessions are immediately invalidated. They will need to log in again, and the new role takes effect on their next login.
+When you change a member's role, all of their active sessions are immediately invalidated. They need to log in again, and the new role takes effect on their next login.
 
 ## Setting Up Your First Notification Channel
 
 A notification channel is the destination where Sentinel sends alerts -- a Slack channel, a set of email addresses, or a custom webhook endpoint. Detections that are not linked to any channel still create alert records in the database, but no external notification is sent. Set up at least one channel before you activate your first detection.
 
-Sentinel supports three channel types:
-
-### Adding an Email Channel
-
-1. Navigate to **Settings** > **Channels**.
-2. Click **New Channel**.
-3. Select **Email** as the channel type.
-4. Enter one or more recipient email addresses.
-5. Give the channel a descriptive name (for example, `Security Team Email`).
-6. Click **Save**.
-
-For email to work, you must configure `SMTP_URL` and `SMTP_FROM` in your `.env` file. See [Installation](installation.md) for details.
+Sentinel supports email and webhook channel types through the channels management page. Slack channels require a separate OAuth installation.
 
 ### Adding a Webhook Channel
 
-If you want to send alerts to a custom endpoint (for example, a SIEM, PagerDuty, or Opsgenie):
+1. Navigate to `/channels` in your browser (or access the channels page from **Settings**).
+2. Click **+ New Channel**.
+3. Make sure the **[webhook]** type is selected (this is the default).
+4. Enter a descriptive **name** for the channel (for example, `PagerDuty Integration`).
+5. Enter the destination **URL** (for example, `https://hooks.example.com/sentinel`).
+6. Click **Create**.
 
-1. Navigate to **Settings** > **Channels**.
-2. Click **New Channel**.
-3. Select **Webhook** as the channel type.
-4. Enter the destination **URL**.
-5. Optionally, enter a **signing secret**. When set, Sentinel includes an HMAC-SHA256 signature in the `X-Signature-256` header of each request so your endpoint can verify authenticity.
-6. Optionally, add custom **headers** if your endpoint requires them. Note that certain headers (`Host`, `Authorization`, `Cookie`, `Content-Type`, `Content-Length`, `Transfer-Encoding`, `Connection`, `X-Signature`) are blocked for security reasons.
-7. Click **Save**.
+Sentinel creates the channel and displays it in the channel list. If a webhook signing secret is generated, it is shown once -- copy it immediately.
+
+You can send a test notification to verify the channel is working by clicking **[test]** next to the channel in the list.
+
+### Adding an Email Channel
+
+1. Navigate to `/channels`.
+2. Click **+ New Channel**.
+3. Click the **email** type toggle to switch from webhook to email.
+4. Enter a descriptive **name** (for example, `Security Team Email`).
+5. Enter one or more **recipient email addresses**, separated by commas.
+6. Click **Create**.
+
+For email to work, you must configure `SMTP_URL` and `SMTP_FROM` in your `.env` file. See [Installation](installation.md) for details.
 
 ### Adding a Slack Channel
 
 To send alerts directly to a Slack channel using the Slack API (not a webhook URL):
 
-1. Complete the Slack OAuth installation flow. Navigate to **Settings** > **Slack** and click **Install Slack App**. Authorize the Sentinel bot in your Slack workspace.
-2. Navigate to **Settings** > **Channels**.
-3. Click **New Channel**.
-4. Select **Slack** as the channel type.
+1. Complete the Slack OAuth installation flow. Navigate to **Settings** and click **Install Slack App**. Authorize the Sentinel bot in your Slack workspace.
+2. Navigate to `/channels`.
+3. Click **+ New Channel**.
+4. Sentinel offers Slack as a channel type after the OAuth installation is complete.
 5. Enter the Slack **channel ID** (the alphanumeric identifier, for example `C01ABCDEF`).
-6. Click **Save**.
+6. Click **Create**.
 
 For full details on the Slack integration, see [Slack Integration](../integrations/slack.md).
+
+### Managing Channels
+
+Each channel in the list shows its type, status (enabled or disabled), and configuration details (webhook URL or email recipients). You can:
+
+- **[test]** -- Send a test notification to verify the channel is reachable.
+- **[disable]** / **[enable]** -- Temporarily disable a channel without deleting it. Disabled channels are skipped during notification dispatch.
+- **[delete]** -- Permanently remove the channel. Sentinel asks for confirmation before deleting.
 
 ## Adding Your First Integration
 
@@ -131,7 +141,7 @@ You do not need to configure all integrations at once. Start with the module tha
 
 ## Organization Settings Reference
 
-The **Settings** page exposes the following organization-level controls:
+The **Settings** page (accessible from the sidebar) exposes the following organization-level controls:
 
 ### Invite Secret Management
 
@@ -146,13 +156,14 @@ Sentinel supports API keys for programmatic access (for example, querying alerts
 
 To create an API key:
 
-1. Navigate to **Settings** > **API Keys**.
-2. Click **New API Key**.
-3. Give the key a descriptive name.
-4. Select the scopes the key should have.
-5. Optionally, set an expiration period in days.
-6. Click **Create**.
-7. Copy the generated key immediately -- it is shown only once and cannot be retrieved later.
+1. Navigate to **Settings**.
+2. Find the **API Keys** section.
+3. Click **New API Key**.
+4. Give the key a descriptive name.
+5. Select the scopes the key should have.
+6. Optionally, set an expiration period in days.
+7. Click **Create**.
+8. Copy the generated key immediately -- it is shown only once and cannot be retrieved later.
 
 To revoke an API key, find it in the key list and click **Revoke**. Revoked keys are immediately invalid.
 

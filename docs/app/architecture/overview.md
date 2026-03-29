@@ -88,6 +88,14 @@ Sentinel is a single-tenant platform per deployment. All tables carry an `org_id
 
 The worker service is configured with two replicas in the Docker Compose production file (`deploy.replicas: 2`). Additional replicas can be added without code changes because BullMQ handles distributed job claiming via atomic Redis operations. Queue concurrency per worker replica: EVENTS and ALERTS at 15, MODULE_JOBS at 10, and DEFERRED at 5.
 
-The API server is stateless (session state lives in PostgreSQL) and can be scaled horizontally behind a load balancer. The rate-limit middleware uses Redis counters keyed by `orgId` so that limits are shared correctly across API server instances.
+The API server is stateless (session state lives in PostgreSQL) and can be scaled horizontally behind a load balancer. The rate-limit middleware uses Redis counters keyed by `userId` (or API key prefix, or client IP for unauthenticated requests) so that limits are shared correctly across API server instances.
 
 PostgreSQL is the primary scaling constraint. For very high event volumes, the `events` and `audit_log` tables are the most write-intensive and are candidates for partitioning by `created_at`.
+
+## Observability
+
+Both the API server and worker emit structured JSON logs via Pino. Each API request receives a unique `requestId` (UUID v4) that is attached to the response as `X-Request-Id` and included in every log line for request-level tracing.
+
+The API server exposes a `/metrics` endpoint in Prometheus text format. The worker reports queue depth gauges every 15 seconds. Both services integrate with Sentry for exception tracking and can be configured via `SENTRY_DSN` and `SENTRY_ENVIRONMENT` environment variables.
+
+Worker health is tracked via a heartbeat file (`/tmp/.worker-heartbeat`) that is touched every 15 seconds. The Docker healthcheck verifies the file's `mtime` is less than 60 seconds old.

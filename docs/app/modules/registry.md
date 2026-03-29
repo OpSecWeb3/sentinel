@@ -318,17 +318,50 @@ Detects behavioral anomalies in artifact publishing: unauthorized pushers, sourc
 
 Routes are mounted under `/modules/registry/`.
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/webhooks/dockerhub` | Receives Docker Hub push webhooks. |
-| `POST` | `/webhooks/npm` | Receives npm publish hooks. |
-| `GET` | `/artifacts` | Lists monitored artifacts for the authenticated organization. |
-| `POST` | `/artifacts` | Registers a new artifact (Docker image or npm package) for monitoring. |
-| `DELETE` | `/artifacts/:id` | Removes a monitored artifact. |
-| `POST` | `/artifacts/:id/poll` | Triggers an immediate poll for the specified artifact. |
-| `POST` | `/ci/notify` | Receives CI pipeline notifications for attribution correlation. |
-| `GET` | `/templates` | Lists detection templates provided by this module. |
-| `GET` | `/event-types` | Lists event types this module can produce. |
+### Webhook endpoints (unauthenticated, signature-verified)
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/webhooks/docker` | HMAC signature | Receives Docker Hub push webhooks. Verifies HMAC-SHA256 signature against the organization's webhook secret. Rate-limited to 100 requests per minute per source IP. |
+| `POST` | `/webhooks/npm` | HMAC signature | Receives npm publish hooks. Verifies HMAC-SHA256 signature. Rate-limited to 100 requests per minute per source IP. |
+| `POST` | `/ci/notify` | Notify key (Bearer) | Receives CI pipeline notifications for attribution correlation. Authenticated via the organization's notify key, not session cookies. |
+
+### Docker image management
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/images` | Session | Lists monitored Docker images for the authenticated organization with pagination. |
+| `POST` | `/images` | Session + Admin/Editor | Registers a new Docker image for monitoring. Accepts image name, registry, tag patterns, poll interval, and optional credentials. |
+| `GET` | `/images/:id` | Session | Returns detailed information about a monitored Docker image, including version history and recent events. |
+| `PUT` | `/images/:id` | Session + Admin/Editor | Updates Docker image monitoring configuration (tag patterns, poll interval, credentials). |
+| `POST` | `/images/:id/poll` | Session + Admin/Editor | Triggers an immediate poll of the specified Docker image. |
+| `DELETE` | `/images/:id` | Session + Admin | Removes a monitored Docker image. |
+| `POST` | `/images/:id/credentials` | Session + Admin | Stores encrypted registry credentials for a private Docker image. |
+| `DELETE` | `/images/:id/credentials` | Session + Admin | Removes stored registry credentials for a Docker image. |
+
+### npm package management
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/packages` | Session | Lists monitored npm packages for the authenticated organization with pagination. |
+| `POST` | `/packages` | Session + Admin/Editor | Registers a new npm package for monitoring. Accepts package name, tag patterns, poll interval, and optional credentials. |
+| `GET` | `/packages/:id` | Session | Returns detailed information about a monitored npm package, including version history and recent events. |
+| `PUT` | `/packages/:id` | Session + Admin/Editor | Updates npm package monitoring configuration. |
+| `POST` | `/packages/:id/poll` | Session + Admin/Editor | Triggers an immediate poll of the specified npm package. |
+| `DELETE` | `/packages/:id` | Session + Admin | Removes a monitored npm package. |
+| `POST` | `/packages/:id/credentials` | Session + Admin | Stores encrypted registry credentials for a private npm package. |
+| `DELETE` | `/packages/:id/credentials` | Session + Admin | Removes stored registry credentials for an npm package. |
+| `POST` | `/npm-orgs/import` | Session + Admin | Imports all packages from an npm scope or organization for bulk monitoring. |
+
+### Module metadata and configuration
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/event-types` | Session | Lists event types this module can produce. |
+| `GET` | `/overview` | Session | Returns aggregated statistics: artifact counts, recent events, verification status, and alert counts. |
+| `GET` | `/templates` | Session | Lists detection templates provided by this module. |
+| `GET` | `/webhook-config` | Session | Returns the organization's webhook configuration URL and secret status for setting up registry webhooks. |
+| `POST` | `/webhook-config/rotate` | Session + Admin | Rotates the organization's webhook signing secret. |
 
 ---
 
@@ -352,3 +385,48 @@ Routes are mounted under `/modules/registry/`.
 | `registry.verification.provenance_invalid` | A release artifact has a SLSA provenance attestation that failed verification. |
 | `registry.attribution.unattributed_change` | A release artifact changed without any CI attribution metadata. |
 | `registry.attribution.attribution_mismatch` | A release artifact has CI attribution that does not match the expected policy. |
+
+---
+
+## Templates
+
+The Registry module provides 26 pre-built detection templates:
+
+| Template slug | Name | Category | Default severity |
+|---|---|---|---|
+| `registry-docker-monitor` | Docker Image Monitor | change-detection | medium |
+| `registry-require-ci-attribution` | Require CI Attribution | supply-chain | high |
+| `registry-enforce-signatures` | Enforce Cosign Signatures | supply-chain | high |
+| `registry-enforce-provenance` | Enforce SLSA Provenance | supply-chain | high |
+| `registry-npm-monitor` | npm Package Monitor | change-detection | medium |
+| `registry-full-security` | Full Registry Security Suite | comprehensive | high |
+| `rc-detect-manual-push` | Detect Manual Push | supply-chain | high |
+| `rc-pin-digest` | Pin Digest | immutability | critical |
+| `rc-suspicious-activity` | Suspicious Activity Detector | anomaly | high |
+| `rc-detect-source-mismatch` | Source Detection Mismatch | anomaly | medium |
+| `rc-log-releases` | Log Docker Releases | change-detection | low |
+| `rc-npm-log-releases` | Log npm Releases | change-detection | low |
+| `rc-npm-tag-audit` | npm Tag Audit | change-detection | medium |
+| `rc-npm-unpublish-alert` | npm Unpublish Alert | change-detection | high |
+| `rc-npm-rapid-publish` | npm Rapid Publish Detection | anomaly | high |
+| `rc-npm-off-hours` | npm Off-Hours Publish | anomaly | medium |
+| `rc-npm-tag-pin-digest` | npm Tag Pin Digest | immutability | critical |
+| `rc-npm-tag-removed` | npm Tag Removed Alert | change-detection | high |
+| `rc-npm-maintainer-change` | npm Maintainer Change | access-control | high |
+| `rc-npm-require-provenance` | npm Require Provenance | supply-chain | high |
+| `rc-npm-tag-require-ci` | npm Tag Require CI | supply-chain | high |
+| `rc-npm-tag-install-scripts` | npm Install Script Detection | supply-chain | critical |
+| `rc-npm-tag-require-provenance` | npm Tag Require Provenance | supply-chain | high |
+| `rc-npm-tag-major-jump` | npm Major Version Jump | anomaly | high |
+| `rc-npm-tag-rapid-change` | npm Rapid Tag Change | anomaly | high |
+| `rc-npm-tag-off-hours` | npm Tag Off-Hours Change | anomaly | medium |
+
+---
+
+## Retention policies
+
+The Registry module declares one custom retention policy:
+
+| Table | Timestamp column | Retention | Notes |
+|---|---|---|---|
+| `rc_ci_notifications` | `created_at` | 90 days | CI build notification records. Low volume but unbounded without a policy. |

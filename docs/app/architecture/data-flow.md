@@ -150,6 +150,27 @@ BullMQ applies the following retry policy to all queues unless overridden:
 
 **Alert dispatch failures** — if the Slack webhook returns a non-2xx status or the SMTP connection times out, the dispatch job retries. If delivery fails after all retries, the alert remains in the `alerts` table with a null `dispatched_at`, allowing a future manual re-dispatch or audit.
 
+### Dead-letter queue
+
+After exhausting all retry attempts, a failed job is moved to the `sentinel-dead-letter` BullMQ queue with metadata including the original queue name, job name, payload, error message, and failure timestamp. Dead-letter entries are retained indefinitely (`removeOnComplete: false`, `removeOnFail: false`) for manual inspection and replay.
+
+If the dead-letter enqueue itself fails (for example, Redis is unreachable), the worker falls back to appending the job payload as a newline-delimited JSON entry to `/tmp/sentinel-dead-letter.ndjson`. This file is capped at 10 MB; payloads that would exceed the cap are dropped with an error log.
+
+## Scheduled maintenance jobs
+
+The worker registers the following repeatable jobs on startup using `upsertJobScheduler` (atomic create-or-update to avoid races during rolling deploys):
+
+| Job name | Queue | Interval | Purpose |
+|---|---|---|---|
+| `platform.data.retention` | `deferred` | 24 hours | Deletes events, alerts, and audit log entries older than the configured retention period. |
+| `platform.session.cleanup` | `deferred` | 1 hour | Deletes expired session rows from PostgreSQL. |
+| `platform.key.rotation` | `deferred` | 5 minutes | Re-encrypts data still encrypted with `ENCRYPTION_KEY_PREV`. |
+| `correlation.expiry` | `deferred` | 5 minutes | Sweeps expired correlation instances from Redis. |
+| `chain.rpc-usage.flush` | `module-jobs` | 5 minutes | Flushes in-memory RPC usage counters to the database. |
+| `registry.poll-sweep` | `module-jobs` | 60 seconds | Polls package registries for new artifact versions. |
+| `aws.poll-sweep` | `module-jobs` | 60 seconds | Polls AWS SQS queues for CloudTrail events. |
+| `infra.schedule.load` | `module-jobs` | 60 seconds | Loads infrastructure scan/probe schedules. |
+
 ## Correlation evaluation path vs single-event path
 
 The two evaluation paths share the same normalized event as input but are otherwise independent:

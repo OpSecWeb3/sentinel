@@ -126,11 +126,11 @@ Sentinel ships with five built-in modules:
 
 | Module ID | Name | Primary data source | Evaluator count | Template count |
 |---|---|---|---|---|
-| `github` | GitHub | GitHub App webhooks | 7 | Varies |
-| `chain` | Chain | EVM-compatible blockchain RPC | 8 | 16 |
-| `registry` | Registry | Docker Hub and npm package registries | 5 | Varies |
-| `infra` | Infrastructure | Host scanning, TLS probing, DNS | 10 | Varies |
-| `aws` | AWS | CloudTrail events via SQS | 4 | Varies |
+| `github` | GitHub | GitHub App webhooks | 7 | 8 |
+| `chain` | Chain | EVM-compatible blockchain RPC | 8 | 21 |
+| `registry` | Registry | Docker Hub and npm package registries | 5 | 26 |
+| `infra` | Infrastructure | Host scanning, TLS probing, DNS | 10 | 7 |
+| `aws` | AWS | CloudTrail events via SQS | 4 | 17 |
 
 For detailed documentation on each module, see:
 

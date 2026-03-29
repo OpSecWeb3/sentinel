@@ -10,7 +10,7 @@ Beyond single-event alerting, Sentinel includes a correlation engine that detect
 
 ## Who This Documentation Is For
 
-This documentation track is for security analysts and administrators who use Sentinel through the web UI or API. It explains what Sentinel does and how to configure it. It does not describe the internal architecture, APIs, or deployment configuration in depth. For API reference and infrastructure documentation, see `docs/app/`.
+This documentation is for security analysts and administrators who use Sentinel through the web UI or API. It explains what Sentinel does and how to configure it. It does not describe the internal architecture, APIs, or deployment configuration in depth. For API reference and infrastructure documentation, see `docs/app/`.
 
 ## "I want to..." Quick Navigation
 

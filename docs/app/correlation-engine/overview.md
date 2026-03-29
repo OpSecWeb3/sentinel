@@ -53,6 +53,8 @@ The cache is module-level (not instance-level) so all `CorrelationEngine` instan
 
 Rules are loaded from the `correlation_rules` table, filtered by `orgId` and `status = 'active'`, and ordered by name.
 
+To handle cross-process cache invalidation (e.g., when an API process updates a rule while worker processes hold cached copies), the engine uses a Redis version counter at `sentinel:corr:version:{orgId}`. The API increments this counter on every correlation rule CRUD operation. Before using cached rules, the worker checks the counter; if it differs from the cached version, the cache is refreshed immediately rather than waiting for the 30-second TTL to expire.
+
 ## Correlation rule types
 
 The engine supports three correlation modes, selected by `config.type`:

@@ -4,7 +4,10 @@ Sentinel enforces rate limits on all `/api/*` routes and authentication endpoint
 
 ## Implementation
 
-Rate limiting uses a Redis-backed sliding counter implemented with a Lua script. The Lua script atomically increments the request counter and sets the key expiry in a single operation, which prevents a race condition where a crash between `INCR` and `EXPIRE` could leave a counter key without a TTL.
+Rate limiting uses Redis-backed counters implemented with Lua scripts. Two counter strategies are used:
+
+- **Fixed-window** (read and write buckets): A Lua script atomically increments the request counter via `INCR` and sets the key expiry via `EXPIRE` in a single round-trip. This prevents a race condition where a crash between `INCR` and `EXPIRE` could leave a counter key without a TTL.
+- **Sliding-window** (auth bucket): A sorted-set (`ZSET`) Lua script timestamps each request, removes entries older than the window, adds the current request, and returns the count. This prevents the 2x burst that can occur at fixed-window boundaries.
 
 The counter key is prefixed `sentinel:rl:<bucket>:<identity>`.
 
@@ -12,9 +15,9 @@ The counter key is prefixed `sentinel:rl:<bucket>:<identity>`.
 
 The identity used for rate limiting follows this priority order:
 
-1. **Organisation ID** (`org:<orgId>`) — used when the request is authenticated and has an org context. This applies to both session-authenticated and API key-authenticated requests.
-2. **API key prefix** (`key:<prefix>`) — used for API key requests when no org context is available (uncommon).
-3. **Client IP address** (`ip:<address>`) — fallback for unauthenticated requests (for example, `POST /auth/login`).
+1. **User ID** (`user:<userId>`) -- used when the request is authenticated (session or API key).
+2. **API key prefix** (`key:<prefix>`) -- used for API key requests where the key prefix starts with `sk_` but the user context was not resolved (uncommon).
+3. **Client IP address** (`ip:<address>`) -- fallback for unauthenticated requests (for example, `POST /auth/login`).
 
 IP address derivation applies `TRUSTED_PROXY_COUNT` rules to avoid header-injection spoofing when the API is behind a reverse proxy. Set `TRUSTED_PROXY_COUNT` in the environment to the number of trusted proxy hops in your deployment.
 

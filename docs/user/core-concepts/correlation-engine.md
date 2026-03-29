@@ -42,7 +42,7 @@ Sentinel emits a single **correlated alert** only when all three steps complete 
 
 ## Correlation Rule Types
 
-Sentinel supports three types of correlation rules:
+Sentinel supports three types of correlation rules. You select the type when creating a new rule from the **correlations** page.
 
 ### Sequence
 
@@ -58,7 +58,17 @@ A sequence alert fires when all steps are matched in order within the overall ti
 
 **Use for:** Ordered attack chains where each step follows from the previous one.
 
-**Example:** "GitHub branch protection disabled, then a force push to the same repository within 30 minutes."
+**Real-world example -- Branch protection bypass:**
+
+A developer disables branch protection on a repository, force-pushes to the main branch, then re-enables branch protection -- all within 30 minutes. Individually, each action has legitimate uses. Together, they indicate someone bypassed code review protections.
+
+```
+Step 1: GitHub event — branch protection rule deleted
+Step 2: GitHub event — push to protected branch (within 15 minutes of Step 1)
+Step 3: GitHub event — branch protection rule created (within 30 minutes of Step 1)
+Correlation key: repository.full_name
+Window: 30 minutes
+```
 
 ### Aggregation
 
@@ -73,7 +83,17 @@ Aggregation counters are managed atomically in Redis using Lua scripts to preven
 
 **Use for:** Brute-force detection, rate-based anomaly detection, or any scenario where the volume of an event type is itself suspicious.
 
-**Example:** "Alert if more than 10 distinct source IPs attempt to authenticate against the same AWS IAM user within 15 minutes."
+**Real-world example -- AWS credential stuffing:**
+
+An attacker tries to log into multiple AWS accounts from different IP addresses in rapid succession. No single failed login is suspicious, but 20 failures across 8 distinct source IPs in 10 minutes signals a credential stuffing attack.
+
+```
+Event filter: AWS module, event type "ConsoleLogin", condition "errorMessage exists"
+Threshold: 20 events
+Count field (distinct): sourceIPAddress
+Group by: targetUser
+Window: 10 minutes
+```
 
 ### Absence
 
@@ -88,7 +108,16 @@ Trigger-to-expected linking uses **match conditions** that compare fields on the
 
 **Use for:** Detecting when a required follow-up action (such as a post-deployment security scan, a two-party approval, or an audit log confirmation) fails to occur.
 
-**Example:** "A deployment event occurred, but no corresponding security scan result was received within 30 minutes."
+**Real-world example -- Missing post-deployment scan:**
+
+Your organization requires a security scan after every production deployment. If a deployment occurs but no scan result is recorded within 30 minutes, someone either skipped the scan or the scanner is down. Either way, you want to know.
+
+```
+Trigger: GitHub module, event type "deployment.created", condition "environment = production"
+Expected: Infra module, event type "security_scan.completed"
+Match condition: expected.deploymentId = trigger.payload.deployment.id
+Grace period: 30 minutes
+```
 
 ---
 
@@ -144,9 +173,13 @@ This means you can express security rules that reflect how real attackers operat
 
 ---
 
-## Defining a Correlation Rule
+## Managing Correlation Rules
 
-To create a correlation rule, navigate to **correlations** in the sidebar and click **New Correlation Rule**. The form asks for:
+Navigate to **correlations** in the sidebar to view all correlation rules for your organization. The list shows each rule's name, type (sequence, aggregation, or absence), status, severity, time window, and last alert timestamp.
+
+### Creating a Correlation Rule
+
+Click **+ New Rule** to create a correlation rule. The form asks for:
 
 - **Name and description** -- A human-readable identifier for the rule.
 - **Severity** -- The severity of the alert that fires when the pattern is matched: `critical`, `high`, `medium`, or `low`.
@@ -158,6 +191,16 @@ To create a correlation rule, navigate to **correlations** in the sidebar and cl
 - **Absence settings** (for absence rules) -- The trigger event filter, the expected event filter, match conditions linking trigger to expected event fields, and the grace period in minutes.
 - **Notification channels** -- Where to send the correlated alert.
 - **Cooldown** -- The minimum time in minutes between repeated fires of this rule.
+
+### Managing Existing Rules
+
+For each correlation rule in the list, you can:
+
+- **[pause]** / **[resume]** -- Toggle the rule between active and paused states.
+- **[edit]** -- Navigate to the edit page to modify the rule's configuration.
+- **[delete]** -- Permanently delete the rule. Sentinel asks for confirmation. Deleted rules cannot be recovered.
+
+You can filter the list by **status** (active, paused), **type** (sequence, aggregation, absence), and **severity** (critical, high, medium, low). A search bar lets you find rules by name.
 
 ---
 

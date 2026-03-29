@@ -409,12 +409,15 @@ The `statePollHandler` (`chain.state.poll`) runs on a configurable interval per 
 
 | Event type | Description |
 |---|---|
-| `chain.log` | Raw EVM log entry from a block. |
-| `chain.event.matched` | Decoded event log that matched an active rule's topic0 and contract filter. |
-| `chain.transaction` | Transaction data with decoded function call arguments. |
-| `chain.balance_snapshot` | Balance reading for a monitored address. |
-| `chain.state_snapshot` | Storage slot value reading for a monitored contract. |
-| `chain.view_call_result` | Return value from a view function call. |
+| `chain.event.matched` | A decoded event log matched an active rule's topic0 and contract filter. |
+| `chain.event.large_transfer` | A token transfer exceeded a configured value threshold. |
+| `chain.event.contract_created` | A new smart contract was deployed on a monitored network. |
+| `chain.state.balance_change` | A monitored address balance changed beyond the configured threshold. |
+| `chain.state.storage_change` | A monitored contract storage slot value changed. |
+| `chain.state.view_call_change` | A monitored view function return value changed. |
+| `chain.event.fund_drainage` | A significant portion of funds was withdrawn from a monitored address. |
+| `chain.event.ownership_change` | Contract ownership was transferred (OwnershipTransferred event). |
+| `chain.block.reorg` | A blockchain reorganization was detected on a monitored network. |
 
 ---
 
@@ -468,16 +471,29 @@ Each template defines user-configurable inputs (network, contract address, thres
 
 Routes are mounted under `/modules/chain/`.
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/networks` | Lists configured networks and their RPC connection status. |
-| `POST` | `/networks` | Adds a new network configuration with RPC URL and optional Etherscan key. |
-| `DELETE` | `/networks/:id` | Removes a network. |
-| `GET` | `/contracts` | Lists monitored contract addresses and their associated ABIs. |
-| `POST` | `/contracts` | Registers a new contract address for monitoring. Triggers ABI lookup if Etherscan is configured. |
-| `DELETE` | `/contracts/:id` | Removes a monitored contract. |
-| `GET` | `/templates` | Lists detection templates provided by this module. |
-| `GET` | `/event-types` | Lists event types this module can produce. |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/overview` | Session | Returns aggregated statistics for the chain dashboard: contract count, detection count, recent alerts, network status, and recent events. |
+| `GET` | `/templates` | Session | Lists detection templates provided by this module. Supports `?search=` query parameter. |
+| `GET` | `/networks` | Session | Lists configured networks with block cursor position, polling status, and RPC health. |
+| `POST` | `/networks` | Session + Admin | Adds a new network configuration with chain ID, RPC URL, block time, and optional explorer URL. |
+| `GET` | `/contracts` | Session | Lists monitored contracts for the authenticated organization. Supports pagination (`?page=`, `?limit=`) and search (`?search=`). |
+| `POST` | `/contracts` | Session | Registers a new contract address for monitoring. Triggers ABI lookup if Etherscan is configured. |
+| `GET` | `/contracts/:id` | Session | Returns detailed information about a specific monitored contract, including ABI events, functions, and active rules. |
+| `GET` | `/contracts/:id/detail` | Session | Returns extended contract detail including ABI-extracted event and function definitions with signatures. |
+| `POST` | `/contracts/:id/verify` | Session | Triggers source code and ABI verification for a contract via Etherscan. |
+| `POST` | `/contracts/:id/fetch-abi` | Session | Fetches the contract ABI from a block explorer API and updates the stored ABI. |
+| `PATCH` | `/contracts/:id` | Session | Updates contract metadata (label, tags, notes). |
+| `GET` | `/rpc-configs` | Session | Lists organization-specific RPC URL overrides. |
+| `POST` | `/rpc-configs` | Session + Admin | Creates or updates an organization-specific RPC URL override for a network. |
+| `GET` | `/rpc-usage` | Session | Returns RPC call usage statistics by network and hour bucket. |
+| `GET` | `/state-changes` | Session | Lists state change history (storage slot values, balance snapshots) for monitored contracts. |
+| `GET` | `/events` | Session | Lists blockchain events for the authenticated organization with filtering by network, contract, and event type. |
+| `POST` | `/detections` | Session | Creates a new chain detection from a template or custom configuration. |
+| `GET` | `/detections` | Session | Lists chain detections for the authenticated organization. |
+| `GET` | `/detections/:id` | Session | Returns details of a specific chain detection including its rules. |
+| `PATCH` | `/detections/:id` | Session | Updates a chain detection's configuration or status. |
+| `DELETE` | `/detections/:id` | Session + Admin | Deletes a chain detection and its associated rules. |
 
 ---
 

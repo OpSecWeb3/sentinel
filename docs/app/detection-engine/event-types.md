@@ -160,7 +160,12 @@ When the correlation engine evaluates an event, it checks each step's filter:
 
 | Type | Label | Description |
 |---|---|---|
-| `chain.event.matched` | On-chain event matched | Pre-matched on-chain log event produced by the block processor |
+| `chain.event.matched` | On-chain event matched | Pre-matched on-chain log event produced by the block processor. Handled by `chain.event_match` evaluator (verifies event name matches expected signature). |
+| `chain.log` | Raw on-chain log | Unfiltered log event matched by topic0. Handled by `chain.event_match`, `chain.windowed_count`, `chain.windowed_spike`, and `chain.windowed_sum` evaluators. |
+| `chain.transaction` | On-chain transaction | Transaction event. Handled by `chain.function_call_match` evaluator. |
+| `chain.balance_snapshot` | Balance snapshot | Periodic balance reading. Handled by `chain.balance_track` evaluator. |
+| `chain.state_snapshot` | State snapshot | Storage slot reading. Handled by `chain.state_poll` evaluator. |
+| `chain.view_call_result` | View call result | Contract view function return values. Handled by `chain.view_call` evaluator. |
 | `chain.event.large_transfer` | Large transfer detected | High-value token or native currency transfer |
 | `chain.event.contract_created` | Contract created | New smart contract deployment |
 | `chain.state.balance_change` | Balance changed | Account balance crossed a monitored threshold |

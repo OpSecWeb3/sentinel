@@ -1,262 +1,332 @@
-# Package registry integration
+# Package Registry Integration
 
-This guide explains how to use Sentinel to monitor Docker image registries and npm package registries for supply chain security events. Sentinel detects unauthorized changes, missing cryptographic signatures, absent provenance attestations, suspicious publish patterns, and npm-specific risk signals.
+This guide explains how to connect Sentinel to Docker Hub and npm registries
+so that Sentinel can monitor container images and npm packages for supply
+chain threats.
 
-## What Sentinel monitors
+## Architecture overview
 
-Sentinel's registry module monitors the following event types:
+Sentinel monitors package registries through two complementary mechanisms:
 
-| Event type | Description |
-|---|---|
-| `registry.docker.digest_change` | A Docker image tag changed to a different content digest |
-| `registry.docker.new_tag` | A new Docker image tag appeared |
-| `registry.docker.tag_removed` | An existing Docker image tag was deleted |
-| `registry.npm.version_published` | A new npm package version was published |
-| `registry.npm.version_deprecated` | An npm package version was deprecated |
-| `registry.npm.version_unpublished` | An npm package version was unpublished |
-| `registry.npm.maintainer_changed` | The maintainer list for an npm package changed |
-| `registry.npm.dist_tag_updated` | An npm dist-tag was added or moved |
-| `registry.verification.signature_missing` | A Docker image lacks a cosign signature |
-| `registry.verification.provenance_missing` | An artifact lacks a SLSA provenance attestation |
-| `registry.verification.signature_invalid` | A Docker image has an invalid or unverifiable signature |
-| `registry.verification.provenance_invalid` | An artifact has an invalid provenance attestation |
-| `registry.attribution.unattributed_change` | A push occurred without matching CI attribution |
-| `registry.attribution.attribution_mismatch` | CI attribution data does not match the artifact |
+1. **Webhooks** -- Docker Hub and npm send real-time notifications when images
+   or packages change.
+2. **Polling** -- Sentinel periodically queries the registry API to detect
+   changes that webhooks may miss (for example, tag mutations, digest changes,
+   or metadata updates).
 
-## Supported registries
-
-| Registry | Artifact type | Ingestion method |
-|---|---|---|
-| Docker Hub | Docker images | Webhook + polling |
-| GitHub Container Registry (ghcr.io) | Docker images | Webhook + polling |
-| npm Registry (registry.npmjs.org) | npm packages | Webhook + polling |
-
-Sentinel uses polling as a fallback when webhooks are unavailable or fail to deliver. The polling interval is configurable per artifact.
+Both mechanisms feed into the same detection pipeline, and Sentinel
+cross-references webhook and polling data to detect anomalies such as direct
+registry pushes that bypass CI/CD.
 
 ## Prerequisites
 
-- The **admin** role in your Sentinel organization (required to add artifacts).
-- A webhook secret configured for your organization (for webhook-based ingestion). See [Organization Settings](../administration/organization-settings.md).
-- A notify key configured for CI attribution (if you want CI pipeline attribution). See [CI/CD integration](#cicd-integration-notify-endpoint).
+- A Sentinel account with the **Admin** role in your organization.
+- For Docker Hub webhooks: admin access to the Docker Hub repository to
+  configure webhook delivery.
+- For npm webhooks: an npm account with access to configure hooks on the
+  packages you want to monitor.
+- A webhook secret configured for your Sentinel organization (set under
+  **Settings > Webhook Secret**).
 
-## Adding Docker images to monitor
+## Adding Docker images for monitoring
 
-1. In Sentinel, navigate to **Registry** and select **Images**.
+### Step 1: Register the image
+
+1. Navigate to **Registry > Images**.
 2. Click **Add Image**.
-3. Enter the following:
-   - **Image name**: The full image name, for example `library/nginx` or `myorg/myapp`.
-   - **Tag patterns**: Glob patterns for tags to watch. Default is `*` (all tags). Set specific patterns like `v*` to watch only version tags.
-   - **Ignore patterns**: Glob patterns for tags to exclude from monitoring.
-   - **Poll interval (seconds)**: How often Sentinel polls the registry. Minimum: 60 seconds. Default: 300 seconds (5 minutes).
-   - **GitHub repo** (optional): The GitHub repository associated with this image, in `owner/repo` format. Used for CI attribution matching.
-4. Click **Save**.
+3. Fill in:
+   - **Name** -- the Docker image name, including the namespace (for example,
+     `library/nginx`, `myorg/api-server`).
+   - **Tag patterns** -- glob patterns that control which tags to monitor. The
+     default `*` monitors all tags. Use specific patterns (for example,
+     `v*`, `latest`) to reduce noise.
+   - **Ignore patterns** -- glob patterns for tags to skip (for example,
+     `*-dev`, `*-rc*`).
+   - **Poll interval** -- how often Sentinel checks the registry (minimum: 60
+     seconds, default: 300 seconds).
+   - **GitHub repo** (optional) -- the source repository in `owner/repo`
+     format. Used for CI attribution checks.
+4. Click **Add**.
 
-Sentinel performs a pre-flight check when the tag pattern is `*` (all tags). If the image has an excessive number of tags, Sentinel rejects the request and asks you to specify a more targeted tag pattern to avoid overwhelming the polling system.
+Sentinel immediately triggers an initial poll to discover existing tags and
+their digests.
 
-### Setting credentials for private Docker images
+> **Pre-flight check:** If you leave tag patterns as `*`, Sentinel performs a
+> pre-flight check to count the total number of tags. If the image has an
+> unusually large number of tags, Sentinel warns you and suggests using
+> specific patterns to avoid excessive polling.
 
-For private Docker Hub repositories that require authentication:
+### Step 2: Configure the Docker Hub webhook
 
-1. Navigate to **Registry > Images** and find the image.
-2. Click the image to open its detail view.
-3. Select **Set Credentials**.
-4. Enter the Docker Hub username and access token.
-5. Click **Save**.
+1. Open Docker Hub and navigate to the repository's **Webhooks** settings.
+2. Add a webhook with the URL:
+   ```
+   https://<your-sentinel-api>/modules/registry/webhooks/docker
+   ```
+3. Set the webhook secret to your organization's webhook secret (available
+   under **Settings > Webhook Secret** in Sentinel).
 
-Sentinel encrypts the credentials at rest and uses them for polling. To remove credentials, select **Remove Credentials** on the same page.
+Docker Hub sends a webhook notification for every push to the repository.
+Sentinel verifies the HMAC-SHA256 signature before processing.
 
-### Managing Docker image configuration
+### Managing Docker images
 
-You can update the following settings on a monitored image:
+**Viewing images:** Navigate to **Registry > Images**. Each image shows:
 
-- **Tag watch patterns**: Change which tags are monitored.
-- **Tag ignore patterns**: Add or remove exclusion patterns.
-- **Enabled/disabled**: Temporarily disable polling without removing the image.
-- **Poll interval**: Adjust the polling frequency.
-- **GitHub repo**: Link or unlink a GitHub repository for attribution.
-- **Webhook URL**: Set a custom webhook URL for this specific image.
+- **Name** -- the Docker image name.
+- **Tag count** -- total tracked tags.
+- **Latest version** -- the most recent tag.
+- **Verification status** -- whether signatures and provenance are present.
+- **Last event** -- when the last change was detected.
+- **Poll interval** -- how often Sentinel checks for changes.
 
-To delete a Docker image from monitoring, click **Delete** on the image detail page. This performs a soft delete (disables the image) rather than removing the record.
+**Updating configuration:** Click an image to open its detail page. Update
+tag patterns, ignore patterns, poll interval, or the linked GitHub repository.
 
-## Adding npm packages to monitor
+**Triggering a manual poll:** Click **Poll** on the image detail page or
+image list to immediately check for changes.
 
-1. In Sentinel, navigate to **Registry** and select **Packages**.
-2. Click **Add Package**.
-3. Enter the following:
-   - **Package name**: The npm package name, for example `@myorg/mypackage` or `express`.
-   - **Tag patterns**: Glob patterns for versions or dist-tags to watch. Default is `*`.
-   - **Ignore patterns**: Glob patterns for versions to exclude.
-   - **Poll interval (seconds)**: Minimum: 60 seconds. Default: 300 seconds.
-   - **GitHub repo** (optional): The GitHub repository in `owner/repo` format.
-   - **Watch mode**: Choose between `versions` (monitor all published versions) or `dist-tags` (monitor only dist-tag changes like `latest`, `next`). Default: `versions`.
-4. Click **Save**.
+**Removing an image:** Click **Delete** on the image. This disables monitoring
+and pauses any detections that reference the image by name.
 
-### Bulk importing npm packages from an organization scope
+## Adding npm packages for monitoring
 
-To monitor all packages under an npm scope:
+### Step 1: Register the package
 
 1. Navigate to **Registry > Packages**.
-2. Click **Import npm Scope**.
-3. Enter the scope name, for example `@myorg`.
-4. Select the default tag patterns and poll interval for all imported packages.
-5. Click **Import**.
+2. Click **Add Package**.
+3. Fill in:
+   - **Name** -- the npm package name (for example, `@acme/sdk`,
+     `express`).
+   - **Tag patterns** -- glob patterns for dist-tags to monitor (default:
+     `*`).
+   - **Ignore patterns** -- dist-tags to skip.
+   - **Watch mode** -- `versions` (track all version publishes) or
+     `dist-tags` (track dist-tag movements only).
+   - **Poll interval** -- how often Sentinel checks the registry (minimum: 60
+     seconds, default: 300 seconds).
+   - **GitHub repo** (optional) -- the source repository in `owner/repo`
+     format.
+4. Click **Add**.
 
-Sentinel queries the npm registry for all packages under the scope (up to 100 packages) and adds them to monitoring with `dist-tags` watch mode. Packages that already exist in Sentinel are skipped.
+### Step 2: Configure the npm webhook
 
-### Setting credentials for private npm packages
+npm supports webhooks through the npm hooks API:
 
-For private npm packages that require authentication:
-
-1. Navigate to **Registry > Packages** and find the package.
-2. Click the package to open its detail view.
-3. Select **Set Credentials**.
-4. Enter your npm access token.
-5. Click **Save**.
-
-## CI/CD integration (notify endpoint)
-
-CI attribution requires your build pipeline to send a notification to Sentinel after pushing an artifact. This creates a record that links the push to a specific CI run, actor, commit, and workflow.
-
-### Step 1: Generate a notify key
-
-1. In Sentinel, navigate to **Settings** and select **Notify Key**.
-2. Click **Generate notify key**.
-3. Copy the key value (prefix: `snk_`). Store it in your CI/CD secrets manager.
-
-### Step 2: Add the notification step to your pipeline
-
-Add the following step to your GitHub Actions workflow, immediately after the `docker push` or `npm publish` step:
-
-```yaml
-- name: Notify Sentinel
-  run: |
-    curl -X POST \
-      ${{ secrets.SENTINEL_URL }}/modules/registry/ci/notify \
-      -H "Authorization: Bearer ${{ secrets.SENTINEL_NOTIFY_KEY }}" \
-      -H "Content-Type: application/json" \
-      -d '{
-        "image": "your-org/your-image",
-        "tag": "${{ github.sha }}",
-        "digest": "${{ steps.push.outputs.digest }}",
-        "runId": ${{ github.run_id }},
-        "commit": "${{ github.sha }}",
-        "actor": "${{ github.actor }}",
-        "workflow": "${{ github.workflow }}",
-        "repo": "${{ github.repository }}"
-      }'
+```bash
+npm hook add @acme/sdk https://<your-sentinel-api>/modules/registry/webhooks/npm <your-webhook-secret>
 ```
 
-Store `SENTINEL_NOTIFY_KEY` and `SENTINEL_URL` as encrypted GitHub Actions secrets.
+npm sends a webhook notification with an `x-npm-signature` header for every
+publish, unpublish, and dist-tag change. Sentinel verifies the HMAC-SHA256
+signature before processing.
 
-### CI notification payload fields
+### Managing npm packages
 
-All fields are required:
+The management workflow for npm packages mirrors Docker images. Navigate to
+**Registry > Packages** to view, update, poll, or delete monitored packages.
 
-| Field | Type | Description |
+## Signature verification with Sigstore
+
+Sentinel verifies supply chain signatures and provenance attestations for both
+Docker images and npm packages.
+
+### Docker image signatures (cosign)
+
+Sentinel checks whether Docker images are signed using
+[cosign](https://github.com/sigstore/cosign). The **Enforce Signatures**
+detection template alerts when an image lacks a cosign signature.
+
+### SLSA provenance attestations
+
+Sentinel verifies [SLSA](https://slsa.dev) provenance attestations that
+cryptographically prove which source repository and build system produced an
+artifact. The **Enforce Provenance** detection template alerts when an artifact
+lacks a provenance attestation.
+
+You can optionally specify an expected source repository to ensure provenance
+attestations match your organization's repository.
+
+### Verification status on the dashboard
+
+Each artifact on the images or packages list shows a verification status:
+
+| Status | Meaning |
+|---|---|
+| `verified` | At least one signature or provenance attestation is present. |
+| `unverified` | No signatures or provenance attestations found. |
+
+## What registry events Sentinel tracks
+
+### Docker image events
+
+- **Digest change** -- an existing tag now points to a different image digest.
+- **New tag** -- a new tag was created.
+- **Tag removed** -- an existing tag was deleted.
+
+### npm package events
+
+- **Version published** -- a new version was published.
+- **Version unpublished** -- a version was removed from the registry.
+- **Version deprecated** -- a version was marked as deprecated.
+- **Maintainer changed** -- package maintainers were added or removed.
+- **Dist-tag updated** -- a dist-tag (for example, `latest`) was moved to a
+  different version.
+- **Dist-tag removed** -- a dist-tag was deleted.
+
+### CI attribution events
+
+When Sentinel receives a CI notification (via the `/modules/registry/ci/notify`
+endpoint from your GitHub Actions workflow), it records:
+
+- **Image/package name and tag/version.**
+- **Digest** of the published artifact.
+- **GitHub Actions run ID, commit SHA, actor, workflow file, and source
+  repository.**
+
+This data is cross-referenced with polling and webhook data to detect pushes
+that were not preceded by a CI build.
+
+## Available detection templates
+
+Navigate to **Registry > Templates** to see the full list. Sentinel ships with
+the following built-in templates:
+
+### Container security
+
+| Template | Severity | Description |
 |---|---|---|
-| `image` | string | Artifact name, for example `myorg/myapp` |
-| `tag` | string | Tag or version that was pushed |
-| `digest` | string | Content digest of the pushed artifact |
-| `runId` | integer | CI run ID (for example, GitHub Actions run ID) |
-| `commit` | string | Git commit SHA (minimum 7 characters) |
-| `actor` | string | The user or bot that triggered the CI run |
-| `workflow` | string | CI workflow name or file path |
-| `repo` | string | GitHub repository in `owner/repo` format |
+| Docker Image Monitor | Medium | Alerts on digest changes, new tags, and tag removals. |
 
-### How attribution works
+### Supply chain
 
-When Sentinel receives a CI notification:
+| Template | Severity | Description |
+|---|---|---|
+| Require CI Attribution | High | Alerts when a release changes without verified CI attribution. |
+| Enforce Signatures | Critical | Alerts when a Docker image lacks a cosign signature. |
+| Enforce Provenance | Critical | Alerts when an artifact lacks a SLSA provenance attestation. |
+| Detect Manual Push | High | Alerts when an image is pushed by an unauthorized user. |
+| Pin Digest | Critical | Alerts when a Docker image digest changes from a pinned value. |
+| Suspicious Activity | High | Alerts on rapid changes or off-hours activity. |
+| Detect Source Mismatch | High | Alerts when a change is detected by polling but not preceded by a webhook. |
 
-1. The notification is persisted to the CI notifications table.
-2. Sentinel searches for a pending registry event that matches the artifact name, tag, and digest.
-3. If a match is found, the event's attribution status is updated to `verified` with the CI metadata.
-4. The detection rules are re-evaluated with the updated attribution data.
+### Package security (npm)
 
-If no matching event exists when the notification arrives (for example, the webhook has not yet been processed), the notification is stored and can be matched later.
+| Template | Severity | Description |
+|---|---|---|
+| npm Package Monitor | High | Alerts on version changes, install script additions, major version jumps, and maintainer changes. |
+| npm Unpublish Alert | Critical | Alerts when a version is unpublished. |
+| npm Rapid Publish | High | Alerts when versions are published faster than expected. |
+| npm Off-Hours Publish | High | Alerts on publishes outside business hours. |
+| npm Maintainer Change | High | Alerts on maintainer additions or removals. |
+| npm Require Provenance | Critical | Alerts when a published version lacks SLSA provenance. |
+| npm Tag Audit | Medium | Logs dist-tag changes on release channels. |
+| npm Tag Pin Digest | Critical | Alerts when a dist-tag tarball digest changes from a pinned value. |
+| npm Tag Removed | High | Alerts when a dist-tag is deleted. |
+| npm Tag Require CI | High | Alerts when a dist-tag change is not attributed to CI. |
+| npm Tag Install Scripts | Critical | Alerts when a dist-tag points to a version with install scripts. |
+| npm Tag Require Provenance | Critical | Alerts when a dist-tag points to a version without SLSA provenance. |
+| npm Tag Major Version Jump | High | Alerts when a dist-tag is moved to a version with a major semver increment. |
+| npm Tag Rapid Change | High | Alerts when dist-tags change faster than expected. |
+| npm Tag Off-Hours | High | Alerts on dist-tag changes outside business hours. |
 
-Sentinel also runs a deferred attribution check 5 minutes after each registry event. During this grace period, Sentinel searches the GitHub Actions API for matching workflow runs. If a match is found, the attribution status is set to `inferred`. If no CI notification or matching workflow run is found, the status is set to `unattributed`.
+### Comprehensive
 
-## Understanding registry events
+| Template | Severity | Description |
+|---|---|---|
+| Full Registry Security | Critical | Enables all registry security monitors in one detection. |
 
-### Digest change detection
+### Audit and logging
 
-When polling detects that a tag's content digest has changed since the last poll, Sentinel creates a `digest_change` event. This is distinct from a `new_tag` event -- digest changes indicate that the content behind an existing tag was replaced, which can signal a supply chain compromise.
+| Template | Severity | Description |
+|---|---|---|
+| Log Releases | Low | Logs all release changes without alerting. |
+| npm Log Releases | Low | Logs all npm version changes without alerting. |
 
-### Webhook vs. polling
+## Polling interval configuration
 
-Sentinel processes events from both webhooks and polling. Webhook events are processed in near real-time. Polling events are detected on the configured poll interval.
+The default poll interval for new artifacts is 300 seconds (5 minutes). You
+can set it to any value with a minimum of 60 seconds.
 
-When Sentinel receives a webhook for a Docker image push, it checks whether the tag already exists in its version database. If the tag exists, the event is classified as a `digest_change`. If the tag is new, it is classified as a `new_tag`.
+**Choosing an interval:**
 
-### Verification pipeline
+- **60 seconds** -- fastest detection, highest API usage. Use for
+  critical production images.
+- **300 seconds** (default) -- good balance for most use cases.
+- **900+ seconds** -- suitable for low-priority or archived packages.
 
-For Docker images, Sentinel can run a verification pipeline that checks:
+To change the interval, update the artifact configuration on its detail page.
+Sentinel triggers an immediate poll after each configuration change.
 
-- **Cosign signature**: Whether the image has a valid cosign (Sigstore) signature.
-- **SLSA provenance**: Whether the image has a valid SLSA provenance attestation.
-- **Rekor transparency log**: Whether the signature is recorded in the Rekor transparency log.
+## CI notification endpoint
 
-Verification results are attached to the event payload and available for rule evaluation.
+To improve attribution accuracy, configure your CI/CD pipeline to notify
+Sentinel after each build:
 
-## Detection templates
+```bash
+curl -X POST https://<your-sentinel-api>/modules/registry/ci/notify \
+  -H "Authorization: Bearer <notify-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image": "myorg/api-server",
+    "tag": "v1.2.3",
+    "digest": "sha256:abc123...",
+    "runId": 12345678,
+    "commit": "a1b2c3d",
+    "actor": "github-actions[bot]",
+    "workflow": "build.yml",
+    "repo": "myorg/api-server"
+  }'
+```
 
-Sentinel provides the following pre-built detection templates for the registry module:
-
-| Template | Category | Severity | Rules |
-|---|---|---|---|
-| Docker Image Monitor | Container Security | Medium | 1 |
-| Require CI Attribution | Supply Chain | High | 2 |
-| Enforce Signatures | Supply Chain | Critical | 1 |
-| Enforce Provenance | Supply Chain | Critical | 2 |
-| npm Package Monitor | Package Security | High | 3 |
-| Full Registry Security | Comprehensive | Critical | 8 |
-
-To enable a template:
-
-1. Navigate to **Registry** and select **Templates**.
-2. Find the template and click **[enable]**.
-3. Optionally scope the detection to a specific artifact. If no artifact is selected, the detection applies globally to all monitored artifacts in your organization.
-4. Provide a detection name and click **Enable Detection**.
-
-## Configuring webhook delivery
-
-To receive real-time webhook events from Docker Hub or npm:
-
-1. Navigate to **Registry** and select **Webhook Config** (or check the webhook configuration endpoint).
-2. The page displays:
-   - **Docker webhook URL**: The endpoint to configure in Docker Hub.
-   - **npm webhook URL**: The endpoint to configure in your npm hook settings.
-   - **Secret status**: Whether a webhook secret is configured, shown by prefix.
-3. If no secret exists, click **Rotate Secret** to generate one. The plaintext secret is shown once -- copy it and configure it in your Docker Hub or npm webhook settings.
-
-### Docker Hub webhook setup
-
-1. In Docker Hub, navigate to your repository's **Webhooks** tab.
-2. Enter the Sentinel Docker webhook URL.
-3. Docker Hub does not natively support HMAC signing. Configure the webhook secret in Sentinel's webhook configuration and use a compatible webhook proxy if HMAC verification is required.
-
-### npm webhook setup
-
-1. Use the npm CLI to create a hook: `npm hook add <package-or-scope> <sentinel-npm-webhook-url> <webhook-secret>`.
-2. npm signs webhook deliveries with the secret using HMAC-SHA256 in the `x-npm-signature` header.
+The **notify key** is available under **Settings > API Keys** in the Sentinel
+web console.
 
 ## Troubleshooting
 
-### Polling is not detecting changes
+### "Invalid webhook signature" (HTTP 401)
 
-- Verify the artifact is enabled in Sentinel (not soft-deleted).
-- Check the poll interval -- changes are detected only at the next scheduled poll.
-- For npm packages, confirm the `watchMode` setting matches your needs (`versions` vs. `dist-tags`).
+The HMAC-SHA256 signature does not match. Verify that:
 
-### CI attribution shows "unattributed" for known CI pushes
+- The webhook secret configured in Docker Hub or npm matches your
+  organization's webhook secret in Sentinel.
+- No proxy or CDN modified the request body after the registry signed it.
 
-- Verify the CI notification step runs after the push step in your pipeline.
-- Confirm the `digest` field in the notification matches the actual pushed digest.
-- Check that the notify key is valid and has not been revoked.
-- Verify the artifact name in the notification matches the monitored artifact name in Sentinel exactly.
+### Pre-flight check rejects the image
 
-### Webhook signature verification fails
+If the pre-flight check reports too many tags, either:
 
-- Confirm the webhook secret configured in Sentinel matches the secret configured in Docker Hub or npm.
-- For Docker webhooks, check the `X-Hub-Signature-256` or `X-Signature` header format.
-- For npm webhooks, check the `x-npm-signature` header format.
+- Specify explicit **tag patterns** (for example, `v*`, `latest`) to narrow
+  the scope.
+- The pre-flight check is automatically skipped when specific tag patterns
+  are set.
+
+### Polling detects changes but webhooks do not arrive
+
+1. Verify the webhook URL is correct and reachable from the registry.
+2. Check the webhook configuration in Docker Hub or npm for delivery failures.
+3. The **Detect Source Mismatch** template can alert you when polling detects
+   a change that was not preceded by a webhook notification.
+
+### "Service temporarily unavailable" (HTTP 503)
+
+The background job queue (Redis/BullMQ) is unreachable. Contact your Sentinel
+administrator to check Redis connectivity and worker health.
+
+### Verification status shows "unverified"
+
+The artifact does not have cosign signatures or SLSA provenance attestations.
+To fix this:
+
+1. Add cosign signing to your CI/CD pipeline.
+2. Enable provenance attestations in your build configuration (for example,
+   `npm publish --provenance` for npm, or SLSA GitHub Actions generators for
+   Docker).
+
+### Detections paused after deleting an image
+
+When you delete a Docker image, Sentinel pauses all detections that reference
+that image by name. To resume monitoring:
+
+1. Re-add the image under **Registry > Images**.
+2. Navigate to **Detections** and re-enable the paused detections.

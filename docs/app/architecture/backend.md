@@ -36,26 +36,31 @@ Request
                                   X-XSS-Protection: 0
                                   Permissions-Policy: camera=(), microphone=(), geolocation=()
 
-4. CSRF defense                 Checks state-changing requests (POST/PUT/PATCH/DELETE).
+4. Request metrics              Records request duration and increments request counters
+                                (httpRequestDuration, httpRequestsTotal) labeled by method,
+                                route, and status code. Exposed via the /metrics endpoint.
+
+5. CSRF defense                 Checks state-changing requests (POST/PUT/PATCH/DELETE).
                                 Skipped for:
                                   - Requests to paths containing /webhooks/, /callback, or /ci/notify
                                   - Requests with Authorization: Bearer ... header
                                   - Requests without a sentinel.sid cookie
                                 Enforces X-Sentinel-Request header; returns 403 if missing.
 
-5. sessionMiddleware            Reads sentinel.sid cookie, queries sessions table,
+6. sessionMiddleware            Reads sentinel.sid cookie, queries sessions table,
                                decrypts JSONB session data (AES-256-GCM),
                                sets userId, orgId, role on context.
 
-6. apiKeyMiddleware             Reads Authorization: Bearer sk_... header,
-                               looks up key by prefix, compares SHA-256 hash (timing-safe),
+7. apiKeyMiddleware             Reads Authorization: Bearer sk_... header,
+                               computes SHA-256(rawKey), looks up key by hash
+                               (unique index), performs timing-safe comparison,
                                checks expiry and org membership,
                                sets userId, orgId, apiKeyId, scopes, role on context.
 
-7. notifyKeyMiddleware          Validates notify-key tokens used by infrastructure agents
+8. notifyKeyMiddleware          Validates notify-key tokens used by infrastructure agents
                                posting to /modules/infra/ci/notify. Sets orgId on context.
 
-8. enrichLogger                 Adds userId and orgId from context variables to the
+9. enrichLogger                 Adds userId and orgId from context variables to the
                                request-scoped Pino child logger.
    │
    ▼
@@ -68,8 +73,8 @@ Response
 After the global middleware, rate limiting is applied to all `/api/*` routes:
 
 ```
-GET /api/*   → apiReadLimiter   (100 req/min per org/key/IP, sliding window in Redis)
-POST/PUT/PATCH/DELETE /api/* → apiWriteLimiter  (30 req/min per org/key/IP)
+GET /api/*   → apiReadLimiter   (100 req/min per user/key/IP, fixed window in Redis)
+POST/PUT/PATCH/DELETE /api/* → apiWriteLimiter  (30 req/min per user/key/IP, fixed window in Redis)
 ```
 
 Module routes under `/modules/*` have an additional auth guard that verifies both `userId` and `orgId` are set, returning `401` or `403` otherwise. This guard skips webhook, callback, and CI notify paths.
@@ -79,6 +84,7 @@ Module routes under `/modules/*` have an additional auth guard that verifies bot
 | Mount point | Router | Auth required | Notes |
 |---|---|---|---|
 | `/health` | Inline handler | None | Returns `{ status, db, redis, timestamp }`. Returns 503 if any dependency is unreachable. |
+| `/metrics` | Inline handler | `Bearer METRICS_TOKEN` (required in production; unauthenticated when unset in non-production) | Returns Prometheus-format metrics (request duration histograms, request counters, queue depth gauges). |
 | `/auth` | `authRouter` | None (login/register/logout routes manage their own session state) | Registration, login, password reset, session termination. |
 | `/integrations` | `integrationsRouter` | Callback paths are public; all other paths require auth | GitHub OAuth flow callback. Slack OAuth flow callback. |
 | `/api/detections` | `detectionsRouter` | Session or API key | CRUD for detection rules. |
@@ -117,8 +123,8 @@ Sessions expire after 7 days. A scheduled worker job (`platform.session.cleanup`
 ### API key authentication
 
 1. The `apiKeyMiddleware` reads the `Authorization: Bearer sk_<key>` header.
-2. It extracts the key prefix (the first `len('sk_') + 8` characters) and uses it to look up candidate rows in `api_keys` by prefix — avoiding a full table scan while preventing full key exposure in query parameters.
-3. It computes `SHA-256(rawKey)` and compares it to `api_keys.key_hash` using `crypto.timingSafeEqual` to prevent timing attacks.
+2. It computes `SHA-256(rawKey)` and queries `api_keys` by the `key_hash` column (unique index). This avoids the prefix-collision issues that a prefix-based lookup would introduce.
+3. It compares the computed hash to the stored `key_hash` using `crypto.timingSafeEqual` to prevent timing attacks.
 4. It checks that the key has not been revoked and has not expired.
 5. It verifies that the key owner is still an active member of the key's org by querying `org_memberships`. This prevents keys from remaining valid after a user is removed from an org.
 6. It sets `userId`, `orgId`, `apiKeyId`, `scopes`, and `role` on context.
@@ -162,6 +168,12 @@ The global error handler is registered via `app.onError()`:
 ```typescript
 app.onError((err, c) => {
   if (err instanceof HTTPException) {
+    // If the exception carries a pre-built Response with JSON content type
+    // (e.g. validation errors with structured details), return it directly.
+    const res = err.getResponse();
+    if (res.body && res.headers.get('content-type')?.includes('application/json')) {
+      return res;
+    }
     return c.json({ error: err.message }, err.status);
   }
   const reqLogger = c.get('logger') ?? log;
@@ -171,7 +183,7 @@ app.onError((err, c) => {
 });
 ```
 
-`HTTPException` instances (used by middleware and route handlers for client errors) are serialized as `{ error: message }` with the exception's HTTP status code. All other errors are logged via the request-scoped Pino logger, reported to Sentry with the request ID for correlation, and returned to the client as a generic `500 Internal Server Error`.
+`HTTPException` instances (used by middleware and route handlers for client errors) are serialized as `{ error: message }` with the exception's HTTP status code. If the exception carries a pre-built `Response` with a JSON content type (used by the validation middleware to return structured `{ error, details }` payloads), that response is returned directly without re-serialization. All other errors are logged via the request-scoped Pino logger, reported to Sentry with the request ID for correlation, and returned to the client as a generic `500 Internal Server Error`.
 
 The `notFound` handler returns `{ error: 'Not found' }` with status `404`.
 
@@ -182,6 +194,24 @@ Sentinel uses [Pino](https://getpino.io/) for structured JSON logging. The logge
 Each incoming request gets a child logger with a unique `requestId` (UUID v4), attached during the `requestContext` middleware. After authentication runs, `enrichLogger` adds `userId` and `orgId` to the child logger's bindings so that every log line emitted by the route handler is correlated to the authenticated identity.
 
 The `LOG_LEVEL` environment variable controls the minimum log level. Default is `info`. Set to `debug` during development to see per-query SQL logs and session decryption traces.
+
+## Prometheus metrics
+
+The API server exposes a `/metrics` endpoint that returns metrics in Prometheus text format. Metrics are collected by the `prom-client` library (`@sentinel/shared/metrics`).
+
+Two metrics are recorded by the request metrics middleware (middleware position 4 in the stack):
+
+- **`http_request_duration_seconds`** (histogram) — request duration in seconds, labeled by `method`, `route`, and `status`.
+- **`http_requests_total`** (counter) — total request count, labeled by `method`, `route`, and `status`.
+
+The worker additionally records:
+
+- **`jobs_processed_total`** (counter) — total jobs processed, labeled by `queue`, `jobName`, and `status` (`completed` or `failed`).
+- **`job_duration_seconds`** (histogram) — job processing duration.
+- **`dead_letter_total`** (counter) — jobs moved to the dead-letter queue after exhausting retries.
+- **`queue_depth`** (gauge) — waiting job count per queue, updated every 15 seconds.
+
+In production, the `/metrics` endpoint requires a `Bearer` token matching the `METRICS_TOKEN` environment variable. If `METRICS_TOKEN` is unset in a non-production environment, the endpoint is accessible without authentication.
 
 ## Sentry integration
 

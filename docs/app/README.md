@@ -67,8 +67,9 @@ sentinel/
     registry/   Package registry (npm, PyPI, etc.) monitoring
     aws/        AWS CloudTrail and SQS event monitoring
   docs/         This documentation tree
-  docker-compose.prod.yml  Production compose file (resource limits, restart policies)
-  docker-compose.yml       Development compose file
+  docker-compose.dev.yml   Development compose (hot-reload, port 5434/6380)
+  docker-compose.yml       Production-like compose (self-contained, port 5432/6379)
+  docker-compose.prod.yml  Production compose (external networks, resource limits)
 ```
 
 ## Technology stack at a glance

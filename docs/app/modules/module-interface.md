@@ -211,6 +211,7 @@ export interface RetentionPolicy {
   timestampColumn: string;
   retentionDays: number;
   filter?: string;
+  useCtid?: boolean;
 }
 ```
 
@@ -220,6 +221,7 @@ export interface RetentionPolicy {
 | `timestampColumn` | `string` | The column containing the row timestamp used for age calculation (for example, `received_at`, `created_at`). |
 | `retentionDays` | `number` | Rows older than this many days are eligible for deletion by the retention janitor. |
 | `filter` | `string` | Optional SQL fragment appended as an additional `AND` condition. Use this to scope a policy to a module-specific subset of a shared table. For example, `"module_id = 'aws'"` restricts deletion to rows produced by the AWS module. |
+| `useCtid` | `boolean` | When `true`, the retention janitor uses PostgreSQL `ctid` for batched deletes instead of an `id` column. Required for tables with composite primary keys that lack a single `id` column (for example, `chain_rpc_usage_hourly`). |
 
 ---
 
@@ -399,22 +401,41 @@ export const MyModule: DetectionModule = {
 
 ### Step 7: Register the module
 
-Import and register the module in the API entrypoint:
+Import and register the module in both the API entrypoint and the worker entrypoint:
+
+**API registration** (`apps/api/src/index.ts`):
 
 ```typescript
-// apps/api/src/index.ts
 import { MyModule } from '@sentinel/mymodule';
 
-registerModules([
-  GitHubModule,
-  ChainModule,
-  RegistryModule,
-  InfraModule,
-  AwsModule,
-  MyModule,  // add your module here
-]);
+const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule, AwsModule, MyModule];
+setModules(modules);
+for (const mod of modules) {
+  app.route(`/modules/${mod.id}`, mod.router);
+}
 ```
+
+**Worker registration** (`apps/worker/src/index.ts`):
+
+```typescript
+import { MyModule } from '@sentinel/mymodule';
+
+const modules = [GitHubModule, RegistryModule, ChainModule, InfraModule, AwsModule, MyModule];
+
+for (const mod of modules) {
+  for (const evaluator of mod.evaluators) {
+    const key = `${evaluator.moduleId}:${evaluator.ruleType}`;
+    evaluatorRegistry.set(key, evaluator);
+  }
+}
+
+// Module job handlers are merged with core handlers for the BullMQ worker
+const moduleHandlers = modules.flatMap((m) => m.jobHandlers);
+const allHandlers = [...coreHandlers, ...moduleHandlers];
+```
+
+Both registrations are required. The API server mounts routes and provides module metadata to the UI. The worker registers evaluators and job handlers for background processing.
 
 ### Step 8: Add a database migration if needed
 
-If your module requires new tables, create a Drizzle migration under `packages/db/migrations/`. The module system itself does not perform automatic schema changes.
+If your module requires new tables, create a Drizzle migration under `packages/db/migrations/`. Follow the migration policy in `CLAUDE.md`: edit the TypeScript schema, run `pnpm db:generate`, review the SQL, and commit both the SQL file and the `meta/` snapshot. The module system itself does not perform automatic schema changes.

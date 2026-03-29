@@ -34,11 +34,11 @@ Each Sentinel service is constrained to specific resource limits in the producti
 | Worker | 384 MB | 1.0 | 2 |
 | Web UI | 384 MB | 0.5 | 1 |
 
-For a minimal deployment, a host with 2 GB of available RAM and 2 CPU cores is sufficient for the Sentinel services alone. Budget additional resources for PostgreSQL and Redis if you run them on the same host.
+For a minimal deployment, a host with 2 GB of available RAM and 2 CPU cores is sufficient for the Sentinel services alone. Budget additional resources for PostgreSQL (at least 1 GB RAM) and Redis (at least 512 MB RAM) if you run them on the same host.
 
 ## Step 1: Clone the Repository
 
-Clone the Sentinel repository to your local machine or server:
+Clone the Sentinel repository to your server:
 
 ```
 git clone https://github.com/your-org/sentinel.git
@@ -79,13 +79,15 @@ The following variables are optional but recommended for production:
 
 ## Step 3: Start the Services
 
-Start all Sentinel services in the background:
+### Option A: Production Deployment
+
+For production, use the production Compose file. This configuration expects PostgreSQL and Redis to already be running on an external Docker network named `shared-infra`:
 
 ```
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-Docker Compose will build and start the following services:
+Docker Compose builds and starts the following services:
 
 | Service | Description | Default Port |
 |---|---|---|
@@ -93,7 +95,19 @@ Docker Compose will build and start the following services:
 | **worker** | Background worker that processes events and dispatches alerts (two replicas by default) | -- |
 | **web** | The Next.js web UI | 3100 |
 
-PostgreSQL and Redis are not defined in the production Compose file. They are expected to already be running on the `shared-infra` network. If you want a self-contained setup for evaluation, use the development Compose file (`docker-compose.yml`) which includes all dependencies.
+PostgreSQL and Redis are not defined in the production Compose file. They are expected to already be running on the `shared-infra` network.
+
+### Option B: Self-Contained Evaluation
+
+If you want a self-contained setup for evaluation or testing, use the development Compose file which includes PostgreSQL and Redis as bundled services:
+
+```
+docker compose up -d
+```
+
+This starts PostgreSQL (port 5432) and Redis (port 6379) alongside the Sentinel services. The API runs on port 4000 in this configuration.
+
+### Monitoring Startup
 
 Wait for all services to report as healthy. You can monitor startup progress with:
 
@@ -104,7 +118,17 @@ docker compose -f docker-compose.prod.yml logs -f
 
 Each service includes a health check. When you see the `api` and `web` services with a status of `healthy`, the platform is ready.
 
-## Step 4: Access the Web UI
+## Step 4: Run Database Migrations
+
+After the services start for the first time, apply the database schema:
+
+```
+docker compose -f docker-compose.prod.yml exec api node -e "require('./dist/db/migrate.js')"
+```
+
+If you are using the self-contained evaluation setup, replace `docker-compose.prod.yml` with `docker-compose.yml`. Migrations are idempotent -- running them more than once is safe.
+
+## Step 5: Access the Web UI
 
 Open your browser and navigate to:
 
@@ -120,25 +144,22 @@ http://localhost:4100
 
 If you deployed to a remote server, replace `localhost` with your server's hostname or IP address. Confirm that your firewall or reverse proxy allows inbound traffic on ports 3100 and 4100. In production, you typically place an nginx reverse proxy in front of both services and expose them on standard HTTPS ports.
 
-## Step 5: Create Your Account and Organization
+## Step 6: Create Your Account and Organization
 
-The first time you open the web UI, Sentinel is empty -- there are no users or organizations yet. Navigate to:
-
-```
-http://localhost:3100/register
-```
+The first time you open the web UI, Sentinel redirects you to the login page. Since there are no accounts yet, click the **register** link to create one.
 
 On the registration page:
 
-1. Enter a **username** (3-50 characters, alphanumeric with hyphens and underscores).
-2. Enter your **email address**.
-3. Enter a **password** (minimum 8 characters).
-4. Enter a name for your **organization** (for example, `Acme Security`). This field is required for the first user because there is no organization to join yet.
-5. Click **Register**.
+1. Make sure the **[new-org]** mode is selected (this is the default for the first user).
+2. Enter a **username**.
+3. Enter your **email address**.
+4. Enter a **password** (minimum 8 characters).
+5. Enter a name for your **organization** (for example, `Acme Security`).
+6. Click **Register**.
 
-After registration, Sentinel displays your **invite secret** -- a one-time string that other team members use to join your organization. Copy it and store it securely. You can regenerate it from **Settings** at any time.
+After registration, Sentinel displays your **invite secret** -- a one-time string that other team members use to join your organization. Copy it and store it securely. This secret cannot be displayed again after you leave this page. You can regenerate it from **Settings** at any time.
 
-You are assigned the **admin** role and redirected to the **Dashboard**.
+Click **continue to dashboard** to proceed. You are assigned the **admin** role.
 
 ## Verifying the Installation
 
@@ -156,7 +177,7 @@ You should receive a `200 OK` response.
 
 **Port conflicts**
 
-If port 4100 or 3100 is already in use on your machine, the services will fail to start. Identify the conflicting process:
+If port 4100 or 3100 is already in use on your machine, the services fail to start. Identify the conflicting process:
 
 ```
 lsof -i :4100
@@ -182,7 +203,7 @@ If the `api` service exits with a database connection error, verify that:
 
 **Cannot reach the web UI from a remote machine**
 
-Ensure the web UI's `NEXT_PUBLIC_API_URL` environment variable is set to the externally reachable address of the API, not `localhost`. The browser makes direct calls to the API, so `localhost` will not work when the browser is on a different machine from the server.
+Ensure the web UI's `NEXT_PUBLIC_API_URL` environment variable is set to the externally reachable address of the API, not `localhost`. The browser makes direct calls to the API, so `localhost` does not work when the browser is on a different machine from the server.
 
 **Health check fails repeatedly**
 
@@ -191,4 +212,13 @@ The API health check has a 10-second start period, and the web UI has a 15-secon
 ```
 docker compose -f docker-compose.prod.yml logs api
 docker compose -f docker-compose.prod.yml logs web
+```
+
+**External Docker networks do not exist**
+
+The production Compose file references two external networks: `gateway` and `shared-infra`. Create them before starting the services:
+
+```
+docker network create gateway
+docker network create shared-infra
 ```

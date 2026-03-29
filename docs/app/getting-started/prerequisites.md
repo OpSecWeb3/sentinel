@@ -2,6 +2,17 @@
 
 Install and verify the following tools before setting up a local Sentinel development environment.
 
+## System requirements
+
+| Resource | Minimum | Recommended |
+|---|---|---|
+| CPU | 2 cores | 4 cores |
+| RAM | 4 GB | 8 GB |
+| Disk | 5 GB free (for Docker images, node_modules, and database data) | 10 GB free |
+| OS | macOS 13+, Ubuntu 22.04+, Windows 11 with WSL2 | macOS or Linux |
+
+The Docker VM (on macOS and Windows) must be allocated at least 4 GB of memory. The default 2 GB is insufficient to run PostgreSQL, Redis, and all three application services simultaneously.
+
 ## Required tools
 
 | Tool | Minimum version | Notes |
@@ -48,10 +59,16 @@ These tools allow you to inspect the database and cache directly, which is usefu
 
 | Tool | Install | Purpose |
 |---|---|---|
-| `psql` | `brew install postgresql` / `apt install postgresql-client` | Query PostgreSQL directly. The default dev database is `sentinel` on `localhost:5432`. |
-| `redis-cli` | Bundled with Redis or `brew install redis` | Inspect BullMQ queues and rate-limit keys. Connect with `redis-cli -a sentinel-dev`. |
+| `psql` | `brew install postgresql` / `apt install postgresql-client` | Query PostgreSQL directly. The dev compose maps Postgres to `localhost:5434` (not the default 5432). Connect with `psql -h localhost -p 5434 -U sentinel sentinel`. |
+| `redis-cli` | Bundled with Redis or `brew install redis` | Inspect BullMQ queues and rate-limit keys. The dev compose Redis is on `localhost:6380` with no password. Connect with `redis-cli -p 6380`. |
 | AWS CLI | `brew install awscli` / [official installer](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) | Required for `scripts/seed-ssm.sh` which stores environment variables in AWS SSM Parameter Store for production deployments. Also useful for testing the AWS module's SQS integration locally. |
 | GitHub CLI (`gh`) | `brew install gh` / [official installer](https://cli.github.com/) | Useful for managing GitHub App installations and testing the GitHub module's webhook verification locally. Not required for normal development. |
+
+## Shared infrastructure (production)
+
+In production, PostgreSQL and Redis run as shared infrastructure in the parent `chainalert` project, not in Sentinel's compose files. Sentinel's `docker-compose.prod.yml` connects to them via external `shared-infra` and `gateway` Docker networks. Do not add PostgreSQL or Redis services to Sentinel's production compose.
+
+For local development, the `docker-compose.dev.yml` file includes standalone PostgreSQL and Redis containers. These are isolated from any host-level database or cache instances by using non-standard ports (5434 and 6380).
 
 ## Platform notes
 

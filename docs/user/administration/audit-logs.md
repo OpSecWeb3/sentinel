@@ -13,6 +13,7 @@ The audit log captures actions across the following categories:
 | **Authentication** | User logins (successful and failed), logouts, session invalidation |
 | **User and membership management** | Member additions, role changes, member removals, organization join and leave, organization creation and deletion |
 | **Detections** | Detection created, updated (name, severity, status, rules, channels, cooldown), detection deleted |
+| **Correlation rules** | Correlation rule created, updated, deleted, instances cleared |
 | **Notification channels** | Channel created, updated, enabled or disabled, deleted |
 | **API keys** | API key created, API key revoked |
 | **Organization secrets** | Invite secret regenerated, notify key generated, rotated, or revoked, webhook secret rotated |
@@ -65,6 +66,10 @@ Select a specific action to view only entries of that type. Common action types 
 - `member.added`
 - `member.role_changed`
 - `member.removed`
+- `correlation_rule.created`
+- `correlation_rule.updated`
+- `correlation_rule.deleted`
+- `correlation_rule.instances_cleared`
 - `api_key.created`
 - `api_key.revoked`
 - `invite_secret.regenerated`
@@ -81,7 +86,7 @@ Enter a user ID to see all actions performed by that specific user. This is usef
 
 ### Filter by resource type
 
-Select a resource type to see all actions affecting that category of resource. Resource types include `detection`, `member`, `api_key`, `organization`, `notification_channel`, `slack_installation`, `github_installation`, and `artifact`.
+Select a resource type to see all actions affecting that category of resource. Resource types include `detection`, `correlation_rule`, `member`, `api_key`, `organization`, `notification_channel`, `slack_installation`, `github_installation`, and `artifact`.
 
 ### Filter by time range
 

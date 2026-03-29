@@ -236,7 +236,9 @@ curl -s \
 GET /api/chain/network-status
 ```
 
-Returns block cursor positions per network, joined with network metadata. This endpoint is not scoped to an org -- it returns global network status.
+Returns block cursor positions per network, joined with network metadata. Scoped to networks the organisation monitors (networks with at least one contract registered by the org).
+
+**Required role:** `admin`
 
 **cURL example**
 

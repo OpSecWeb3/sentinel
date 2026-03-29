@@ -1,232 +1,289 @@
-# EVM blockchain integration
+# EVM Blockchain Integration
 
-This guide explains how to connect Sentinel to an EVM-compatible blockchain network and configure contract monitoring. After completing this setup, Sentinel can detect smart contract events, function calls, balance changes, and contract storage mutations in real time.
+This guide explains how to connect Sentinel to EVM-compatible blockchain
+networks so that Sentinel can monitor on-chain events, state changes, and
+contract activity in real time.
 
-## What Sentinel monitors on EVM chains
+## Architecture overview
 
-Sentinel's chain module supports the following detection types:
-
-- **Event match** (`chain.event_match`): Alerts when a smart contract emits a log matching an ABI event signature and optional field conditions.
-- **Function call match** (`chain.function_call_match`): Alerts when a transaction calls a specific function on a monitored contract, with optional conditions on decoded arguments.
-- **Windowed count** (`chain.windowed_count`): Alerts when a specific event occurs more than a threshold number of times within a rolling time window.
-- **Windowed spike** (`chain.windowed_spike`): Alerts when an event's rate spikes significantly above a historical baseline.
-- **Windowed sum** (`chain.windowed_sum`): Alerts when the sum of a numeric event argument exceeds a threshold within a rolling time window.
-- **Balance tracking** (`chain.balance_track`): Alerts when a contract or wallet balance crosses a threshold, drops or rises by a percentage, or changes within a time window. Supports both native ETH and ERC-20 token balances.
-- **State polling** (`chain.state_poll`): Alerts when a contract storage slot value changes, crosses a threshold, or deviates from a rolling average.
-- **View call** (`chain.view_call`): Monitors the return value of a read-only contract function at each poll interval. Supports dynamic argument tokens (`$NOW`, `$BLOCK_NUMBER`, `$BLOCK_TIMESTAMP`) and automatic UDVT (User-Defined Value Type) signature normalization.
+Sentinel connects to blockchain networks through JSON-RPC endpoints. It polls
+for new blocks, decodes contract events, reads storage slots, and tracks
+balances. All on-chain data is processed through Sentinel's detection engine
+to generate alerts.
 
 ## Prerequisites
 
-- An RPC endpoint URL for the EVM network you want to monitor. This can be a self-hosted node or a hosted provider such as Infura, Alchemy, or QuickNode. HTTPS is required; HTTP is accepted but logged as a warning.
-- An Etherscan (or compatible block explorer) API key if you want Sentinel to automatically fetch contract ABIs by address.
-- The **admin** role in your Sentinel organization.
+- A Sentinel account with the **Admin** role in your organization.
+- An RPC endpoint for each blockchain network you want to monitor (public or
+  dedicated).
+- The contract addresses you want to track.
 
-> **Note:** RPC providers impose rate limits. Sentinel batches block polling and processes events efficiently, but you should use a paid RPC plan for production monitoring of high-throughput networks.
+## Adding blockchain networks
 
-## Step 1: Add a blockchain network
+Sentinel ships with preconfigured support for common EVM networks. Your
+administrator may have already enabled the networks relevant to your
+organization.
 
-1. In Sentinel, navigate to **Settings** and select **Chain Networks**.
+### Viewing available networks
+
+1. Navigate to **Chain > Networks**.
+2. The table shows each network's name, chain ID, current block number,
+   polling status, and last polled timestamp.
+
+### Adding a new network (admin only)
+
+1. Navigate to **Chain > Networks**.
 2. Click **Add Network**.
-3. Enter the following details:
-   - **Network name**: A human-readable label, for example `Ethereum Mainnet` or `Polygon Mainnet`.
-   - **Network slug**: A URL-safe identifier, for example `ethereum-mainnet`. This is used internally to reference the network.
-   - **Chain ID**: The EVM chain ID integer. Common values: Ethereum Mainnet `1`, Goerli `5`, Polygon `137`, Arbitrum One `42161`, Base `8453`.
-   - **RPC URLs**: One or more HTTPS endpoint URLs. Sentinel supports multiple RPC URLs for automatic failover -- if the primary URL fails, requests are retried against the next URL in the list.
-   - **Block explorer API key** (optional): An Etherscan-compatible API key for automatic ABI lookups.
-4. Click **Save**. Sentinel begins polling the latest block number to verify connectivity.
+3. Fill in:
+   - **Name** -- a human-readable name (for example, "Ethereum Mainnet").
+   - **Chain ID** -- the EVM chain ID (for example, 1 for Ethereum, 137 for
+     Polygon).
+   - **Block time (ms)** -- approximate block time in milliseconds (default:
+     12,000 for Ethereum).
+   - **RPC URL** (optional) -- a default RPC endpoint for the network.
+   - **Explorer URL** (optional) -- a block explorer URL (for example,
+     `https://etherscan.io`).
+4. Click **Create**.
 
-### RPC URL security
+### Configuring custom RPC endpoints
 
-Sentinel validates all RPC URLs before use:
+Each organization can override the default RPC endpoint for any network:
 
-- URLs must use the HTTPS protocol. HTTP is accepted but generates a security warning.
-- URLs targeting private or internal IP addresses (127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, link-local, and reserved ranges) are rejected.
-- URLs targeting `localhost`, `.internal`, `.local`, `.lan`, `.corp`, `.home`, `.intranet`, and the cloud metadata endpoint (`169.254.169.254`) are rejected.
+1. Navigate to **Chain > RPC**.
+2. Click **Add RPC Config**.
+3. Select the **Network**.
+4. Enter the **RPC URL** (for example,
+   `https://eth-mainnet.g.alchemy.com/v2/YOUR-KEY`).
+5. Click **Save**.
 
-> **Warning:** Sentinel performs hostname-level SSRF validation but cannot prevent DNS rebinding attacks where a public hostname resolves to a private IP at connection time. Your infrastructure team should configure egress firewall rules to block outbound connections to RFC-1918 and link-local CIDR ranges.
+Custom RPC endpoints are used only by your organization. Other organizations
+on the same Sentinel instance use the default or their own custom endpoints.
 
-### RPC URL rotation
+## Registering contracts for monitoring
 
-When you configure multiple RPC URLs, Sentinel uses round-robin rotation based on the current hour. The rotation window is configurable via the `RPC_ROTATION_HOURS` environment variable. If the primary URL fails a request, Sentinel automatically fails over to the next URL.
+### Adding a contract
 
-### RPC client configuration
-
-The RPC client supports the following options:
-
-| Option | Default | Description |
-|---|---|---|
-| Max retries | 3 | Maximum number of retry attempts per RPC call |
-| Retry delay | 1000 ms | Base delay for exponential backoff between retries |
-| Request timeout | 15000 ms | Timeout per individual RPC request |
-| Rotation window | Configurable | Hours between primary URL rotation |
-
-## Step 2: Add a contract to monitor
-
-Before you can create event-match or function-call detections, add the contract to Sentinel's monitoring list.
-
-1. Navigate to the chain module's contract management page.
+1. Navigate to **Chain > Contracts**.
 2. Click **Add Contract**.
-3. Enter the following:
-   - **Network**: Select the network you added in Step 1.
-   - **Contract address**: The checksummed or lowercase hex address, for example `0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045`.
-   - **Label** (optional): A human-readable name, for example `Gnosis Safe - Treasury`.
-   - **ABI**: If you provided an Etherscan API key and the contract is verified, Sentinel fetches the ABI automatically. Otherwise, paste the contract ABI JSON.
-4. Click **Save**.
+3. Fill in:
+   - **Network** -- select the blockchain network.
+   - **Address** -- the contract address (for example,
+     `0x1234...abcd`). Must be a valid 40-character hex address with `0x`
+     prefix.
+   - **Label** -- a human-readable name (for example, "USDC Token").
+   - **Tags** (optional) -- categorization tags (for example, "defi",
+     "treasury").
+   - **Notes** (optional) -- free-text notes about the contract.
+4. Click **Add**.
 
-> **Note:** Sentinel does not backfill historical blocks by default. Monitoring starts from the block at which you add the contract.
+Sentinel normalizes the address to lowercase and creates a global contract
+record. If the same address is already tracked on the same network (by any
+organization), Sentinel reuses the existing record.
 
-### Contract verification via Etherscan
+### ABI management
 
-When you add a contract address and an Etherscan API key is configured for the network, Sentinel:
+Sentinel uses a contract's ABI (Application Binary Interface) to decode
+on-chain events and function calls. Without an ABI, event monitoring is
+limited to raw log data.
 
-1. Queries the Etherscan API for the verified contract ABI.
-2. Stores the ABI for decoding event logs and function call data.
-3. Detects contract traits (proxy patterns, multisig patterns, token interfaces) from the ABI to suggest relevant detection templates.
+**Automatic ABI fetching:** When you add a contract, Sentinel can
+automatically fetch the ABI from the network's block explorer (for example,
+Etherscan). Toggle **Fetch ABI** to enable this during contract creation.
 
-If the contract is not verified on Etherscan, you must paste the ABI manually.
+**Manual ABI upload:** If the contract is not verified on the block explorer,
+you can paste the ABI JSON directly when creating the contract.
 
-## Step 3: How block polling works
+**ABI status indicators:**
 
-Sentinel uses a poll-based architecture for blockchain monitoring:
-
-1. A **block poll** job runs on a scheduled interval for each monitored network. It fetches the latest block number from the RPC endpoint and compares it to the stored cursor position.
-2. For each new block, Sentinel fetches logs (event emissions) and optionally full transaction data.
-3. Each block's data is enqueued as a **block process** job.
-4. The block cursor is advanced only after all block data jobs are successfully enqueued, preventing data loss on failure.
-5. Block process jobs match logs against active detection rules, decode event arguments using the stored ABI, and create platform events for matched conditions.
-
-## Available detection types
-
-### Event match
-
-Alerts immediately when a contract emits a log matching the specified event signature. You can add field-level conditions on decoded event arguments using the operators `eq`, `neq`, `gt`, `lt`, `gte`, `lte`, `contains`, and `not_contains`.
-
-| Field | Description |
+| Status | Meaning |
 |---|---|
-| Network | The blockchain network to monitor |
-| Contract | The contract address to filter events by (leave blank for all contracts) |
-| Event signature | ABI event signature, for example `Transfer(address,address,uint256)` |
-| Conditions | Optional field conditions on decoded event arguments |
+| `loaded` | ABI is available; events and functions are decoded. |
+| `pending` | ABI fetch is in progress. |
+| `missing` | ABI fetch completed but no ABI was found (contract may not be verified). |
+| `error` | ABI fetch failed. Try again or upload manually. |
 
-### Function call match
+To retry ABI fetching, navigate to the contract detail page and click
+**Fetch ABI**.
 
-Alerts when a transaction calls a specific function on a monitored contract. The contract address is required.
+### Contract detail page
 
-| Field | Description |
-|---|---|
-| Network | The blockchain network to monitor |
-| Contract | Required: the contract address receiving the function call |
-| Function signature | ABI function signature, for example `transfer(address,uint256)` |
-| Conditions | Optional field conditions on decoded function arguments |
+Navigate to **Chain > Contracts** and click a contract to see:
 
-### Windowed count
+- **ABI Events** -- decoded event signatures (for example,
+  `Transfer(address,address,uint256)`).
+- **ABI Functions** -- decoded function signatures with state mutability.
+- **Linked Detections** -- active detections that reference this contract.
+- **Proxy information** -- whether the contract is a proxy and its
+  implementation address.
+- **Storage layout** -- if available, the contract's storage layout for
+  state monitoring.
 
-Alerts when the specified event occurs at or above a threshold within a rolling time window.
+## What blockchain events Sentinel tracks
 
-| Field | Description |
-|---|---|
-| Event signature | ABI event signature to count |
-| Time window (ms) | Rolling window duration |
-| Alert threshold | Alert when count reaches this value |
-| Group by field | Optional: count separately per value of a decoded argument |
+Sentinel monitors the following categories of on-chain activity:
 
-### Windowed spike
+### Log events
 
-Alerts when the event rate in the observation window significantly exceeds the historical baseline rate.
+Sentinel decodes EVM log events emitted by monitored contracts. Common events
+include:
 
-| Field | Description |
-|---|---|
-| Event signature | ABI event signature to track |
-| Observation window (ms) | Recent window to compare against baseline |
-| Baseline window (ms) | Historical window to establish normal rate |
-| Rate increase % | Percentage increase required to trigger |
-| Minimum baseline count | Skip alert if baseline has fewer events |
+- `Transfer(address,address,uint256)` -- token transfers (ERC-20, ERC-721).
+- `Approval(address,address,uint256)` -- token approvals.
+- `OwnershipTransferred(address,address)` -- ownership changes.
+- `Upgraded(address)` -- proxy implementation changes.
+- `Paused(address)` / `Unpaused(address)` -- emergency circuit breakers.
+- `RoleGranted(bytes32,address,address)` / `RoleRevoked(bytes32,address,address)` -- access control changes.
+- `AddedOwner(address)` / `RemovedOwner(address)` -- multisig signer changes.
 
-### Balance tracking
+### State changes
 
-Alerts when a wallet or contract balance meets a condition. Supports native ETH balances and ERC-20 token balances via the `tokenAddress` configuration field.
+Sentinel polls EVM storage slots and view functions at configurable intervals
+to detect state changes that do not emit events:
 
-| Field | Description |
-|---|---|
-| Address | The address to track |
-| Token address | Optional: ERC-20 token contract address. Leave blank for native balance. |
-| Condition type | `percent_change`, `threshold_above`, or `threshold_below` |
-| Threshold / percent | Amount in wei, or a percentage value |
-| Window (ms) | Look-back window for `percent_change` |
-| Bidirectional | For `percent_change`: also alert on rises, not only drops |
+- Storage slot monitoring (for example, proxy implementation slot changes).
+- Balance tracking (native and ERC-20 token balances).
+- View function return value monitoring.
 
-### State polling
+### Transaction-level monitoring
 
-Alerts when a contract storage slot value meets a condition. Snapshots are retained per rule, up to a maximum of 500, to support rolling-window calculations.
+- Contract creation by monitored addresses.
+- Function call matching by 4-byte selector.
 
-| Field | Description |
-|---|---|
-| Contract | The contract address to poll |
-| Storage slot | The hex-encoded storage slot to monitor |
-| Condition type | `changed`, `threshold_above`, `threshold_below`, or `windowed_percent_change` |
-| Percent threshold | Required for `windowed_percent_change` |
-| Window size | Number of historical snapshots for rolling mean. Max: 500 |
+## Available detection templates
 
-### View call
+Navigate to **Chain > Templates** to see the full list. Sentinel ships with
+the following built-in templates:
 
-Monitors the return value of a read-only contract function. Supports dynamic argument tokens:
+### Token activity
 
-| Token | Resolved to |
-|---|---|
-| `$NOW` | Current Unix timestamp (seconds) |
-| `$BLOCK_NUMBER` | Latest block number |
-| `$BLOCK_TIMESTAMP` | Timestamp of the latest block |
-
-## Understanding blockchain event types
-
-Sentinel generates the following platform event types from blockchain data:
-
-| Event type | Trigger |
-|---|---|
-| `chain.event.matched` | A log matched an event-match rule |
-| `chain.function_call.matched` | A transaction matched a function-call rule |
-| `chain.state.changed` | A storage slot or balance value triggered an alert condition |
-| `chain.block.processed` | Summary event after processing a block (for windowed aggregation) |
-
-## Example: Monitoring a Gnosis Safe for owner changes
-
-1. **Add the network**: Add Ethereum Mainnet (chain ID `1`) with your Infura or Alchemy RPC URL.
-2. **Add the contract**: Add the Gnosis Safe address. Sentinel fetches the ABI from Etherscan if an API key is configured.
-3. **Create event match detections** for the following signatures:
-   - `AddedOwner(address)` -- severity: Critical
-   - `RemovedOwner(address)` -- severity: Critical
-   - `ChangedThreshold(uint256)` -- severity: High
-
-## Rate limits and RPC usage
-
-Sentinel tracks RPC call metrics internally. Be aware of the following when configuring your integration:
-
-| Provider | Free tier limit | Recommended plan |
+| Template | Severity | Description |
 |---|---|---|
-| Infura | 100,000 requests/day | Growth or Team |
-| Alchemy | 300 million CU/month | Growth |
-| QuickNode | 10 million credits/month | Build or Scale |
+| Large Transfer Monitor | High | Alerts when an ERC-20 transfer exceeds a threshold amount. |
+| Repeated Transfer Detector | High | Alerts when the same recipient receives more than N transfers within a time window. |
+| Transfer Volume Monitor | High | Alerts when total transferred volume exceeds a threshold within a rolling window. |
 
-Sentinel makes one `eth_blockNumber` call per poll interval plus `eth_getLogs` calls per monitored address range per block. Balance tracking and state polling rules add `eth_getBalance`, `eth_getStorageAt`, and `eth_call` requests.
+### Balance monitoring
 
-The Etherscan free tier allows 5 calls per second. Sentinel queries Etherscan only during contract ABI lookups, not during ongoing monitoring.
+| Template | Severity | Description |
+|---|---|---|
+| Fund Drainage Detection | Critical | Alerts when a contract's balance drops by a percentage within a time window. |
+| Balance Low Alert | Medium | Alerts when an address balance falls below a minimum threshold. |
+| Balance Tracker | Medium | Alerts on balance changes by percentage, minimum, or maximum threshold. |
+| Native Balance Anomaly | High | Alerts when native balance drops by a percentage within a time window. |
+
+### Governance and access control
+
+| Template | Severity | Description |
+|---|---|---|
+| Contract Ownership Monitor | Critical | Alerts on ownership transfers (Ownable and Ownable2Step). |
+| Access-Control Role Change | High | Alerts when AccessControl roles are granted or revoked. |
+| Proxy Upgrade Monitor | Critical | Alerts on ERC-1967 Upgraded events. |
+| Proxy Upgrade Slot Watcher | Critical | Polls the ERC-1967 implementation storage slot for changes. |
+| Multisig Signer Change | High | Alerts when Safe (Gnosis Safe) owners are added or removed. |
+| Pause State Monitor | High | Alerts when a contract is paused or unpaused. |
+
+### State monitoring
+
+| Template | Severity | Description |
+|---|---|---|
+| Storage Anomaly Detector | High | Monitors an EVM storage slot for unexpected changes or threshold crossings. |
+| Custom Storage Slot Monitor | Medium | Polls an arbitrary storage slot and alerts on user-defined conditions. |
+| Custom View Function Monitor | Medium | Calls a read-only function on a schedule and alerts on return value conditions. |
+
+### Custom
+
+| Template | Severity | Description |
+|---|---|---|
+| Custom Event Monitor | Medium | Watches for any on-chain event by Solidity signature with optional parameter filters. |
+| Custom Function Call Monitor | High | Alerts when a specific function is called by matching the 4-byte selector. |
+| Custom Windowed Event Count | Medium | Counts event occurrences within a sliding window and alerts when threshold is exceeded. |
+| Activity Spike Detector | High | Alerts when event firing rate increases dramatically compared to a baseline period. |
+| Contract Creation Watcher | High | Alerts when a monitored address deploys a new contract. |
+
+### Activating a template
+
+1. Navigate to **Chain > Templates**.
+2. Click the template you want to enable.
+3. Select the **Network** and **Contract** for monitoring.
+4. Configure template-specific inputs (thresholds, time windows, event
+   signatures).
+5. Optionally assign a notification channel.
+6. Click **Create Detection**.
+
+## RPC usage monitoring
+
+Sentinel tracks RPC call volume and error rates per network.
+
+1. Navigate to **Chain > RPC**.
+2. The RPC usage dashboard shows:
+   - **Total calls** -- aggregate call count over the selected time range.
+   - **Error rate** -- percentage of calls that returned errors.
+   - **Per-network breakdown** -- call counts and latency per network.
+
+Use the time range filters and network selector to narrow the view. RPC usage
+data is aggregated hourly and retained for analysis.
+
+## State polling configuration
+
+For detection templates that poll on-chain state (storage slots, balances,
+view functions), you can configure:
+
+- **Poll interval** -- how frequently Sentinel reads the value (minimum:
+  10,000 ms). Shorter intervals detect changes faster but consume more RPC
+  calls.
+- **Alert condition** -- when to fire an alert:
+  - **Any change** -- alert on any value change.
+  - **Equals value** -- alert when the value equals a specific amount.
+  - **Greater than / Less than** -- alert on threshold crossings.
+  - **Changes by %** -- alert when the value changes by a percentage.
+
+State polling results are visible on the **Chain > State Changes** page. You
+can filter by rule, contract address, snapshot type (balance, storage, or
+view-call), and whether the snapshot triggered an alert.
 
 ## Troubleshooting
 
-### RPC connection fails
+### Contract shows "ABI: pending" indefinitely
 
-- Verify the RPC URL is correct and uses HTTPS.
-- Confirm the URL is not blocked by your network's egress firewall.
-- Test the endpoint directly with a `curl` command: `curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' <your-rpc-url>`.
+The ABI fetch job may be queued behind other work. Try:
 
-### Sentinel falls behind on blocks
+1. Navigate to the contract detail page.
+2. Click **Fetch ABI** to re-queue the job.
+3. If the contract is not verified on the block explorer, upload the ABI
+   manually.
 
-- Your RPC provider's rate limit may be too low. Upgrade to a higher-tier plan.
-- Add a second RPC URL for failover to distribute load.
-- Reduce the number of monitored contracts if possible.
+### No events appearing for a monitored contract
 
-### No events are matched despite active rules
+1. Verify the contract address is correct (check the block explorer).
+2. Verify the contract emits the events you expect. Some contracts use
+   non-standard event signatures.
+3. Confirm the network is actively polling. Navigate to **Chain > Networks**
+   and check that **Polling Active** is true and **Current Block** is
+   advancing.
+4. Check the RPC endpoint health on **Chain > RPC**. High error rates may
+   indicate a failing endpoint.
 
-- Confirm the event signature in the rule matches the contract's ABI exactly.
-- Verify the contract address is correct and lowercase.
-- Check whether the contract has emitted the target event recently using a block explorer.
+### RPC errors or high latency
+
+1. Verify your RPC endpoint is operational (test with `curl` or an Ethereum
+   client).
+2. If using a rate-limited public endpoint, switch to a dedicated provider
+   (Alchemy, Infura, QuickNode).
+3. Update the RPC URL under **Chain > RPC** and Sentinel will use it
+   immediately.
+
+### Detection fires too frequently
+
+Adjust the template parameters:
+
+- Increase the **threshold** for transfer amount or event count monitors.
+- Increase the **time window** for windowed detections.
+- Increase the **poll interval** for state polling detections.
+- Add parameter filters to narrow the events that match (for example, filter
+  by `from` or `to` address).
+
+### "Unknown network" error when adding a contract
+
+The specified network ID does not exist in Sentinel. Navigate to **Chain >
+Networks** and verify the network is registered and active. If it is missing,
+ask your Sentinel administrator to add it.

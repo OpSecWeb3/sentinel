@@ -1,177 +1,246 @@
-# GitHub App integration
+# GitHub App Integration
 
-This guide explains how to connect Sentinel to your GitHub organization using a GitHub App. After completing this setup, Sentinel monitors your organization's repositories, members, branch protections, deploy keys, secret scanning alerts, force pushes, and organization-level settings in real time.
-
-## What Sentinel monitors
-
-When the GitHub App integration is active, Sentinel ingests webhook events from your GitHub organization and evaluates them against your configured detections. Sentinel monitors the following:
-
-- **Repository visibility changes**: Detects when a repository is made public or private.
-- **Branch protection rules**: Detects when branch protections are created, modified, or deleted.
-- **Member changes**: Detects when users are added to or removed from repositories and the organization.
-- **Deploy keys**: Detects when deploy keys with write access are added or removed.
-- **Secret scanning alerts**: Detects when GitHub identifies a leaked credential in a commit.
-- **Force pushes**: Detects when a force push targets a protected branch such as `main`, `master`, `release/*`, or `production`.
-- **Organization and team events**: Detects organization membership changes, team creation and deletion, and organization-level administrative actions.
-
-Sentinel also performs a periodic repository sync to maintain an up-to-date list of repositories and their settings. The sync runs automatically after installation and can be triggered on demand.
+This guide explains how to connect Sentinel to your GitHub organizations and
+repositories so that Sentinel can monitor security-relevant events in real time.
 
 ## Prerequisites
 
-Before you begin, confirm the following:
+- A Sentinel account with the **Admin** role in your organization.
+- Owner or admin access to the GitHub organization you want to monitor.
+- The Sentinel instance must be reachable from the public internet (GitHub
+  delivers webhooks over HTTPS).
 
-- You have owner or admin access to the GitHub organization you want to monitor.
-- You have the **admin** role in your Sentinel organization.
-- Your Sentinel instance is accessible from the public internet, or from GitHub's webhook delivery IP ranges, to receive webhook events.
-- Your Sentinel server administrator has configured the `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_SLUG` environment variables.
+## Installing the GitHub App
 
-## Step 1: Install the GitHub App via OAuth flow
+### Automated installation (recommended)
 
-The OAuth-assisted flow is the recommended setup path for GitHub.com. Sentinel handles the full installation lifecycle automatically.
+1. Open the Sentinel web console and navigate to **GitHub > Overview**.
+2. Click **+ Install GitHub App**.
+3. Sentinel redirects you to GitHub. Sign in if prompted.
+4. Select the GitHub organization (or personal account) where you want to
+   install the app.
+5. Choose whether to grant access to **All repositories** or **Only select
+   repositories**.
+6. Click **Install**.
+7. GitHub redirects you back to Sentinel. A success banner confirms the
+   installation.
 
-1. In Sentinel, navigate to **Settings** and select **GitHub**.
-2. Click **Connect GitHub App**. Sentinel generates an HMAC-signed state parameter for CSRF protection and redirects you to GitHub.
-3. On GitHub, authorize the installation for your organization. Select **All repositories** or choose specific repositories to monitor.
-4. GitHub redirects you back to Sentinel at the callback URL. Sentinel performs the following actions automatically:
-   - Fetches installation details from the GitHub API, including the installation ID, target organization or user, permissions, and subscribed events.
-   - Generates a unique HMAC-SHA256 webhook secret for the installation and encrypts it at rest.
-   - Stores the installation record in the database.
-   - Queues a background repository sync job.
-5. You are redirected to the GitHub settings page in Sentinel, which displays the connected installation.
+Sentinel automatically triggers a repository sync after installation. Within
+a few seconds, the **Repositories** page shows every repository the app can
+access.
 
-> **Note:** The OAuth state parameter expires after 10 minutes. If you do not complete the flow within that time, return to Sentinel and start again.
+> **Note:** The redirect URL includes a cryptographically signed state
+> parameter that expires after 10 minutes. If you leave the GitHub
+> authorization page open for longer than 10 minutes, restart the flow from
+> Step 2.
 
-### Manual setup (GitHub Enterprise Server or custom installations)
+### Manual installation (GitHub Enterprise Server)
 
-If your organization uses GitHub Enterprise Server or the OAuth flow is not available, you can register an installation manually.
+If you run a self-hosted GitHub Enterprise Server instance, use the manual
+setup endpoint instead.
 
-1. In Sentinel, navigate to **Settings** and select **GitHub**, then click **Add Installation Manually**.
-2. Enter the following values:
-   - **Installation ID**: The numeric GitHub App installation ID. Find this in the URL after installing the App on GitHub, for example `https://github.com/organizations/your-org/settings/installations/12345678`.
-   - **Webhook secret**: A strong random string of at least 20 characters. You must configure the same secret in your GitHub App's webhook settings.
-   - **Base URL** (optional): Required only for GitHub Enterprise Server. Enter the GHE base URL, for example `https://github.example.com`.
-3. Click **Save**. Sentinel encrypts the webhook secret, verifies the installation with the GitHub API, and queues a repository sync.
+1. Create a GitHub App on your GHES instance with the permissions listed in
+   the section below.
+2. Install the app on your organization and note the **installation ID**.
+3. Generate a webhook secret (at least 20 characters).
+4. In the Sentinel web console, navigate to **Settings > GitHub**.
+5. Enter the **Installation ID** and **Webhook Secret**, then click
+   **Save**.
+6. Sentinel verifies the installation against the GitHub API and begins
+   syncing repositories.
 
-> **Warning:** The webhook secret must be at least 20 characters. Sentinel uses HMAC-SHA256 to verify all incoming webhook deliveries. If this secret does not match the value configured on the GitHub App, all webhooks are rejected with a 401 response.
+## Required GitHub App permissions
 
-## Step 2: Configure the GitHub App permissions
+Sentinel requests the following permissions during installation:
 
-If you are creating a new GitHub App (rather than using Sentinel's managed App), configure the following permissions:
-
-### Required permissions
-
-| Permission | Access level | Purpose |
+| Permission | Access | Purpose |
 |---|---|---|
-| **Contents** | Read-only | Read repository content for sync operations |
-| **Members** | Read-only | Monitor organization membership changes |
-| **Administration** | Read-only | Monitor repository settings and organization-level configuration |
-| **Metadata** | Read-only | Required by GitHub for all Apps |
-| **Secrets** | Read-only | Receive secret scanning alert events |
+| Repository metadata | Read | List repositories, detect visibility changes |
+| Repository administration | Read | Branch protection rule changes |
+| Organization members | Read | Member additions and removals |
+| Organization administration | Read | Organization setting changes |
+| Secret scanning alerts | Read | Detect exposed secrets |
 
-### Subscribed webhook events
+Sentinel subscribes to these webhook event types:
 
-| Event | What Sentinel monitors |
-|---|---|
-| `repository` | Visibility changes (public/private) |
-| `branch_protection_rule` | Creation, modification, and deletion of branch protection rules |
-| `member` | Members added to or removed from repositories |
-| `organization` | Organization-level member and team events |
-| `team` | Team creation, deletion, and membership changes |
-| `deploy_key` | Deploy key creation and deletion |
-| `secret_scanning_alert` | New and resolved secret scanning alerts |
-| `push` | Force pushes to protected branches |
+- `repository` -- visibility, creation, deletion, archival, transfer, rename
+- `member` -- collaborator added, removed, or permission changed
+- `organization` -- member added, removed, invited
+- `team` -- created, deleted, edited, repository access changed
+- `branch_protection_rule` -- created, edited, deleted
+- `deploy_key` -- created, deleted
+- `secret_scanning_alert` -- created, resolved
+- `push` -- code pushed (used for force-push detection)
+- `installation` -- created, deleted, suspended, unsuspended
 
-> **Note:** Some events only become available after you grant the corresponding permission. If you do not see a particular event in your GitHub App settings, confirm that the related permission is enabled.
+## Managing tracked repositories
 
-## Step 3: Configure the webhook URL
+After installation, Sentinel automatically syncs the list of accessible
+repositories.
 
-After completing the Sentinel setup, you receive a webhook endpoint URL in the format:
+### Viewing repositories
+
+1. Navigate to **GitHub > Repositories**.
+2. The table shows each repository's name, visibility (public, private, or
+   internal), and last sync timestamp.
+
+### Triggering a manual sync
+
+If repository access changed on the GitHub side (for example, you granted the
+app access to additional repositories), trigger a sync manually:
+
+1. Navigate to **GitHub > Installations**.
+2. Locate the installation and click **Sync**.
+3. Sentinel enqueues a background sync job. The repository list updates within
+   a few seconds.
+
+Sentinel deduplicates concurrent sync requests. If a sync is already running
+for the same installation, the second request is silently dropped.
+
+### Removing an installation
+
+1. Navigate to **GitHub > Installations**.
+2. Click **Delete** next to the installation you want to remove.
+3. Confirm the deletion.
+
+When you remove the last active installation for your organization, Sentinel
+automatically pauses all GitHub detection rules. This prevents false negatives
+from detections that no longer receive events.
+
+## Available detection templates
+
+Navigate to **GitHub > Templates** to see the full list. Sentinel ships with
+the following built-in detection templates:
+
+### Access control
+
+| Template | Severity | Description |
+|---|---|---|
+| Repository Visibility Monitor | Critical | Alerts when a repository is made public. Prevents accidental exposure of private code. |
+| Member Access Monitor | High | Alerts on member additions and removals. Tracks who has access to your repositories and organization. |
+| Deploy Key Monitor | High | Alerts when deploy keys are added. Write-access keys are a common supply chain attack vector. |
+
+### Code protection
+
+| Template | Severity | Description |
+|---|---|---|
+| Branch Protection Changes | High | Alerts when branch protection rules are modified or removed. Detects weakening of code review requirements. |
+| Force Push Detection | Critical | Alerts on force pushes to critical branches. Force pushes can rewrite history and bypass code review. |
+
+### Secrets
+
+| Template | Severity | Description |
+|---|---|---|
+| Secret Scanning Alerts | Critical | Alerts when GitHub detects exposed secrets. Immediate action required to rotate compromised credentials. |
+
+### Organization
+
+| Template | Severity | Description |
+|---|---|---|
+| Organization Settings Monitor | High | Alerts on organization and team changes. Tracks membership, team permissions, and org-level events. |
+
+### Comprehensive
+
+| Template | Severity | Description |
+|---|---|---|
+| Full GitHub Security Suite | Critical | Enables all GitHub security monitors in one detection. Covers visibility, access, branch protection, force pushes, secrets, and org changes. |
+
+To activate a template:
+
+1. Navigate to **GitHub > Templates**.
+2. Click the template you want to enable.
+3. Configure any required inputs (for example, branch patterns for force-push
+   detection).
+4. Optionally assign a Slack channel for notifications.
+5. Click **Create Detection**.
+
+## Webhook delivery
+
+Sentinel receives GitHub webhooks at:
 
 ```
-https://<your-sentinel-host>/modules/github/webhooks/<installation-uuid>
+POST https://<your-sentinel-api>/modules/github/webhooks/<installation-id>
 ```
 
-The `<installation-uuid>` is the Sentinel-internal UUID for the installation, not the GitHub installation ID. You can find this value on the GitHub installation detail page in Sentinel.
+Each webhook is verified using HMAC-SHA256 with a per-installation secret that
+Sentinel generates and encrypts at rest. Invalid signatures are rejected with
+HTTP 401.
 
-1. Return to your GitHub App settings at `github.com/organizations/<org>/settings/apps/<app-slug>`.
-2. Under **Webhook**, paste the Sentinel URL into the **Webhook URL** field.
-3. Paste your webhook secret into the **Webhook secret** field.
-4. Set **SSL verification** to **Enable SSL verification** unless you are running Sentinel on a non-public network with a self-signed certificate.
-5. Click **Save changes**.
+### Rate limiting
 
-## Step 4: Configure repository monitoring
+Sentinel enforces a rate limit of 100 webhook deliveries per source IP address
+per 60-second window. If your GitHub instance exceeds this limit, Sentinel
+returns HTTP 429. Contact your Sentinel administrator to adjust the limit if
+needed.
 
-After the initial repository sync completes, Sentinel maintains a list of all repositories accessible through the installation. You can view and manage tracked repositories in Sentinel.
+### Deduplication
 
-### Viewing tracked repositories
-
-1. Navigate to the GitHub module page in Sentinel.
-2. Select **Repositories**. The list shows all synced repositories with their metadata.
-
-### Triggering a manual repository sync
-
-If you have added new repositories to the GitHub App installation and want Sentinel to pick them up immediately:
-
-1. Navigate to the GitHub module page.
-2. Find the installation and click **Sync Repositories**.
-3. Sentinel queues a sync job. The sync uses a deduplication job ID to prevent concurrent sync requests from creating duplicate work.
-
-### Filtering synced repositories
-
-When triggering a sync, you can provide optional filter criteria to control which repositories are synced. This is useful for large organizations with hundreds of repositories where you only want to monitor a subset.
-
-## Webhook event processing
-
-Sentinel enforces the following protections on incoming GitHub webhooks:
-
-- **HMAC-SHA256 signature verification**: Every webhook delivery must include a valid `X-Hub-Signature-256` header. Sentinel rejects unsigned or incorrectly signed payloads with a 401 response.
-- **Rate limiting**: Sentinel enforces a rate limit of 100 webhook requests per minute per source IP address.
-- **Body size limit**: Webhook payloads are limited to 5 MB.
-- **Deduplication**: Sentinel uses the `X-GitHub-Delivery` header as a job ID to prevent duplicate processing of retried webhook deliveries.
-
-## Detection templates
-
-Sentinel provides pre-built detection templates for the GitHub module. To view available templates:
-
-1. Navigate to the GitHub module page.
-2. Select **Templates**.
-
-Templates include pre-configured rules for common security monitoring scenarios such as branch protection changes, force push detection, and secret scanning.
-
-## Testing the integration
-
-To confirm that events are flowing from GitHub to Sentinel:
-
-1. In your GitHub organization, go to any repository's settings and make a non-critical change -- for example, rename a team or add yourself as a collaborator, then immediately remove yourself.
-2. Wait 30 to 60 seconds, then navigate to the **Alerts** page in Sentinel.
-3. Filter by **Module: github** and check for a new alert corresponding to the change you made.
-4. If no alert appears, navigate to your GitHub App settings and select the **Advanced** tab. Under **Recent Deliveries**, inspect individual webhook deliveries and their HTTP response codes. A `202 Accepted` response indicates Sentinel received the payload successfully.
-
-> **Note:** Detection rules must be active for events to produce alerts. If you have not yet created any detections for the GitHub module, no alerts appear even if events are being ingested. See [Using Detection Templates](../detections/using-templates.md) or [Custom Rules](../detections/custom-rules.md) to configure your first GitHub detection.
+Sentinel uses the `X-GitHub-Delivery` header as a unique job identifier. If
+GitHub retries a webhook delivery, Sentinel silently drops the duplicate.
 
 ## Troubleshooting
 
-### Webhooks return 401 Unauthorized
+### "Missing required GitHub webhook headers" (HTTP 400)
 
-- Confirm the webhook secret in your GitHub App settings matches the secret stored in Sentinel. If you rotated the secret in Sentinel, update it in GitHub as well.
-- Check that the webhook URL path contains the correct Sentinel installation UUID, not the GitHub numeric installation ID.
+GitHub did not send the expected `X-Hub-Signature-256`, `X-GitHub-Event`, or
+`X-GitHub-Delivery` headers. Verify that:
 
-### Webhooks return 429 Too Many Requests
+- You are using the correct webhook URL.
+- The webhook content type is set to `application/json` in your GitHub App
+  settings.
+- No proxy or load balancer is stripping headers.
 
-Sentinel enforces a rate limit of 100 webhook deliveries per minute per source IP. If you receive 429 responses, your GitHub organization may be generating webhook traffic faster than the limit allows. Contact your Sentinel administrator to adjust the rate limit.
+### "Invalid signature" (HTTP 401)
 
-### Repository sync does not complete
+The HMAC-SHA256 signature does not match. Possible causes:
 
-- Verify that the GitHub App installation has the **Contents** permission set to read-only.
-- Check the Sentinel worker logs for errors related to the `github.repo.sync` job.
-- Ensure the GitHub API is accessible from your Sentinel server. If you are behind a corporate firewall, allow outbound HTTPS to `api.github.com`.
+- The webhook secret was rotated on the GitHub side but not updated in
+  Sentinel. Re-run the installation flow to regenerate the secret.
+- A proxy or WAF modified the request body after GitHub signed it.
+- The installation was removed from Sentinel. Reinstall the GitHub App.
 
-### No alerts appear despite active detections
+### Webhook returns HTTP 429
 
-- Confirm that the detection's module is set to `github`.
-- Verify the detection status is **active**.
-- Check the events list in Sentinel to confirm that events are being ingested. If events appear but no alerts fire, review the detection's rule conditions.
+The source IP address exceeded the rate limit (100 requests per 60 seconds).
+This can happen during large GitHub organization events (for example, bulk
+repository transfers). Sentinel queues miss no events -- GitHub retries
+delivery automatically. If the problem persists, ask your Sentinel
+administrator to increase the `WEBHOOK_RATE_LIMIT`.
 
-### Installation shows "removed" status
+### Repository list is empty after installation
 
-An installation can enter the "removed" status if an administrator deletes it in Sentinel or if the GitHub App is uninstalled from the organization on GitHub's side. To reconnect, repeat the installation flow from Step 1.
+1. Confirm that the GitHub App has access to at least one repository. Check
+   **GitHub > Settings > GitHub Apps > Sentinel > Repository access**.
+2. Navigate to **GitHub > Installations** and click **Sync** to trigger a
+   manual repository sync.
+3. Check the Sentinel worker logs for errors related to
+   `github.repo.sync` jobs.
+
+### Detections are paused unexpectedly
+
+When the last active GitHub installation is removed, Sentinel automatically
+pauses all GitHub detections for your organization. To resume:
+
+1. Reinstall the GitHub App (see "Installing the GitHub App" above).
+2. Navigate to **Detections** and re-enable any paused GitHub detections.
+
+### "GitHub App not configured on this server" (HTTP 501)
+
+The Sentinel server does not have `GITHUB_APP_CLIENT_ID` and
+`GITHUB_APP_SLUG` environment variables set. Contact your Sentinel
+administrator.
+
+### OAuth callback errors
+
+If the GitHub redirect lands on an error page, check the `reason` query
+parameter:
+
+| Reason | Meaning |
+|---|---|
+| `missing_params` | GitHub did not include the installation ID or state. Retry the installation. |
+| `invalid_state` | The CSRF state token is malformed. Clear cookies and retry. |
+| `invalid_signature` | The CSRF state token signature is invalid. This may indicate a tampered URL. |
+| `expired_state` | More than 10 minutes passed since you started the flow. Retry. |
+| `user_mismatch` | The logged-in user does not match the user who initiated the flow. Log in with the correct account. |
+| `github_api_error` | Sentinel could not reach the GitHub API. Check network connectivity and retry. |
+| `queue_unavailable` | The background job queue is down. Contact your Sentinel administrator. |

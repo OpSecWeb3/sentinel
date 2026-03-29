@@ -417,30 +417,66 @@ Reacts to `infra.ct.new_entry` events.
 
 Routes are mounted under `/modules/infra/`.
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/hosts` | Lists monitored hosts and their current security scores. |
-| `POST` | `/hosts` | Adds a new hostname to the monitoring schedule. |
-| `DELETE` | `/hosts/:id` | Removes a host from monitoring. |
-| `POST` | `/hosts/:id/scan` | Triggers an immediate full scan of the specified host. |
-| `GET` | `/hosts/:id/history` | Returns the scan history and score timeline for a host. |
-| `GET` | `/worldview` | Returns the geographic distribution of monitored hosts as a GeoJSON feature collection for the map visualization. Each feature includes the host's current security score, grade, and last scan time. |
-| `GET` | `/templates` | Lists detection templates provided by this module. |
-| `GET` | `/event-types` | Lists event types this module can produce. |
+### Host management
 
-### The worldview map
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/hosts` | Session | Lists monitored hosts with security scores, grades, and scan status. Supports pagination, search (`?q=`), sorting (`?sort=`, `?dir=`), and tree view (`?all=true`). |
+| `POST` | `/hosts` | Session + Admin/Editor | Adds a new hostname to the monitoring schedule. Validates hostname format and creates a scan schedule. |
+| `GET` | `/hosts/:id` | Session | Returns detailed information about a monitored host, including TLS analysis, DNS records, HTTP headers, WHOIS data, and scan history. |
+| `POST` | `/hosts/:id/scan` | Session + Admin/Editor | Triggers an immediate full scan of the specified host. |
+| `DELETE` | `/hosts/:id` | Session + Admin | Soft-deletes a host (marks as inactive). Cleans up associated detections. |
+| `GET` | `/hosts/:id/history` | Session | Returns the scan history and score timeline for a host. |
+| `GET` | `/hosts/:id/certificates` | Session | Lists TLS certificates observed for a host across scan history. |
+| `GET` | `/hosts/:id/dns` | Session | Lists current and historical DNS records for a host, including change history. |
+| `POST` | `/hosts/:id/suppressions` | Session + Admin/Editor | Suppresses a specific finding type for a host (for example, to acknowledge an expected self-signed certificate). |
+| `PUT` | `/hosts/:id/schedule` | Session + Admin/Editor | Updates the scan and probe schedule for a host (interval, probe enable/disable, next run time). |
+| `POST` | `/hosts/:id/discover` | Session + Admin/Editor | Triggers subdomain discovery for a host using CT logs, DNS enumeration, or zone transfer. |
+| `GET` | `/hosts/:id/subdomains` | Session | Lists discovered subdomains for a root host. |
+| `GET` | `/hosts/:id/cdn-origins` | Session | Lists CDN origin records associated with a host. |
 
-The `/modules/infra/worldview` endpoint returns a GeoJSON feature collection that the Sentinel dashboard renders as an interactive world map. Each monitored host with a resolved IP address is plotted as a point feature. Feature properties include:
+### Dashboard and analytics
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/overview` | Session | Returns aggregated statistics: host count, average score, expiring certificates, recent alerts, and score distribution. |
+| `GET` | `/dashboard` | Session | Returns dashboard data including host status breakdown, grade distribution, and worst-scoring hosts. |
+| `GET` | `/findings` | Session | Lists security findings across all monitored hosts with filtering and pagination. |
+| `GET` | `/changes` | Session | Lists recent DNS and certificate changes across all monitored hosts. |
+| `GET` | `/certificates` | Session | Lists all TLS certificates across monitored hosts, with expiry filtering. |
+| `GET` | `/ct-logs` | Session | Lists Certificate Transparency log entries for monitored domains. |
+| `GET` | `/infrastructure/map` | Session | Returns the geographic distribution of monitored hosts as a GeoJSON feature collection for the map visualization. |
+
+### CDN provider management
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/cdn-providers` | Session | Lists configured CDN provider integrations. |
+| `POST` | `/cdn-providers` | Session + Admin | Adds a CDN provider integration (for example, CloudFront). |
+| `DELETE` | `/cdn-providers/:id` | Session + Admin | Removes a CDN provider integration. |
+| `POST` | `/cdn-providers/:id/validate` | Session + Admin | Validates CDN provider credentials and connectivity. |
+| `POST` | `/cdn-providers/check-proxy` | Session | Checks whether a hostname is served through a known CDN. |
+
+### Module metadata
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/templates` | Session | Lists detection templates provided by this module. |
+| `GET` | `/event-types` | Session | Lists event types this module can produce. |
+
+### The infrastructure map
+
+The `/modules/infra/infrastructure/map` endpoint returns a GeoJSON feature collection that the Sentinel dashboard renders as an interactive world map. Each monitored host with a resolved IP address is plotted as a point feature. Feature properties include:
 
 - `hostname`: The monitored hostname.
 - `ip`: The resolved IP address used for geolocation.
-- `score`: Current security score (0–100).
+- `score`: Current security score (0--100).
 - `grade`: Letter grade derived from the score.
 - `lat` / `lon`: Coordinates from IP geolocation.
 - `lastScannedAt`: ISO 8601 timestamp of the most recent scan.
 - `issues`: Count of open security findings.
 
-Hosts without a resolvable IP address or geolocation data are excluded from the worldview response but remain fully monitored and appear in the hosts list.
+Hosts without a resolvable IP address or geolocation data are excluded from the map response but remain fully monitored and appear in the hosts list.
 
 ---
 
@@ -448,6 +484,8 @@ Hosts without a resolvable IP address or geolocation data are excluded from the 
 
 | Event type | Description |
 |---|---|
+| `infra.scan.completed` | A full security scan of a monitored host completed. |
+| `infra.probe.completed` | A reachability probe of a monitored host completed. |
 | `infra.cert.expiring` | A TLS certificate is approaching its expiration date. |
 | `infra.cert.expired` | A TLS certificate has expired. |
 | `infra.cert.issue` | A TLS certificate has a structural problem (chain error, self-signed, weak key, SHA-1, revoked). |
@@ -460,3 +498,28 @@ Hosts without a resolvable IP address or geolocation data are excluded from the 
 | `infra.subdomain.discovered` | A previously unseen subdomain was discovered. |
 | `infra.whois.expiring` | A domain registration is approaching its WHOIS expiry date. |
 | `infra.ct.new_entry` | A new certificate was logged in Certificate Transparency logs for a monitored domain. |
+
+---
+
+## Templates
+
+| Template slug | Name | Category | Default severity |
+|---|---|---|---|
+| `infra-cert-monitor` | Certificate Expiry Monitor | certificates | high |
+| `infra-tls-security` | TLS Security Audit | certificates | high |
+| `infra-dns-change-monitor` | DNS Change Monitor | dns | high |
+| `infra-host-uptime` | Host Uptime Monitor | availability | critical |
+| `infra-domain-expiry` | Domain Expiry Monitor | dns | high |
+| `infra-ct-monitor` | Certificate Transparency Monitor | certificates | medium |
+| `infra-full-audit` | Full Infrastructure Audit | comprehensive | high |
+
+---
+
+## Retention policies
+
+| Table | Timestamp column | Retention | Notes |
+|---|---|---|---|
+| `infra_reachability_checks` | `checked_at` | 30 days | Reachability probe results. High volume (fires every few minutes per host). |
+| `infra_snapshots` | `created_at` | 90 days | Infrastructure snapshots: one per scan per host (IP, geolocation, ports). |
+| `infra_scan_step_results` | `created_at` | 90 days | Per-step scan results (TLS, DNS, headers). Moderate volume. |
+| `infra_score_history` | `recorded_at` | 180 days | Score history for long-term trend analysis. |

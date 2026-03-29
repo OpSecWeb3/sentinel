@@ -325,6 +325,58 @@ All routes are mounted under `/modules/github/`.
 
 ---
 
+## Event types
+
+| Event type | Description |
+|---|---|
+| `github.repository.visibility_changed` | A repository's visibility changed between public and private. |
+| `github.repository.created` | A new repository was created. |
+| `github.repository.deleted` | A repository was deleted. |
+| `github.repository.archived` | A repository was archived. |
+| `github.repository.unarchived` | A repository was unarchived. |
+| `github.repository.transferred` | A repository was transferred to another owner. |
+| `github.repository.renamed` | A repository was renamed. |
+| `github.member.added` | A collaborator was added to a repository. |
+| `github.member.removed` | A collaborator was removed from a repository. |
+| `github.member.edited` | A collaborator's permissions on a repository were changed. |
+| `github.organization.member_added` | A user was added to the organization. |
+| `github.organization.member_removed` | A user was removed from the organization. |
+| `github.organization.member_invited` | A user was invited to the organization. |
+| `github.team.created` | A new team was created in the organization. |
+| `github.team.deleted` | A team was deleted from the organization. |
+| `github.team.edited` | A team's settings were modified. |
+| `github.team.added_to_repository` | A team was granted access to a repository. |
+| `github.team.removed_from_repository` | A team's access to a repository was revoked. |
+| `github.branch_protection.created` | A branch protection rule was created. |
+| `github.branch_protection.edited` | A branch protection rule was modified. |
+| `github.branch_protection.deleted` | A branch protection rule was deleted. |
+| `github.deploy_key.created` | A deploy key was added to a repository. |
+| `github.deploy_key.deleted` | A deploy key was removed from a repository. |
+| `github.secret_scanning.created` | A secret scanning alert was created (secret detected). |
+| `github.secret_scanning.resolved` | A secret scanning alert was resolved. |
+| `github.push` | A push event occurred on a repository. |
+| `github.installation.created` | A GitHub App installation was created. |
+| `github.installation.deleted` | A GitHub App installation was deleted. |
+| `github.installation.suspended` | A GitHub App installation was suspended. |
+| `github.installation.unsuspended` | A GitHub App installation was unsuspended. |
+
+---
+
+## Templates
+
+| Template slug | Name | Category | Default severity |
+|---|---|---|---|
+| `github-repo-visibility` | Repository Visibility Monitor | access-control | critical |
+| `github-member-changes` | Member Change Monitor | access-control | high |
+| `github-deploy-keys` | Deploy Key Monitor | access-control | high |
+| `github-branch-protection` | Branch Protection Monitor | code-protection | high |
+| `github-force-push-protection` | Force Push Protection | code-protection | high |
+| `github-secret-scanning` | Secret Scanning Alert | secrets | critical |
+| `github-org-changes` | Organization Change Monitor | access-control | high |
+| `github-full-security` | Full GitHub Security Suite | comprehensive | high |
+
+---
+
 ## Retention policies
 
 The GitHub module does not declare custom retention policies. Repository and installation metadata are retained according to the platform default (90 days for events). Installation records and repository snapshots persist indefinitely until explicitly removed.

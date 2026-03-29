@@ -1,14 +1,214 @@
 # Using detection templates
 
-Detection templates are pre-built rule configurations that address common security monitoring scenarios. Each template bundles one or more evaluation rules with sensible defaults, so you can deploy a detection in minutes without writing rules from scratch.
+Detection templates are pre-built rule configurations that address common security
+monitoring scenarios. Each template bundles one or more evaluation rules with
+sensible defaults, so you can deploy a detection in minutes without writing rules
+from scratch.
 
-Templates are organized by **module** (the data source they monitor) and **category** (the security domain they address). When you create a detection from a template, Sentinel provisions the underlying rules, connects them to your notification channels, and begins evaluation immediately.
+Templates are organized by **module** (the data source they monitor) and
+**category** (the security domain they address). When you create a detection from
+a template, Sentinel provisions the underlying rules, connects them to your
+notification channels, and begins evaluation immediately.
+
+## What templates are
+
+A template is a reusable blueprint that defines:
+
+- One or more **evaluation rules** with default configurations.
+- A **severity** level appropriate for the threat scenario.
+- A set of **inputs** -- parameters you fill in to customize the template for your
+  environment (for example, a contract address, a token threshold, or a branch
+  name pattern).
+- A **category** that groups related templates within a module (for example,
+  "access-control" or "governance").
+
+When you create a detection from a template, Sentinel resolves the template
+inputs, generates the concrete rules, and stores them as a standard detection.
+You can edit the detection later to change any parameter, and Sentinel rebuilds
+the rules from the template definition with your updated inputs.
+
+## Browsing available templates by module
+
+Navigate to **Detections** in the sidebar, then select **+ New Detection**. The
+template picker displays five module tabs across the top of the page:
+
+| Module tab | Data source | Description |
+|---|---|---|
+| **github** | GitHub webhook events | GitHub security detection templates covering access control, code protection, secrets, and organization management. |
+| **infra** | TLS, DNS, WHOIS, HTTP probes | Infrastructure monitoring templates for certificates, DNS records, domain registration, and host availability. |
+| **chain** | EVM-compatible blockchains | On-chain detection templates for token activity, balance monitoring, governance events, and custom contract monitoring. |
+| **registry** | Docker registries, npm | Supply chain security templates for container image and npm package monitoring. |
+| **aws** | AWS CloudTrail | AWS CloudTrail detection templates organized by MITRE ATT&CK categories: identity, defense evasion, network, data, compute, and reconnaissance. |
+
+Select a module tab to load its templates. Each module organizes templates into
+categories.
+
+### Filtering by category
+
+For modules with predefined categories (github, aws), category buttons appear
+below the module tabs. Select a category to filter the template list. Select
+**all** to show every template in the module.
+
+The github module uses these categories: `access-control`, `code-protection`,
+`secrets`, `organization`, and `comprehensive`.
+
+The aws module uses these categories: `identity`, `defense-evasion`, `network`,
+`data`, `compute`, `reconnaissance`, and `comprehensive`.
+
+For other modules (chain, infra, registry), categories are derived dynamically
+from the loaded templates.
+
+### Searching templates
+
+The chain module provides a search bar for finding templates by name or
+description. Type a query and Sentinel filters the results after a short delay.
+Other modules use category filtering instead of search.
+
+## Creating a detection from a template
+
+Follow these steps to create a detection from a template.
+
+1. Navigate to **Detections** in the sidebar, then select **+ New Detection**.
+2. Select the module tab at the top of the page (**github**, **infra**, **chain**,
+   **registry**, or **aws**).
+3. Optionally filter templates by category or use the search bar (chain module
+   only).
+4. Review the template cards. Each card shows the template name, default severity,
+   category, rule count, and any required inputs.
+5. Select a template card to proceed to the configuration form.
+6. On the configuration form, provide values for all fields marked with a red
+   asterisk (*). These are required inputs.
+7. Optionally customize the **name** field. Sentinel pre-fills the template name.
+8. Select a **severity** level from the dropdown (`critical`, `high`, `medium`,
+   or `low`). The template's default severity is pre-selected.
+9. Set the **cooldown (min)** value. This controls the minimum time between
+   repeated alerts. The default is 5 minutes. The maximum is 1440 minutes (24
+   hours). Set to 0 for no cooldown.
+10. Select **Create Detection**. Sentinel provisions the detection and its rules,
+    validates any prerequisite resources, and redirects you to the detection detail
+    page. Evaluation begins immediately.
+
+If prerequisite resources are missing (for example, no active GitHub App
+installation for a GitHub detection, or no monitored hosts for an infrastructure
+detection), Sentinel returns an error message explaining what to set up first.
+
+## Customizing template parameters
+
+Templates provide default values for most parameters, but you can override any
+value during creation or later through the edit page.
+
+### Overriding severity
+
+The detection inherits the template's severity by default. To change it, select a
+different value from the **severity** dropdown on the configuration form.
+
+### Adjusting thresholds
+
+Many templates expose numeric inputs such as transfer thresholds, time windows,
+and percentage drop limits. Enter your own values to match your operational
+requirements. For number inputs, the template may specify minimum and maximum
+constraints.
+
+### Scoping by resource
+
+Different modules use different resource scoping mechanisms:
+
+- **Blockchain templates** require you to select a **network** and optionally a
+  **contract address**. When you select a contract, Sentinel auto-fills the
+  network. If you leave the contract field empty on templates where it is
+  optional, the detection monitors all contracts on the selected network.
+- **Infrastructure templates** provide a **host scope** field where you enter
+  comma-separated hostnames or glob patterns (for example,
+  `api.example.com, *.prod.example.com`). Leave the field empty for
+  organization-wide monitoring.
+- **Registry templates** provide an **artifact** dropdown where you select a
+  specific monitored Docker image or npm package. Sentinel loads your registered
+  artifacts automatically.
+
+### Conditional inputs
+
+Some template inputs only appear when a prerequisite input has a value. For
+example, a contract filter may only appear after you select a network. These
+conditional inputs use the `showIf` property to control visibility.
+
+### String array inputs
+
+Some inputs accept multiple values, such as a list of addresses or branch
+patterns. Enter one value per line, or use comma-separated values. Sentinel
+parses both formats.
+
+### Changing rule actions after creation
+
+Each template rule has a default action of `alert`, `log`, or `suppress`. After
+creating the detection, you can edit individual rules through the detection edit
+page to change their action. For example, you might change an alerting rule to
+`log` during an initial tuning period.
+
+## Example: setting up a "suspicious transfer" template for blockchain
+
+This example demonstrates creating a detection that alerts on large ERC-20
+token transfers.
+
+1. Navigate to **Detections** > **+ New Detection**.
+2. Select the **chain** tab.
+3. In the search bar, type "transfer" to filter templates.
+4. Select the **Large Transfer Monitor** card. The card shows severity `high`,
+   category `token-activity`, and lists required inputs: network, contract
+   address, and threshold.
+5. On the configuration form:
+   - **Name**: Enter "Treasury USDC large transfer alert" or keep the default.
+   - **Severity**: Select `critical` (upgrading from the default `high` because
+     this monitors a treasury contract).
+   - **Cooldown**: Set to `15` minutes to avoid repeated alerts during a batch
+     transfer session.
+   - **Network**: Select your target network from the dropdown (for example,
+     "Ethereum Mainnet (chainId: 1)").
+   - **Contract**: Select the USDC contract from the dropdown, or leave empty to
+     monitor all contracts on the selected network.
+   - **Threshold**: Enter the token amount that constitutes a "large" transfer
+     (for example, `1000000` for 1 million tokens in base units).
+6. Select **Create Detection**.
+
+Sentinel creates the detection with rules configured to monitor Transfer events
+on the specified contract and alert when the transfer amount exceeds your
+threshold.
+
+## Example: setting up a "repo made public" template for GitHub
+
+This example demonstrates creating a detection that alerts when a repository in
+your GitHub organization is made public.
+
+1. Navigate to **Detections** > **+ New Detection**.
+2. Select the **github** tab.
+3. Select the **access-control** category.
+4. Select the **Repository Visibility Monitor** card. The card shows severity
+   `critical` and lists the template description.
+5. On the configuration form:
+   - **Name**: Enter "Production org repo visibility alert" or keep the default.
+   - **Severity**: Keep as `critical`. A repository becoming public is a high-risk
+     event.
+   - **Cooldown**: Set to `0` minutes. This event is rare, and you want an alert
+     every time it occurs.
+   - Fill in any required template inputs. For the visibility monitor, you may
+     need to specify which visibility change to watch for (typically
+     "publicized").
+6. Select **Create Detection**.
+
+Sentinel creates the detection and begins monitoring your GitHub organization's
+webhook events. When any repository is made public, the detection fires and sends
+notifications to all assigned channels.
+
+To receive notifications, assign at least one notification channel to the
+detection. You can do this during creation or by editing the detection afterward.
+See [Configuring notification channels](../alerts/configuring-channels.md) for
+instructions.
 
 ## Available templates by module
 
 ### Blockchain (chain)
 
-The blockchain module monitors on-chain activity across EVM-compatible networks. Templates are grouped into the following categories.
+The blockchain module monitors on-chain activity across EVM-compatible networks.
+Templates are grouped into the following categories.
 
 **Token activity**
 
@@ -58,7 +258,9 @@ The blockchain module monitors on-chain activity across EVM-compatible networks.
 
 ### GitHub
 
-The GitHub module processes webhook events from your GitHub organization. Categories include access control, code protection, secrets, and organization management.
+The GitHub module processes webhook events from your GitHub organization.
+Categories include access control, code protection, secrets, and organization
+management.
 
 | Template | Category | Severity | Description |
 |---|---|---|---|
@@ -73,7 +275,8 @@ The GitHub module processes webhook events from your GitHub organization. Catego
 
 ### Registry
 
-The registry module monitors Docker image registries and npm package registries for supply chain threats.
+The registry module monitors Docker image registries and npm package registries
+for supply chain threats.
 
 **Container security**
 
@@ -123,7 +326,8 @@ The registry module monitors Docker image registries and npm package registries 
 
 ### Infrastructure (infra)
 
-The infrastructure module monitors TLS certificates, DNS records, domain registration, and host availability.
+The infrastructure module monitors TLS certificates, DNS records, domain
+registration, and host availability.
 
 | Template | Category | Severity | Description |
 |---|---|---|---|
@@ -137,7 +341,8 @@ The infrastructure module monitors TLS certificates, DNS records, domain registr
 
 ### AWS
 
-The AWS module processes CloudTrail events to detect identity, network, and data security threats.
+The AWS module processes CloudTrail events to detect identity, network, and data
+security threats.
 
 | Template | Category | Severity | Description |
 |---|---|---|---|
@@ -158,32 +363,6 @@ The AWS module processes CloudTrail events to detect identity, network, and data
 | Secrets Manager Access Monitor | Data | High | Alert on secret reads and deletions. |
 | Access Denied Monitor | Reconnaissance | Medium | Alert on repeated access-denied errors. |
 | AWS Full Security Suite | Comprehensive | Critical | All Tier 1 AWS monitors in one detection. |
-
-## Creating a detection from a template
-
-1. Navigate to **Detections** in the sidebar, then select **New Detection**.
-2. Select the module tab at the top of the page (**github**, **infra**, **chain**, **registry**, or **aws**).
-3. Optionally filter templates by category using the category buttons, or use the search bar (available for the chain module).
-4. Select a template card. The card displays the template name, severity level, category, rule count, and any required inputs.
-5. On the configuration form, provide values for all required inputs. Required inputs are listed at the bottom of each template card.
-6. Optionally customize the detection name. If you leave it blank, Sentinel uses the template name.
-7. Set the **Cooldown** period. This determines the minimum time between repeated alerts from this detection. The default is 5 minutes; the maximum is 1440 minutes (24 hours).
-8. Assign one or more **Notification channels** to route alerts to Slack, email, or webhook endpoints.
-9. Select **Create Detection**. Sentinel provisions the detection and its rules, and evaluation begins immediately.
-
-## Customizing template defaults
-
-Templates provide default values for most parameters, but you can override any value during creation.
-
-**Overriding severity.** The detection inherits the template's severity by default. To change it, update the severity dropdown on the creation form.
-
-**Adjusting thresholds.** Many templates expose numeric inputs such as transfer thresholds, time windows, and percentage drop limits. Enter your own values to match your operational requirements.
-
-**Scoping by resource.** Blockchain templates require you to select a network and contract address. Infrastructure templates apply to monitored hosts. Use these resource selectors to narrow the detection scope.
-
-**Changing rule actions.** Each template rule has a default action of `alert`, `log`, or `suppress`. After creating the detection, you can edit individual rules to change their action. For example, you might change an alerting rule to `log` during an initial tuning period.
-
-After creation, you can update any detection parameter through the detection detail page. When you edit a template-based detection, Sentinel rebuilds the underlying rules with your new inputs while preserving notification channel assignments and cooldown settings.
 
 ## Template categories and use cases
 

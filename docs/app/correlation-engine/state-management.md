@@ -183,9 +183,7 @@ The `AGG_INCR_LUA` script atomically increments a counter, refreshes the window 
 
 ```lua
 local count = redis.call('INCR', KEYS[1])
-if count == 1 then
-  redis.call('PEXPIRE', KEYS[1], ARGV[2])
-end
+redis.call('PEXPIRE', KEYS[1], ARGV[2])
 if count >= tonumber(ARGV[1]) then
   redis.call('DEL', KEYS[1])
   return {count, 1}
@@ -193,7 +191,7 @@ end
 return {count, 0}
 ```
 
-The script sets the TTL only on the first increment (`count == 1`), anchoring the window start to the first event. If the threshold is reached, the key is atomically deleted in the same script so no second worker can observe `count >= threshold` before the reset. The return value `[count, 1]` indicates the threshold was reached.
+The script refreshes the TTL on every increment via `PEXPIRE`. If the threshold is reached, the key is atomically deleted in the same script so no second worker can observe `count >= threshold` before the reset. The return value `[count, 1]` indicates the threshold was reached.
 
 ### Distinct-count mode (SADD)
 
@@ -245,7 +243,7 @@ Redis memory usage scales with the number of active sequences and absence timers
 | Aggregation INCR | `AGG_INCR_LUA` Lua script | Atomic increment + threshold check + delete |
 | Aggregation SADD | `AGG_SADD_LUA` Lua script | Atomic add + cardinality check + delete |
 | Sequence advancement | `SEQ_ADVANCE_LUA` Lua CAS | Only the worker whose expected step index matches succeeds |
-| Absence key creation | Plain `SET` (only if key does not exist via `GET` check) | First trigger wins; subsequent triggers are ignored |
+| Absence key creation | `SET NX PX` (atomic set-if-not-exists) | First trigger wins; subsequent triggers are ignored |
 | Absence cancellation | `DEL` + `ZREM` | Last writer wins (benign -- both delete the same key) |
 
 ## TTL management and cleanup

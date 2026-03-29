@@ -12,12 +12,14 @@ the credentials required, rate limits, and failure modes.
 | Etherscan API | Contract ABI and source verification lookup | `@sentinel/module-chain` | API key (optional, higher rate limits) | Contract metadata unavailable; detection rule setup degrades |
 | EVM JSON-RPC nodes | Block polling, log fetching, balance/state/view calls | `@sentinel/module-chain` | RPC URL (may include API key for Infura/Alchemy) | Chain module non-functional for affected chain |
 | Docker Hub API | Tag listing, digest comparison, image metadata | `@sentinel/module-registry` | Optional Bearer token per artifact | Registry digest-change detection unavailable for Docker artifacts |
+| GitHub Container Registry (GHCR) | Docker image tag and digest polling | `@sentinel/module-registry` | `GITHUB_TOKEN` PAT or per-artifact credentials | GHCR image monitoring unavailable or limited to public images |
 | npm Registry API | Package metadata, version listing, dist-tag tracking | `@sentinel/module-registry` | Optional Bearer token per artifact | Registry version-change detection unavailable for npm artifacts |
 | crt.sh (Certificate Transparency) | CT log queries for subdomain discovery and certificate monitoring | `@sentinel/module-infra` | None (public API) | Subdomain discovery and CT log monitoring degrade gracefully |
 | WHOIS (port 43) | Domain registration expiry and registrar lookup | `@sentinel/module-infra` | None (raw TCP socket) | WHOIS expiry detection unavailable for affected TLDs |
-| Sigstore TUF | Trust root for registry artifact signature verification | `@sentinel/module-registry` | None (public PKI) | Signature verification fails until trust root is fetched |
+| Sigstore TUF / Rekor | Trust root for registry artifact signature and provenance verification | `@sentinel/module-registry` | None (public PKI) | Signature verification fails until trust root is fetched |
 | AWS SQS | Polling CloudTrail event notifications | `@sentinel/module-aws` | IAM role ARN (preferred) or access key | AWS module non-functional for affected integration |
 | AWS STS | Assuming IAM roles for cross-account access | `@sentinel/module-aws` | IAM role with `sts:AssumeRole` | Cannot assume cross-account roles; falls back to static credentials if configured |
+| Sentry | Error tracking and performance monitoring | `@sentry/nextjs`, API, worker | DSN (ingest key) | Error reporting disabled; no operational impact |
 | SMTP server | Email alert delivery | `nodemailer` | SMTP URL with credentials | Email alert channels fail; BullMQ retries |
 
 ---
@@ -186,7 +188,7 @@ exponential, 2-second base delay).
 
 **Module**: `@sentinel/module-chain`
 **Source**: `modules/chain/src/etherscan.ts`
-**Environment variables**: `ETHERSCAN_API_KEY` (runtime, not Zod-validated)
+**Environment variables**: `ETHERSCAN_API_KEY` (Zod-validated, optional)
 
 ### Purpose
 
@@ -375,6 +377,41 @@ High-frequency polling of many artifacts from a single IP can exhaust this limit
 
 ---
 
+## GitHub Container Registry (GHCR)
+
+**Module**: `@sentinel/module-registry`
+**Source**: `modules/registry/src/polling.ts`
+**Environment variables**: `GITHUB_TOKEN`
+
+### Purpose
+
+The registry module polls GHCR (`ghcr.io`) for Docker image tag changes. GHCR is used
+alongside Docker Hub as a monitored container registry.
+
+### Authentication
+
+Requests use the `GITHUB_TOKEN` personal access token (PAT) set globally, or per-artifact
+credentials stored encrypted in the database. Without authentication, only public images are
+accessible.
+
+### Rate limits
+
+GHCR shares the GitHub API rate limit:
+
+| Tier | Limit |
+|------|-------|
+| Authenticated | 5,000 requests/hour |
+| Unauthenticated | 60 requests/hour per IP |
+
+### Failure modes
+
+| Failure | Impact | Recovery |
+|---------|--------|----------|
+| GHCR unreachable | Image monitoring paused | BullMQ retries; poll sweep re-triggers on next cycle |
+| Token expired or revoked | Authentication fails; falls back to unauthenticated (public images only) | Regenerate `GITHUB_TOKEN` or update per-artifact credentials |
+
+---
+
 ## npm Registry API
 
 **Module**: `@sentinel/module-registry`
@@ -557,7 +594,7 @@ The WHOIS parser extracts:
 
 ---
 
-## Sigstore TUF
+## Sigstore TUF and Rekor
 
 **Module**: `@sentinel/module-registry`
 **Packages**: `@sigstore/verify`, `@sigstore/bundle`, `@sigstore/tuf`
@@ -604,6 +641,18 @@ AWS CloudTrail and Sentinel.
 | IAM role (recommended) | Sentinel assumes a cross-account IAM role using STS `AssumeRole`. Role ARN and optional external ID stored encrypted in `aws_integrations.credentialsEncrypted`. |
 | Access key | Static AWS access key ID and secret access key, stored encrypted in `aws_integrations.credentialsEncrypted`. |
 
+### Cross-account role chain
+
+When running off-AWS, the authentication flow involves two role assumptions:
+
+1. Bootstrap IAM user (`AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`) assumes the intermediate
+   SentinelService role (`AWS_SENTINEL_ROLE_ARN`) via STS.
+2. The SentinelService role assumes each customer's cross-account role (ARN stored in the
+   database per integration).
+
+When running on AWS with an instance profile that is already the SentinelService role, step 1
+is skipped.
+
 ### Required IAM permissions
 
 **For IAM role assumption (STS):**
@@ -645,6 +694,41 @@ The customer's IAM role must trust the Sentinel execution role and must have:
 | SQS queue unreachable | CloudTrail events not ingested | BullMQ retries; poll sweep re-triggers every 60 seconds |
 | IAM role assumption fails | Cannot access customer's SQS queue | Verify trust policy and role ARN in integration settings |
 | SQS message processing error | Individual message fails | Message visibility timeout expires; SQS redelivers |
+
+---
+
+## Sentry
+
+**Packages**: `@sentry/nextjs` (web), Sentry SDK (API, worker)
+**Environment variables**: `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `NEXT_PUBLIC_SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_ENVIRONMENT`, `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT`
+
+### Purpose
+
+Sentry provides error tracking and performance monitoring for all three services (API, worker,
+and web). A single Sentry project is used; the same DSN is shared across server-side and
+client-side telemetry.
+
+### Authentication
+
+The Sentry DSN contains an ingest key that authenticates event submissions. The
+`SENTRY_AUTH_TOKEN` is used only at build time to upload source maps.
+
+### Data flow
+
+| Service | SDK | Transport |
+|---------|-----|-----------|
+| API | Sentry Node SDK | HTTPS to Sentry ingest |
+| Worker | Sentry Node SDK | HTTPS to Sentry ingest |
+| Web (server) | `@sentry/nextjs` server | HTTPS to Sentry ingest |
+| Web (browser) | `@sentry/nextjs` client | HTTPS to Sentry ingest (from user browser) |
+
+### Failure modes
+
+| Failure | Impact | Recovery |
+|---------|--------|----------|
+| Sentry ingest unreachable | Error events dropped silently | No operational impact; Sentry SDK fails open |
+| Invalid DSN | Sentry not initialized; no error tracking | Fix `SENTRY_DSN` |
+| Missing `SENTRY_AUTH_TOKEN` at build time | Source maps not uploaded; production stack traces are minified | Set `SENTRY_AUTH_TOKEN` and rebuild |
 
 ---
 

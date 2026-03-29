@@ -206,66 +206,673 @@ if (!evaluator) continue; // unknown ruleType -- skip silently
 
 If a rule references a `ruleType` that no registered evaluator handles, the rule is silently skipped. This allows modules to be removed without breaking the engine for other modules.
 
-## Built-in evaluators by module
+### Platform evaluator (`moduleId: 'platform'`)
+
+| ruleType | Source file | Description |
+|---|---|---|
+| `platform.compound` | `packages/shared/src/evaluators/compound.ts` | Combines multiple sub-rules with AND, OR, or N-of-M (threshold) logic. Resolves sub-evaluators from the shared registry and returns a single alert with the highest severity from matched sub-rules. |
+
+## Complete evaluator reference
 
 ### GitHub module (`moduleId: 'github'`)
 
-| ruleType | Source file | Description |
-|---|---|---|
-| `github.repo_visibility` | `repo-visibility.ts` | Fires when a repository visibility changes (publicized, privatized, or either). Supports glob exclusion patterns for repository names. |
-| `github.branch_protection` | `branch-protection.ts` | Fires when a branch protection rule is edited or deleted. Supports glob patterns on branch names. |
-| `github.member_change` | `member-change.ts` | Fires when a collaborator is added or removed from a repository or organization. Filterable by role. |
-| `github.deploy_key` | `deploy-key.ts` | Fires when a deploy key is created or deleted. Can restrict to write-access keys only. |
-| `github.secret_scanning` | `secret-scanning.ts` | Fires when GitHub's secret scanning creates a new alert. Filterable by secret type. |
-| `github.force_push` | `force-push.ts` | Fires on force pushes to protected branches. Supports glob patterns on branch names. |
-| `github.org_settings` | `org-settings.ts` | Fires on organization-level changes including team membership, installations, and org-level events. |
+#### `github.repo_visibility`
+
+**Source**: `modules/github/src/evaluators/repo-visibility.ts`
+
+**Detects**: Repository visibility changes (public/private transitions). Fires on `github.repository.visibility_changed` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `alertOn` | `'publicized' \| 'privatized' \| 'any'` | `'publicized'` | Which direction of visibility change to alert on. |
+| `excludeRepos` | `string[]` | `[]` | Glob patterns for repository names to ignore. |
+
+**Example config**:
+
+```json
+{
+  "alertOn": "publicized",
+  "excludeRepos": ["org/archived-*", "org/public-*"]
+}
+```
+
+**Alert trigger**: When a repository's `action` matches the configured direction and the repository name does not match any exclusion pattern. Severity: `critical`.
+
+---
+
+#### `github.branch_protection`
+
+**Source**: `modules/github/src/evaluators/branch-protection.ts`
+
+**Detects**: Branch protection rule modifications. Fires on events starting with `github.branch_protection.`.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `alertOnActions` | `('created' \| 'edited' \| 'deleted')[]` | `['edited', 'deleted']` | Which protection actions trigger the rule. |
+| `watchBranches` | `string[]` | `[]` | Branch name glob patterns. Empty watches all branches. |
+
+**Example config**:
+
+```json
+{
+  "alertOnActions": ["edited", "deleted"],
+  "watchBranches": ["main", "release/*"]
+}
+```
+
+**Alert trigger**: When the action matches and the branch rule's pattern matches at least one watch pattern (via `minimatch`). Severity: `critical` for deletions, `high` for edits.
+
+---
+
+#### `github.member_change`
+
+**Source**: `modules/github/src/evaluators/member-change.ts`
+
+**Detects**: Membership changes in repositories and organizations. Fires on `github.member.*` and `github.organization.*` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `alertOnActions` | `string[]` | `['added', 'removed']` | Actions: `added`, `removed`, `edited`, `member_added`, `member_removed`, `member_invited`. |
+| `watchRoles` | `string[]` | `[]` | Role filter. Empty watches all roles. |
+
+**Alert trigger**: When the action matches and the member's role matches the watch list (if configured). Severity: `high`.
+
+---
+
+#### `github.deploy_key`
+
+**Source**: `modules/github/src/evaluators/deploy-key.ts`
+
+**Detects**: Deploy key lifecycle events. Fires on events starting with `github.deploy_key.`.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `alertOnActions` | `('created' \| 'deleted')[]` | `['created']` | Which key actions trigger the rule. |
+| `alertOnWriteKeys` | `boolean` | `true` | When true, only alert on keys with write access (read_only = false). |
+
+**Alert trigger**: When the action matches and the key's access level passes the write filter. Severity: `high` for write keys, `medium` for read-only.
+
+---
+
+#### `github.secret_scanning`
+
+**Source**: `modules/github/src/evaluators/secret-scanning.ts`
+
+**Detects**: GitHub secret scanning alerts. Fires on events starting with `github.secret_scanning.`.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `alertOnActions` | `('created' \| 'resolved' \| 'reopened')[]` | `['created']` | Which alert actions to monitor. |
+| `secretTypes` | `string[]` | `[]` | Filter to specific secret types. Empty matches all types. |
+
+**Alert trigger**: When the action matches and the secret type is in the watch list (if configured). Severity: `critical` for created, `medium` for resolved/reopened.
+
+---
+
+#### `github.force_push`
+
+**Source**: `modules/github/src/evaluators/force-push.ts`
+
+**Detects**: Force pushes to protected branches. Fires on `github.push` events where `payload.forced = true`.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `watchBranches` | `string[]` | `['main', 'master', 'release/*', 'production']` | Branch patterns to protect. |
+| `alertOnAllForced` | `boolean` | `false` | Alert on force pushes to any branch. |
+
+**Alert trigger**: When a push is forced, the ref is a branch (not a tag), and the branch matches at least one watch pattern. Severity: `critical`.
+
+---
+
+#### `github.org_settings`
+
+**Source**: `modules/github/src/evaluators/org-settings.ts`
+
+**Detects**: Organization and team events. Fires on `github.organization.*` and `github.team.*` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `watchActions` | `string[]` | `[]` | Actions to monitor. Empty watches all actions. |
+
+**Alert trigger**: When the event action matches the watch list (if configured). Severity: `high` for member and team deletion events, `medium` for others.
+
+---
 
 ### Chain module (`moduleId: 'chain'`)
 
-| ruleType | Source file | Description |
-|---|---|---|
-| `chain.event_match` | `event-match.ts` | Matches on-chain log events by `topic0` (keccak256 of event signature) and optional contract address. Supports field-level conditions on decoded event arguments. |
-| `chain.function_call_match` | `function-call-match.ts` | Matches on-chain function calls by 4-byte selector. Evaluates conditions on decoded call arguments. |
-| `chain.windowed_count` | `windowed-count.ts` | Counts matching on-chain log events within a sliding time window using a Redis sorted set. Triggers when count reaches threshold. Supports optional `groupByField`. |
-| `chain.windowed_spike` | `windowed-spike.ts` | Detects rate spikes by comparing a short observation window against a longer baseline. Triggers when the percentage increase exceeds `increasePercent`. |
-| `chain.windowed_sum` | `windowed-sum.ts` | Sums a numeric decoded argument field across events within a sliding window. Supports BigInt-scale values (e.g., wei amounts). |
-| `chain.balance_track` | `balance-track.ts` | Monitors an account's on-chain balance and fires when it crosses a configured threshold. |
-| `chain.state_poll` | `state-poll.ts` | Periodically calls a contract view function and fires when the returned value matches a configured condition. |
-| `chain.view_call` | `view-call.ts` | Evaluates a contract view function call result against field-level conditions on demand. |
+#### `chain.event_match`
+
+**Source**: `modules/chain/src/evaluators/event-match.ts`
+
+**Detects**: On-chain log events matching a specific event signature. Handles two event types: `chain.event.matched` (pre-filtered by the block processor) and `chain.log` (raw log events matched by topic0).
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `eventSignature` | `string?` | -- | Solidity event signature (e.g., `Transfer(address,address,uint256)`). |
+| `topic0` | `string?` | -- | Pre-computed keccak256 hash of the event signature. |
+| `contractAddress` | `string?` | -- | Contract address filter (lowercase hex). |
+| `conditions` | `Condition[]` | `[]` | Field-level conditions on decoded event arguments. |
+
+**Example config**:
+
+```json
+{
+  "eventSignature": "Transfer(address,address,uint256)",
+  "contractAddress": "0x1234...abcd",
+  "conditions": [
+    { "field": "value", "operator": ">", "value": "1000000000000000000" }
+  ]
+}
+```
+
+**Alert trigger**: When the event signature (or topic0) matches, the contract address matches (if configured), and all field conditions pass. For `chain.event.matched` events, an additional guard verifies the event name matches the expected name derived from the signature. Severity: `high`. triggerType: `immediate`.
+
+---
+
+#### `chain.function_call_match`
+
+**Source**: `modules/chain/src/evaluators/function-call-match.ts`
+
+**Detects**: On-chain function calls by 4-byte selector matching. Fires on `chain.transaction` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `functionSignature` | `string` | -- | Function signature (e.g., `transfer(address,uint256)`). |
+| `functionName` | `string?` | -- | Human-readable name for display. |
+| `selector` | `string?` | -- | Pre-computed 4-byte selector. Derived from `functionSignature` if absent. |
+| `contractAddress` | `string` | -- | Target contract address (lowercase hex). |
+| `conditions` | `Condition[]` | `[]` | Conditions on decoded function arguments. |
+
+**Alert trigger**: When the transaction's `to` address matches, the first 4 bytes of `input` match the selector, and all field conditions pass. Severity: `high`. triggerType: `immediate`.
+
+---
+
+#### `chain.windowed_count`
+
+**Source**: `modules/chain/src/evaluators/windowed-count.ts`
+
+**Detects**: High-frequency on-chain events within a sliding window. Fires on `chain.log` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `eventSignature` | `string?` | -- | Event signature to match. |
+| `topic0` | `string?` | -- | Pre-computed topic0. |
+| `contractAddress` | `string?` | -- | Optional contract address filter. |
+| `windowMinutes` | `number` | `60` | Sliding window duration in minutes. |
+| `threshold` | `number` | `5` | Alert when count reaches this value. |
+| `groupByField` | `string?` | -- | Group counts by this decoded argument field. |
+
+**Redis state**: Sorted set at `sentinel:wcount:{orgId}:{ruleId}[:{groupValue}]`. Members are event IDs; scores are wall-clock timestamps (Date.now()). Stale entries pruned on every evaluation via `ZREMRANGEBYSCORE`. TTL set to `windowMs` via `PEXPIRE`.
+
+**Alert trigger**: When the count of events in the window reaches or exceeds the threshold. Severity: `high`. triggerType: `windowed`.
+
+---
+
+#### `chain.windowed_spike`
+
+**Source**: `modules/chain/src/evaluators/windowed-spike.ts`
+
+**Detects**: Rate spikes by comparing a short observation window against a longer baseline. Fires on `chain.log` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `eventSignature` | `string?` | -- | Event signature to match. |
+| `topic0` | `string?` | -- | Pre-computed topic0. |
+| `contractAddress` | `string?` | -- | Optional contract address filter. |
+| `observationMinutes` | `number` | `5` | Recent window duration. |
+| `baselineMinutes` | `number` | `60` | Historical baseline duration. |
+| `increasePercent` | `number` | `200` | Minimum percentage increase to trigger. |
+| `minBaselineCount` | `number` | `3` | Minimum events in baseline for valid comparison. |
+| `groupByField` | `string?` | -- | Per-field spike detection. |
+
+**Algorithm**: `baselineAvg = baselineCount / (baselineMs / observationMs)`, `spikePercent = ((currentCount - baselineAvg) / baselineAvg) * 100`. Triggers when `spikePercent >= increasePercent` and `baselineCount >= minBaselineCount`.
+
+**Redis state**: Sorted set at `sentinel:wspike:{ruleId}[:{groupValue}]`. TTL set to `baselineMs`.
+
+**Alert trigger**: When the observation window event rate exceeds the baseline average by the configured percentage. Severity: `critical`. triggerType: `windowed`.
+
+---
+
+#### `chain.windowed_sum`
+
+**Source**: `modules/chain/src/evaluators/windowed-sum.ts`
+
+**Detects**: Cumulative value thresholds across events in a sliding window. Fires on `chain.log` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `eventSignature` | `string?` | -- | Event signature to match. |
+| `topic0` | `string?` | -- | Pre-computed topic0. |
+| `contractAddress` | `string?` | -- | Optional contract address filter. |
+| `sumField` | `string` | -- | Decoded argument field to sum (e.g., `value`). |
+| `windowMinutes` | `number` | `60` | Sliding window duration. |
+| `threshold` | `string` | -- | BigInt-compatible threshold string (e.g., `"1000000000000000000"`). |
+| `operator` | `'gt' \| 'gte' \| 'lt' \| 'lte'` | `'gt'` | Comparison operator. |
+| `groupByField` | `string?` | -- | Group sums by this field. |
+
+**Redis state**: Sorted set at `sentinel:wsum:{orgId}:{ruleId}[:{groupValue}]`. Members are `{eventId}:{value}` strings; scores are wall-clock timestamps.
+
+**Alert trigger**: When the sum of all values in the window satisfies the threshold condition. Severity: `high`. triggerType: `windowed`.
+
+---
+
+#### `chain.balance_track`
+
+**Source**: `modules/chain/src/evaluators/balance-track.ts`
+
+**Detects**: Balance changes on monitored accounts. Fires on `chain.balance_snapshot` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `conditionType` | `'percent_change' \| 'threshold_above' \| 'threshold_below'` | -- | Type of balance condition. |
+| `value` | `string` | -- | Threshold: percentage (0-100) or absolute wei string. |
+| `windowMs` | `number?` | -- | Rolling window for windowed percent_change comparisons. |
+| `bidirectional` | `boolean` | `false` | When true, triggers on both drops and rises for percent_change. |
+
+**Redis state**: Previous value at `sentinel:prev:{ruleId}`. Windowed snapshots in sorted set at `sentinel:balsnapshots:{ruleId}` (members are `{timestamp}:{value}` to avoid dedup of identical balances).
+
+**Alert trigger**: When the balance condition is met. For `percent_change`, the default (bidirectional=false) triggers only on drops. Severity: `high`. triggerType: `immediate`.
+
+---
+
+#### `chain.state_poll`
+
+**Source**: `modules/chain/src/evaluators/state-poll.ts`
+
+**Detects**: EVM storage slot value changes. Fires on `chain.state_snapshot` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `conditionType` | `'changed' \| 'threshold_above' \| 'threshold_below' \| 'windowed_percent_change'` | -- | Type of state condition. |
+| `value` | `string?` | -- | Threshold value (required for threshold conditions). |
+| `percentThreshold` | `number?` | -- | Percent deviation threshold (for windowed_percent_change). |
+| `windowSize` | `number` | `100` | Number of historical snapshots for rolling mean (1-500). |
+
+**Redis state**: Previous value at `sentinel:state:prev:{ruleId}`. Recent values list at `sentinel:state:recent:{ruleId}` (capped at windowSize via LTRIM).
+
+**Alert trigger**: When the state condition is met. For `windowed_percent_change`, computes rolling mean from previous values (excluding current) and triggers when deviation exceeds the threshold. Severity: `high`. triggerType: `deferred`.
+
+---
+
+#### `chain.view_call`
+
+**Source**: `modules/chain/src/evaluators/view-call.ts`
+
+**Detects**: Contract view function return value conditions. Fires on `chain.view_call_result` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `contractAddress` | `string` | -- | Contract address to call. |
+| `functionSignature` | `string` | -- | View function signature. |
+| `functionName` | `string?` | -- | Human-readable name for display. |
+| `conditions` | `Condition[]` | `[]` | Conditions on return values. |
+| `resultField` | `string` | `'result'` | Field name for single-return-value functions. |
+
+**Alert trigger**: When the contract address matches and all conditions pass against the return values. Severity: `high`. triggerType: `deferred`.
+
+---
 
 ### Infrastructure module (`moduleId: 'infra'`)
 
-| ruleType | Source file | Description |
-|---|---|---|
-| `infra.cert_expiry` | `cert-expiry.ts` | Fires when a TLS certificate will expire within a configurable number of days. |
-| `infra.cert_issues` | `cert-issues.ts` | Fires when a TLS certificate has validity issues such as invalid CN, self-signed, or chain errors. |
-| `infra.tls_weakness` | `tls-weakness.ts` | Fires when a host exposes weak TLS configurations including deprecated protocol versions or weak cipher suites. |
-| `infra.dns_change` | `dns-change.ts` | Fires when DNS records for a monitored host change from their baseline. |
-| `infra.header_missing` | `header-missing.ts` | Fires when a required HTTP security header is absent from a scanned endpoint. |
-| `infra.host_unreachable` | `host-unreachable.ts` | Fires when a monitored host fails TCP or HTTP reachability probes. |
-| `infra.score_degradation` | `score-degradation.ts` | Fires when a host's aggregate security score drops by more than a configured percentage. |
-| `infra.new_subdomain` | `new-subdomain.ts` | Fires when certificate transparency logs reveal a new subdomain under a monitored apex domain. |
-| `infra.whois_expiry` | `whois-expiry.ts` | Fires when a domain registration will expire within a configurable number of days. |
-| `infra.ct_new_entry` | `ct-new-entry.ts` | Fires when a new certificate is issued for a monitored domain as reported by CT logs. |
+#### `infra.cert_expiry`
+
+**Source**: `modules/infra/src/evaluators/cert-expiry.ts`
+
+**Detects**: TLS certificates approaching expiry. Fires on `infra.cert.expiring` and `infra.cert.expired` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `thresholdDays` | `number` | `30` | Alert when certificate expires within this many days. |
+
+**Severity tiers**: <=7 days: `critical`, <=14 days: `high`, <=30 days: `medium`.
+
+---
+
+#### `infra.cert_issues`
+
+**Source**: `modules/infra/src/evaluators/cert-issues.ts`
+
+**Detects**: Certificate validity issues. Fires on `infra.cert.issue` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `issueTypes` | `string[]` | `[]` | Issue types to alert on: `chain_error`, `self_signed`, `weak_key`, `sha1_signature`, `revoked`. Empty matches all. |
+
+**Severity map**: `revoked`/`chain_error`: `critical`, `self_signed`/`weak_key`: `high`, `sha1_signature`: `medium`.
+
+---
+
+#### `infra.tls_weakness`
+
+**Source**: `modules/infra/src/evaluators/tls-weakness.ts`
+
+**Detects**: Weak TLS configurations. Fires on `infra.tls.weakness` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `alertOnLegacyVersions` | `boolean` | `true` | Alert on TLS 1.0/1.1. |
+| `alertOnWeakCiphers` | `boolean` | `true` | Alert on weak cipher suites. |
+| `alertOnMissingTls13` | `boolean` | `false` | Alert when TLS 1.3 is not supported. |
+
+---
+
+#### `infra.dns_change`
+
+**Source**: `modules/infra/src/evaluators/dns-change.ts`
+
+**Detects**: DNS record changes. Fires on `infra.dns.change` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `watchRecordTypes` | `string[]` | `[]` | DNS record types to watch (A, AAAA, MX, NS, TXT). Empty watches all. |
+| `watchChangeTypes` | `('added' \| 'modified' \| 'removed')[]` | `[]` | Change types to alert on. Empty matches all. |
+
+**Alert trigger**: Filters the event's `changes` array by configured record types and change types. NS record changes or critical-flagged changes elevate severity to `critical`.
+
+---
+
+#### `infra.header_missing`
+
+**Source**: `modules/infra/src/evaluators/header-missing.ts`
+
+**Detects**: Missing HTTP security headers. Fires on `infra.header.missing` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `requiredHeaders` | `string[]` | `[]` | Headers to require. Empty checks all known: HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy. |
+
+---
+
+#### `infra.host_unreachable`
+
+**Source**: `modules/infra/src/evaluators/host-unreachable.ts`
+
+**Detects**: Host availability issues. Fires on `infra.host.unreachable` and `infra.host.slow` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `thresholdMs` | `number` | `5000` | Response time threshold for slow-response alerts. |
+| `consecutiveFailures` | `number` | `2` | Consecutive failures before unreachable alert. |
+
+---
+
+#### `infra.new_subdomain`
+
+**Source**: `modules/infra/src/evaluators/new-subdomain.ts`
+
+**Detects**: Newly discovered subdomains. Fires on `infra.subdomain.discovered` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `ignorePatterns` | `string[]` | `[]` | Subdomain patterns to ignore. Simple glob (leading/trailing wildcards). |
+
+---
+
+#### `infra.ct_new_entry`
+
+**Source**: `modules/infra/src/evaluators/ct-new-entry.ts`
+
+**Detects**: New Certificate Transparency log entries. Fires on `infra.ct.new_entry` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `ignorePatterns` | `string[]` | `[]` | Issuer name patterns to ignore. Simple glob. |
+
+---
+
+#### `infra.whois_expiry`
+
+**Source**: `modules/infra/src/evaluators/whois-expiry.ts`
+
+**Detects**: Domain registration approaching expiry. Fires on `infra.whois.expiring` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `thresholdDays` | `number` | `30` | Alert when domain expires within this many days. |
+
+**Severity tiers**: <=7 days: `critical`, <=14 days: `high`, <=30 days: `medium`.
+
+---
+
+#### `infra.score_degradation`
+
+**Source**: `modules/infra/src/evaluators/score-degradation.ts`
+
+**Detects**: Security score drops. Fires on `infra.score.degraded` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `minScore` | `number` | `70` | Alert when score falls below this. |
+| `minDrop` | `number` | `10` | Alert when score drops by this many points. |
+| `mode` | `'score' \| 'drop' \| 'both'` | `'both'` | Which condition(s) to apply (OR logic for `both`). |
+
+---
 
 ### AWS module (`moduleId: 'aws'`)
 
-| ruleType | Source file | Description |
-|---|---|---|
-| `aws.event_match` | `event-match.ts` | Matches AWS CloudTrail events by event name, source service, and optional field-level conditions. |
-| `aws.root_activity` | `root-activity.ts` | Fires when any CloudTrail event is attributed to the root account. |
-| `aws.auth_failure` | `auth-failure.ts` | Fires when AWS authentication failures exceed a configurable threshold. |
-| `aws.spot_eviction` | `spot-eviction.ts` | Fires when an EC2 Spot instance receives an interruption notice. |
+#### `aws.event_match`
+
+**Source**: `modules/aws/src/evaluators/event-match.ts`
+
+**Detects**: CloudTrail events matching configurable field filters. Fires on any event with type starting with `aws.`.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `eventNames` | `string[]` | `[]` | CloudTrail event name patterns (glob via minimatch). Empty matches all. |
+| `eventSources` | `string[]` | `[]` | Event sources (e.g., `iam.amazonaws.com`). |
+| `userTypes` | `string[]` | `[]` | CloudTrail `userIdentity.type` values (Root, IAMUser, AssumedRole). |
+| `principalArnPatterns` | `string[]` | `[]` | ARN patterns for the caller (glob + substring). |
+| `errorEventsOnly` | `boolean` | `false` | Only match events with an error code. |
+| `errorCodes` | `string[]` | `[]` | Specific CloudTrail error codes to match. |
+| `regions` | `string[]` | `[]` | AWS regions to watch. Empty matches all. |
+| `alertTitle` | `string` | `'AWS CloudTrail: {{eventName}} by {{principalId}}'` | Template supporting `{{eventName}}`, `{{principalId}}`, `{{awsRegion}}`, `{{accountId}}`. |
+
+---
+
+#### `aws.root_activity`
+
+**Source**: `modules/aws/src/evaluators/root-activity.ts`
+
+**Detects**: Any API action by the AWS root account. Fires on any event with type starting with `aws.` where `userIdentity.type === 'Root'`.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `excludeEventNames` | `string[]` | `[]` | Event names to suppress (e.g., billing console actions). |
+| `includeFailedActions` | `boolean` | `true` | Include root events that resulted in errors. |
+
+**Alert trigger**: Always fires for root account actions unless excluded. Severity: `critical`.
+
+---
+
+#### `aws.auth_failure`
+
+**Source**: `modules/aws/src/evaluators/auth-failure.ts`
+
+**Detects**: Console login failures, root logins, and MFA-less logins. Fires on `aws.signin.ConsoleLogin` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `alertOnLoginFailure` | `boolean` | `true` | Alert on failed console logins. |
+| `alertOnRootLogin` | `boolean` | `true` | Alert on successful root console logins. |
+| `alertOnNoMfa` | `boolean` | `false` | Alert on logins without MFA. |
+
+**Alert trigger**: Checks `responseElements.ConsoleLogin` for failure, `userIdentity.type` for root, and `additionalEventData.MFAUsed` for MFA status. Severity: `critical` for root failures, `high` for non-root failures, `medium` for no-MFA.
+
+---
+
+#### `aws.spot_eviction`
+
+**Source**: `modules/aws/src/evaluators/spot-eviction.ts`
+
+**Detects**: EC2 Spot instance interruption notices. Fires on `aws.ec2.SpotInstanceInterruption` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `watchInstanceIds` | `string[]` | `[]` | Specific instance IDs. Empty watches all. |
+| `regions` | `string[]` | `[]` | AWS regions. Empty watches all. |
+| `severity` | `'low' \| 'medium' \| 'high' \| 'critical'` | `'medium'` | Configurable alert severity. |
+
+---
 
 ### Registry module (`moduleId: 'registry'`)
 
-| ruleType | Source file | Description |
-|---|---|---|
-| `registry.digest_change` | `digest-change.ts` | Fires when a monitored container image or package digest changes unexpectedly. |
-| `registry.attribution` | `attribution.ts` | Fires when a package publish cannot be attributed to a known author or expected CI workflow. |
-| `registry.security_policy` | `security-policy.ts` | Fires when a package violates configured security policy rules such as missing provenance or unsigned releases. |
-| `registry.npm_checks` | `npm-checks.ts` | Fires when an npm package fails integrity or metadata checks (install scripts, suspicious maintainer changes). |
-| `registry.anomaly_detection` | `anomaly-detection.ts` | Fires when package publish patterns deviate from historical baselines (unusual timing, frequency, or size). |
+#### `registry.digest_change`
+
+**Source**: `modules/registry/src/evaluators/digest-change.ts`
+
+**Detects**: Docker image and npm package changes. Handles 10 event types across `registry.docker.*` and `registry.npm.*`.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `tagPatterns` | `string[]` | `['*']` | Glob patterns for tags/versions to monitor. |
+| `changeTypes` | `string[]` | `['digest_change', 'new_tag', 'tag_removed']` | Which change types trigger this rule: `digest_change`, `new_tag`, `tag_removed`, `new_version`, `version_unpublished`, `maintainer_changed`, `dist_tag_updated`, `version_published`. |
+| `expectedTagPattern` | `string?` | `null` | Alert when a new tag does NOT match this pattern. |
+
+---
+
+#### `registry.npm_checks`
+
+**Source**: `modules/registry/src/evaluators/npm-checks.ts`
+
+**Detects**: npm-specific security concerns. Handles `registry.docker.digest_change`, `registry.docker.new_tag`, and several `registry.npm.*` events.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `tagPatterns` | `string[]` | `['*']` | Tag patterns to check. |
+| `changeTypes` | `string[]` | `['version_published']` | Change types to check. |
+| `checkInstallScripts` | `boolean` | `false` | Alert on preinstall/install/postinstall scripts. |
+| `checkMajorVersionJump` | `boolean` | `false` | Alert on unexpected major semver increments. |
+
+**Alert trigger**: Fires when install scripts are detected (`critical`) or a major version jump occurs (`high`). Returns null if neither npm-specific check triggers.
+
+---
+
+#### `registry.attribution`
+
+**Source**: `modules/registry/src/evaluators/attribution.ts`
+
+**Detects**: CI/CD attribution policy violations. Checks workflow, actor, and branch against allowlists.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `tagPatterns` | `string[]` | `['*']` | Tags to check. |
+| `changeTypes` | `string[]` | `['digest_change']` | Change types to gate on. |
+| `attributionCondition` | `'must_match' \| 'must_not_match'` | -- | Whether attribution must be present or absent. |
+| `workflows` | `string[]` | `[]` | Allowed CI workflow filenames. |
+| `actors` | `string[]` | `[]` | Allowed actor logins. |
+| `branches` | `string[]` | `[]` | Allowed branch patterns (glob). |
+
+**Alert trigger**: For `must_match`, fires when attribution is absent or does not match the allowed sets. For `must_not_match`, fires when attribution matches the criteria. Pending attribution produces a `deferred` trigger type. Severity: `critical` for unattributed changes, `high` for unexpected attribution.
+
+---
+
+#### `registry.security_policy`
+
+**Source**: `modules/registry/src/evaluators/security-policy.ts`
+
+**Detects**: Missing signatures, provenance, and digest pinning violations.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `tagPatterns` | `string[]` | `['*']` | Tags to enforce. |
+| `changeTypes` | `string[]` | `['digest_change', 'new_tag']` | Change types to check. |
+| `requireSignature` | `boolean` | `false` | Require cosign/Sigstore signature. |
+| `requireProvenance` | `boolean` | `false` | Require SLSA provenance attestation. |
+| `provenanceSourceRepo` | `string?` | `null` | Expected source repo in provenance (case-insensitive substring). |
+| `pinnedDigest` | `string?` | `null` | Exact digest the artifact must match. |
+
+**Alert trigger**: Fires on the first failed check (pinned digest, then signature, then provenance). Returns null if all configured checks pass.
+
+---
+
+#### `registry.anomaly_detection`
+
+**Source**: `modules/registry/src/evaluators/anomaly-detection.ts`
+
+**Detects**: Anomalous release patterns including unauthorized pushers, source mismatches, off-hours activity, and rapid changes.
+
+**Config schema**:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `tagPatterns` | `string[]` | `['*']` | Tags to monitor. |
+| `changeTypes` | `string[]` | `['digest_change', 'new_tag', 'tag_removed']` | Change types to check. |
+| `pusherAllowlist` | `string[]` | `[]` | Allowed pusher usernames. |
+| `expectedSource` | `string?` | `null` | Expected detection source (e.g., `'webhook'`). |
+| `maxChanges` | `number?` | `null` | Rate limit: max changes per window. |
+| `windowMinutes` | `number` | `60` | Rate limit window size. |
+| `allowedHoursStart` | `string?` | `null` | Allowed window start (HH:MM format). |
+| `allowedHoursEnd` | `string?` | `null` | Allowed window end (HH:MM format). |
+| `timezone` | `string` | `'UTC'` | IANA timezone for the time window. |
+| `allowedDays` | `number[]` | `[1,2,3,4,5]` | ISO day-of-week numbers (1=Mon..7=Sun). |
+
+**Alert trigger**: Checks are applied in order: pusher allowlist, source mismatch, time window, rate limit. The first violation produces an alert. Supports midnight-crossing time windows (e.g., 22:00-06:00). Rate limiting uses a Redis sorted set at `sentinel:registry:rate:{keyPrefix}:{ruleId}`.
 
 ## Condition evaluation
 

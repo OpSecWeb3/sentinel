@@ -38,16 +38,16 @@ The `ENCRYPTION_KEY` environment variable (64 hex characters, 32 bytes) is the k
 
 **Session garbage collection** — The worker runs `platform.session.cleanup` every hour. This job deletes rows from `sessions` where `expire < now()`. Without this, the table would grow indefinitely.
 
-**Backward compatibility** — The `decryptSession()` function handles both the encrypted format (`{ _encrypted: "..." }`) and a legacy plaintext JSONB format (`{ userId, orgId, role }`). This allows a zero-downtime migration from unencrypted to encrypted sessions. Once all legacy sessions have expired, the legacy branch can be removed.
+**Decryption behavior** — The `decryptSession()` function only accepts the encrypted format (`{ _encrypted: "..." }`). If the JSONB payload does not contain the `_encrypted` key, or if decryption fails (for example, due to a rotated key without `ENCRYPTION_KEY_PREV` configured), the function returns `null` and the session is silently ignored. The request proceeds as unauthenticated.
 
 ### API key authentication
 
 API keys use a hash-based lookup pattern to avoid storing raw key material:
 
 1. A key is issued as `sk_<random-bytes>`. The full value is shown to the user exactly once and never stored.
-2. The server stores `SHA-256(rawKey)` as `api_keys.key_hash` (hex-encoded).
-3. On each request, `SHA-256(incomingKey)` is computed and compared to `key_hash` using `crypto.timingSafeEqual()`. This prevents timing side-channel attacks.
-4. A `key_prefix` (the first `len('sk_') + 8` characters of the raw key) is stored to support prefix-based lookup without a full table scan.
+2. The server stores `SHA-256(rawKey)` as `api_keys.key_hash` (hex-encoded, unique index).
+3. On each request, `SHA-256(incomingKey)` is computed and used to look up the key by its hash directly (not by prefix). The computed hash is then compared to the stored `key_hash` using `crypto.timingSafeEqual()` to prevent timing side-channel attacks.
+4. A `key_prefix` (the first `len('sk_') + 8` characters of the raw key) is stored for display purposes and administrative key identification.
 
 API key scope values (`api:read`, `api:write`) are stored as a text array in `api_keys.scopes`. Route handlers that require a specific scope can inspect `c.get('scopes')` to enforce fine-grained access.
 
@@ -169,7 +169,7 @@ Sentinel supports backward-compatible encryption key rotation via the `ENCRYPTIO
 
 ## Rate limiting
 
-Rate limiting is implemented in `apps/api/src/middleware/rate-limit.ts` using a Redis-backed sliding window counter.
+Rate limiting is implemented in `apps/api/src/middleware/rate-limit.ts` using Redis-backed counters. The `auth` bucket uses a sliding window (sorted set) to prevent the 2x burst at window boundaries; the `read` and `write` buckets use fixed windows (atomic INCR + EXPIRE) for lower per-request overhead.
 
 ### Implementation
 
@@ -200,8 +200,8 @@ Counter keys follow the pattern `sentinel:rl:<bucket>:<identity>`.
 
 The rate limit key identity is resolved in order:
 
-1. **`org:<orgId>`** — if the request is authenticated and `orgId` is set. This is the normal case for dashboard users and API key holders. Limits are shared across all users and keys within the same org.
-2. **`key:<prefix>`** — if an API key prefix is present in the `Authorization` header but authentication has not yet resolved an `orgId`. This is a fallback for partially resolved requests.
+1. **`user:<userId>`** — if the request is authenticated and `userId` is set. This is the normal case for dashboard users and API key holders. Limits are tracked per user, not per organization.
+2. **`key:<prefix>`** — if an API key prefix is present in the `Authorization` header but authentication has not yet resolved a `userId`. This is a fallback that uses the first 20 characters of the raw key (after `Bearer `).
 3. **`ip:<clientIp>`** — for unauthenticated requests (login, register). The client IP is extracted by `getClientIp()` from `packages/shared/src/ip.ts`, which applies `TRUSTED_PROXY_COUNT` rules to correctly derive the real client IP from `X-Forwarded-For` without being vulnerable to header injection from untrusted proxies.
 
 ### Response headers

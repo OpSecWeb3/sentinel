@@ -1,12 +1,14 @@
-# Sentinel Documentation Style Guide
+# Sentinel documentation style guide
 
 This guide defines the standards for all documentation in the Sentinel repository. It applies to contributors writing new pages, engineers updating API references, and anyone editing existing content. Follow these guidelines to keep the documentation consistent, scannable, and correct.
+
+Sentinel documentation follows the [Google Developer Documentation Style Guide](https://developers.google.com/style) as the baseline. This document covers Sentinel-specific conventions and highlights the rules that are most commonly needed.
 
 ---
 
 ## Audience
 
-This guide is for **documentation authors** — people writing or editing files in `docs/`. It is not a user-facing document. If you are looking for how to use Sentinel, see [`docs/user/quick-start.md`](user/quick-start.md).
+This guide is for **documentation authors** -- people writing or editing files in `docs/`. It is not a user-facing document. If you are looking for how to use Sentinel, see [`docs/user/getting-started`](user/getting-started).
 
 ---
 
@@ -42,14 +44,14 @@ Do not use filler phrases: "simply," "just," "easily," "of course," "obviously."
 
 ## Document types
 
-Sentinel documentation follows the [Diátaxis](https://diataxis.fr/) framework. Every document belongs to one of four types. Identify the type at the start of writing — it determines structure and scope.
+Sentinel documentation follows the [Diataxis](https://diataxis.fr/) framework. Every document belongs to one of four types. Identify the type at the start of writing -- it determines structure and scope.
 
 | Type | Purpose | Reader's goal | Example |
 |------|---------|---------------|---------|
-| **Tutorial** | Learning-oriented walkthrough | Gain hands-on experience | `user/quick-start.md` |
-| **How-to guide** | Goal-oriented procedure | Accomplish a specific task | `user/integrations.md` |
-| **Reference** | Information-oriented catalog | Look up precise details | `app/api-reference.md` |
-| **Explanation** | Understanding-oriented discussion | Understand why and how | `app/correlation-engine.md` |
+| **Tutorial** | Learning-oriented walkthrough | Gain hands-on experience | `user/getting-started` |
+| **How-to guide** | Goal-oriented procedure | Accomplish a specific task | `user/integrations` |
+| **Reference** | Information-oriented catalog | Look up precise details | `app/api-reference` |
+| **Explanation** | Understanding-oriented discussion | Understand why and how | `app/correlation-engine` |
 
 Do not mix types in a single document. If a reference page needs procedural content, link to a how-to guide instead of embedding steps.
 
@@ -59,10 +61,10 @@ Do not mix types in a single document. If a reference page needs procedural cont
 
 ### Headings
 
-Use ATX-style headings (`#` prefixes). The page title is H1. Body sections use H2. Subsections use H3. H4 is the maximum depth — restructure the content if you need H5 or deeper.
+Use ATX-style headings (`#` prefixes). The page title is H1. Body sections use H2. Subsections use H3. H4 is the maximum depth -- restructure the content if you need H5 or deeper.
 
 ```markdown
-# Page Title
+# Page title
 
 ## Major section
 
@@ -97,7 +99,7 @@ Common language tags used in this repository:
 All commands in code blocks must be copy-pastable. Do not include shell prompts (`$`, `%`, `#`) in command blocks. Include them only in example output blocks where the distinction between input and output matters.
 
 ```bash
-# Correct — no prompt, copy-pastable
+# Correct -- no prompt, copy-pastable
 pnpm install --frozen-lockfile
 
 # Acceptable when showing input vs. output
@@ -129,7 +131,7 @@ Do not use inline code for product names (Sentinel, GitHub, AWS, Slack) or gener
 
 ### Tables
 
-Use tables for reference data with two or more comparable attributes. Align columns with spaces for readability in source. Keep table cell content short — link to a separate page for detailed explanations.
+Use tables for reference data with two or more comparable attributes. Align columns with spaces for readability in source. Keep table cell content short -- link to a separate page for detailed explanations.
 
 ```markdown
 | Column one | Column two | Column three |
@@ -137,7 +139,7 @@ Use tables for reference data with two or more comparable attributes. Align colu
 | Value      | Value      | Value        |
 ```
 
-Do not use tables for sequential steps — use a numbered list instead.
+Do not use tables for sequential steps -- use a numbered list instead.
 
 ### Lists
 
@@ -151,19 +153,94 @@ Do not nest lists more than two levels deep.
 
 Use blockquotes for callouts. Prefix the callout with a bold label that identifies its type.
 
-**Note** — additional context that helps but is not critical:
+**Note** -- additional context that helps but is not critical:
 
 > **Note:** The health check endpoint at `/health` does not require authentication.
 
-**Warning** — information the reader must act on to avoid a problem:
+**Warning** -- information the reader must act on to avoid a problem:
 
 > **Warning:** Rotating the `ENCRYPTION_KEY` without re-encrypting stored secrets will cause all existing integration credentials to become unreadable.
 
-**Tip** — an optional shortcut or best practice:
+**Tip** -- an optional shortcut or best practice:
 
 > **Tip:** Run `pnpm test:watch` during development to get immediate feedback on test failures as you edit files.
 
 Use callouts sparingly. If every paragraph has a callout, none of them carry weight.
+
+---
+
+## API documentation conventions
+
+### Endpoint format
+
+Document each API endpoint with the following structure:
+
+```markdown
+### `POST /api/detections`
+
+Create a new detection rule.
+
+**Authentication:** Session cookie or API key with `write` scope.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | Yes | Human-readable detection name |
+| `moduleId` | `string` | Yes | Module identifier: `github`, `chain`, `infra`, `registry`, or `aws` |
+| `severity` | `string` | No | One of `low`, `medium`, `high`, `critical`. Defaults to `high` |
+
+**Example request:**
+
+```bash
+curl -X POST http://localhost:4000/api/detections \
+  -H "Content-Type: application/json" \
+  -H "Cookie: sentinel.sid=<session-id>" \
+  -H "x-csrf-token: <csrf-token>" \
+  -d '{
+    "name": "Branch protection disabled",
+    "moduleId": "github",
+    "severity": "critical"
+  }'
+```
+
+**Response (201):**
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Branch protection disabled",
+  "moduleId": "github",
+  "severity": "critical",
+  "status": "active"
+}
+```
+
+**Error responses:**
+
+| Status | Reason |
+|--------|--------|
+| `400` | Invalid request body (Zod validation failure) |
+| `401` | Missing or expired session |
+| `403` | Insufficient permissions (requires `editor` or `admin` role) |
+```
+
+### cURL examples
+
+Include a cURL example for every mutating endpoint (`POST`, `PUT`, `PATCH`, `DELETE`). For `GET` endpoints, include a cURL example when the endpoint has non-obvious query parameters.
+
+All cURL examples must:
+
+- Use long-form flags (`--header` is acceptable; `-H` is preferred for brevity in repeated headers).
+- Include the `Content-Type: application/json` header for JSON request bodies.
+- Use placeholder values in angle brackets for authentication tokens and dynamic identifiers.
+- Be copy-pastable with only placeholder substitution.
+
+### Request and response format
+
+- Show request bodies as JSON objects with representative example values.
+- Show response bodies as JSON objects. Include only the fields that are relevant to the endpoint's purpose.
+- Use `...` to indicate truncated arrays or objects when the full response is too long.
 
 ---
 
@@ -187,7 +264,7 @@ Examples of required spell-outs:
 | JSONB | JSON Binary (PostgreSQL column type) |
 | REST | Representational State Transfer |
 | DevSecOps | Development, Security, and Operations |
-| BullMQ | Bull Message Queue |
+| RPC | Remote Procedure Call |
 
 After the first spell-out, use the acronym form exclusively. Do not alternate between spelled-out and acronym forms in the same document.
 
@@ -205,8 +282,8 @@ Use these terms consistently across all documentation.
 | correlation rule | Lowercase | A multi-event pattern: sequence, aggregation, or absence |
 | alert | Lowercase | The output produced when a detection or correlation rule fires |
 | event | Lowercase | A normalized, timestamped occurrence ingested by a module |
-| module | Lowercase | A self-contained integration: github, chain, infra, registry, aws |
-| module ID | Use the exact ID strings from code: `github`, `chain`, `infra`, `registry`, `aws` | Use backtick inline code formatting |
+| module | Lowercase | A self-contained integration: `github`, `chain`, `infra`, `registry`, `aws` |
+| module ID | Use the exact ID strings from code | Use backtick inline code formatting: `github`, `chain`, `infra`, `registry`, `aws` |
 | organization | Full word | Do not abbreviate as "org" in documentation prose (acceptable in code and config) |
 | notification channel | Lowercase | Slack, email, or webhook destination for alerts |
 | evaluator | Lowercase | Short form of "rule evaluator." Acceptable in technical documentation; prefer "rule evaluator" in operator-facing docs |
@@ -221,13 +298,18 @@ Use these terms consistently across all documentation.
 | poll sweep | Lowercase | A scheduled job that iterates over monitored resources and polls for changes |
 | notify key | Lowercase | An organization-scoped API key prefixed with `snk_` for CI pipeline and external integration authentication |
 | grace period | Lowercase | A configurable delay before a deferred rule evaluation fires, allowing cancellation if a compensating event arrives |
+
+### Product and library names
+
+| Name | Correct casing | Notes |
+|------|----------------|-------|
 | BullMQ | Exactly this casing | Do not write "Bull", "bullmq", or "Bull MQ" |
 | Drizzle ORM | Exactly this casing | Do not write "drizzle" |
 | Hono | Exactly this casing | Do not write "hono" |
 | Next.js | Exactly this casing | Do not write "Next" or "NextJS" |
 | Vitest | Exactly this casing | Do not write "vitest" |
-| PostgreSQL | Exactly this casing | Do not write "Postgres" or "postgres" |
-| Redis | Exactly this casing | Do not write "redis" |
+| PostgreSQL | Exactly this casing | Do not write "Postgres" or "postgres" in prose |
+| Redis | Exactly this casing | Do not write "redis" in prose |
 | Docker Compose | Two words, both capitalized | Do not write "docker-compose" in prose |
 | GitHub Actions | Exactly this casing | |
 | Hetzner | Exactly this casing | |
@@ -244,10 +326,9 @@ The four valid severity levels in ascending order: `low`, `medium`, `high`, `cri
 
 ### Role names
 
-Role names are lowercase in prose.
+Role names are lowercase in prose. The three RBAC roles are `admin`, `editor`, and `viewer`.
 
-- The three RBAC roles are `admin`, `editor`, and `viewer`.
-- "Assign the editor role to developers who write detection rules."
+- "Assign the `editor` role to developers who write detection rules."
 
 ---
 
@@ -281,17 +362,17 @@ graph LR
 - Use `graph TD` (top-down) for hierarchy and architecture diagrams.
 - Use `sequenceDiagram` for request/response flows.
 - Use `stateDiagram-v2` for state machines.
-- Keep node labels short (3–5 words maximum).
+- Keep node labels short (3-5 words maximum).
 - Use bracket shapes consistently: `[Service]` for services, `(Process)` for processes, `{Decision}` for decision points, `[(Database)]` for data stores.
-- Do not use color overrides or custom styles — diagrams must render correctly in both light and dark GitHub themes.
+- Do not use color overrides or custom styles -- diagrams must render correctly in both light and dark GitHub themes.
 
 ### When to use ASCII diagrams
 
-Use ASCII diagrams only when Mermaid cannot represent the concept — for example, packet formats, memory layouts, or table schemas. Keep ASCII diagrams narrow enough to display without horizontal scrolling (80 characters maximum).
+Use ASCII diagrams only when Mermaid cannot represent the concept -- for example, packet formats, memory layouts, or table schemas. Keep ASCII diagrams narrow enough to display without horizontal scrolling (80 characters maximum).
 
 ### Diagram captions
 
-Place a plain-text description immediately below each diagram that explains what the diagram shows. Do not rely on the diagram alone to convey meaning — some readers use screen readers or render docs in environments that do not process Mermaid.
+Place a plain-text description immediately below each diagram that explains what the diagram shows. Do not rely on the diagram alone to convey meaning -- some readers use screen readers or render docs in environments that do not process Mermaid.
 
 ---
 
@@ -310,9 +391,11 @@ Place all documentation files under `docs/`. Use the track subdirectories for co
 
 ```text
 docs/
-├── README.md              # Documentation hub (this file)
+├── README.md              # Documentation hub
 ├── CONTRIBUTING.md        # Contributor guide
 ├── STYLE-GUIDE.md         # This style guide
+├── TESTING.md             # Testing guide
+├── security-scanning.md   # Security scanning overview
 ├── app/                   # Technical track
 │   ├── architecture/      # System architecture and data flow
 │   ├── api-reference/     # REST API endpoint documentation
@@ -375,8 +458,6 @@ For links to external sites that readers should open in a new tab (such as third
 See the <a href="https://api.slack.com/block-kit" target="_blank" rel="noopener noreferrer">Slack Block Kit documentation</a>.
 ```
 
-In standard Markdown link syntax (no HTML), links open in the same tab. Use HTML only for external links where the new-tab behavior is important to the reader's workflow.
-
 ### Link text
 
 Write descriptive link text. Do not use "click here," "this link," or bare URLs as link text.
@@ -384,64 +465,20 @@ Write descriptive link text. Do not use "click here," "this link," or bare URLs 
 - **Correct:** "See [Writing correlation rules](user/correlation-rules.md) for examples."
 - **Incorrect:** "For more information, [click here](user/correlation-rules.md)."
 
-### Cross-reference patterns
-
-Use consistent phrasing when linking between documents. Follow these patterns for common cross-reference scenarios.
-
-**Referencing a concept defined elsewhere:**
-
-```markdown
-For details on how the rule engine evaluates conditions, see [Detection engine](app/detection-engine).
-```
-
-**Referencing a prerequisite:**
-
-```markdown
-Before you begin, complete the steps in [Setting up the development environment](CONTRIBUTING.md#setting-up-the-development-environment).
-```
-
-**Referencing a related procedure:**
-
-```markdown
-After you create a detection rule, [configure a notification channel](user/alerts) to receive alerts.
-```
-
-**Referencing an API endpoint from a user guide:**
-
-```markdown
-This action calls the `POST /api/detections` endpoint. See the [API reference](app/api-reference) for request and response schemas.
-```
-
-**Referencing a module from an architecture page:**
-
-```markdown
-The `chain` module implements the block poller and on-chain evaluators. See [Chain module reference](app/modules) for supported networks and rule types.
-```
-
-When linking from the operator track (`docs/user/`) to the technical track (`docs/app/`), note the audience difference:
-
-```markdown
-> **Note:** This section covers operator workflows. For implementation details and the underlying API contracts, see the [technical documentation](../app/architecture).
-```
-
-Do not create circular cross-references. If page A links to page B, page B should link back to page A only when the reverse reference adds value.
-
 ---
 
 ## Security content conventions
-
-Security documentation requires extra precision. Follow these rules when writing about authentication, credentials, and secrets.
 
 ### Never publish real credentials
 
 Do not include real API keys, passwords, tokens, session secrets, or encryption keys in documentation. Use clearly synthetic placeholders:
 
 ```bash
-SESSION_SECRET=your-session-secret-at-least-32-characters
+SESSION_SECRET=<your-session-secret-at-least-32-characters>
 ENCRYPTION_KEY=<64-hex-characters>
 ```
 
-Prefer `<descriptive-placeholder>` syntax over `YOUR_VALUE_HERE` — angle bracket placeholders are visually distinct from real values.
+Prefer `<descriptive-placeholder>` syntax over `YOUR_VALUE_HERE` -- angle bracket placeholders are visually distinct from real values.
 
 ### Describing authentication flows
 
@@ -458,7 +495,7 @@ When documenting how Sentinel stores sensitive data, state the mechanism explici
 - "Sentinel encrypts integration credentials with AES-256-GCM before writing them to the database."
 - Not: "Credentials are stored securely."
 
-### Describing role-based access control
+### Describing Role-Based Access Control
 
 When describing an action that requires a specific role, state the role requirement at the start of the procedure, not buried in a later step:
 
@@ -474,11 +511,11 @@ Use the Warning callout format for any content where a misconfiguration could ca
 
 ## Review checklist
 
-Before submitting a documentation pull request, verify each item in this checklist.
+Before submitting a documentation PR, verify each item in this checklist.
 
 ### Content
 
-- [ ] The document belongs to one Diátaxis type and does not mix types.
+- [ ] The document belongs to one Diataxis type and does not mix types.
 - [ ] All factual claims are accurate and match the current codebase.
 - [ ] New environment variables, API endpoints, or configuration options are documented.
 - [ ] Removed features or breaking changes are removed from the documentation in the same PR.

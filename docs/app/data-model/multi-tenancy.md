@@ -13,8 +13,8 @@ prefix. Instead, every row in every data table carries a `org_id uuid NOT NULL`
 column, and every query that accesses data must include a `WHERE org_id = $1`
 clause (or its Drizzle ORM equivalent).
 
-This approach keeps the operational surface area small — one connection pool,
-one migration path, one backup — while the application layer bears full
+This approach keeps the operational surface area small -- one connection pool,
+one migration path, one backup -- while the application layer bears full
 responsibility for ensuring queries are always scoped.
 
 ## Organization and Membership Model
@@ -22,12 +22,12 @@ responsibility for ensuring queries are always scoped.
 Three tables implement the identity and access model:
 
 ```
-users ──< org_memberships >── organizations
+users --< org_memberships >-- organizations
 ```
 
-- `users` — global; a single user account can belong to multiple organizations.
-- `organizations` — the tenant. Every data object links here.
-- `org_memberships` — the join table. Its composite primary key `(org_id, user_id)` enforces exactly one membership record per user per org. The `role` column (`owner`, `admin`, `viewer`) determines what the member is permitted to do within that org.
+- `users` -- global; a single user account can belong to multiple organizations.
+- `organizations` -- the tenant. Every data object links here.
+- `org_memberships` -- the join table. Its composite primary key `(org_id, user_id)` enforces exactly one membership record per user per org. The `role` column (`owner`, `admin`, `viewer`) determines what the member is permitted to do within that org.
 
 To determine which organizations a user has access to, query `org_memberships`
 by `user_id`:
@@ -58,7 +58,7 @@ non-PK column:
 export const someTable = pgTable('some_table', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
-  // … other columns
+  // ... other columns
 });
 ```
 
@@ -66,35 +66,170 @@ The `onDelete: 'cascade'` ensures that deleting an organization removes all of
 its data automatically at the database level, with no application-level cleanup
 required.
 
-Tables that are intentionally global (not org-scoped) are the exception and
-exist only in the blockchain module:
+### Tables with org_id (cascade delete)
 
-- `chain_networks` — shared network registry
-- `chain_contracts` — shared contract registry
-- `chain_detection_templates` — shared template library
+The following tables carry an `org_id` column with `ON DELETE CASCADE` from
+`organizations.id`:
+
+| Domain | Tables |
+|---|---|
+| Core | `api_keys`, `detections`, `rules`, `events`, `alerts`, `notification_channels`, `slack_installations`, `correlation_rules` |
+| GitHub | `github_installations`, `github_repositories` |
+| Blockchain | `chain_org_contracts`, `chain_org_rpc_configs` |
+| Registry | `rc_artifacts`, `rc_ci_notifications` |
+| Infrastructure | `infra_hosts`, `infra_cdn_provider_configs` |
+| AWS | `aws_integrations`, `aws_raw_events` |
+
+The `audit_log` table uses `ON DELETE SET NULL` instead of cascade, so audit
+records survive org deletion for compliance purposes.
+
+### Tables without org_id (global reference data)
+
+Tables that are intentionally global (not org-scoped) exist only in the
+blockchain module:
+
+- `chain_networks` -- shared network registry
+- `chain_contracts` -- shared contract registry
+- `chain_detection_templates` -- shared template library
+- `chain_block_cursors` -- per-network polling position
+- `chain_container_metrics` -- Docker container resource metrics
+- `chain_rpc_usage_hourly` -- RPC call tracking (uses a text `org_id` column with a `_system` default, not a FK)
 
 These tables contain no customer data and are read-only from the tenant
 perspective.
+
+### Tables scoped indirectly via parent FK
+
+Several tables do not carry their own `org_id` column because they are
+reachable only through a parent table that is already org-scoped. Deleting the
+parent cascades to these child records:
+
+| Child table | Parent FK | Ultimate org scope |
+|---|---|---|
+| `chain_state_snapshots` | `rules.rule_id` | `rules.org_id` |
+| `rc_artifact_versions` | `rc_artifacts.artifact_id` | `rc_artifacts.org_id` |
+| `rc_artifact_events` | `rc_artifacts.artifact_id` | `rc_artifacts.org_id` |
+| `rc_verifications` | `rc_artifacts.artifact_id` | `rc_artifacts.org_id` |
+| `rc_attributions` | `rc_artifacts.artifact_id` | `rc_artifacts.org_id` |
+| `notification_deliveries` | `alerts.alert_id` | `alerts.org_id` |
+| `infra_snapshots` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_certificates` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_ct_log_entries` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_tls_analyses` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_dns_records` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_dns_changes` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_dns_health_checks` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_whois_records` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_whois_changes` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_scan_events` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_scan_step_results` | `infra_scan_events.scan_event_id` | `infra_hosts.org_id` (via scan event) |
+| `infra_score_history` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_finding_suppressions` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_scan_schedules` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_reachability_checks` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_http_header_checks` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+| `infra_cdn_origin_records` | `infra_hosts.host_id` | `infra_hosts.org_id` |
+
+## Cascade Delete Behavior
+
+Deleting an organization triggers a cascade that removes all associated data.
+The cascade follows the FK graph:
+
+```
+organizations (DELETE)
+  |-- org_memberships (CASCADE)
+  |-- api_keys (CASCADE)
+  |-- detections (CASCADE)
+  |     |-- rules (CASCADE via detection_id)
+  |           |-- chain_state_snapshots (CASCADE via rule_id)
+  |-- events (CASCADE)
+  |-- alerts (CASCADE)
+  |     |-- notification_deliveries (CASCADE via alert_id)
+  |-- notification_channels (CASCADE)
+  |-- slack_installations (CASCADE)
+  |-- correlation_rules (CASCADE)
+  |-- github_installations (CASCADE)
+  |     |-- github_repositories (CASCADE via installation_id)
+  |-- infra_hosts (CASCADE)
+  |     |-- infra_snapshots (CASCADE via host_id)
+  |     |-- infra_certificates (CASCADE via host_id)
+  |     |-- infra_ct_log_entries (CASCADE via host_id)
+  |     |-- infra_tls_analyses (CASCADE via host_id)
+  |     |-- infra_dns_records (CASCADE via host_id)
+  |     |-- infra_dns_changes (CASCADE via host_id)
+  |     |-- infra_dns_health_checks (CASCADE via host_id)
+  |     |-- infra_whois_records (CASCADE via host_id)
+  |     |-- infra_whois_changes (CASCADE via host_id)
+  |     |-- infra_scan_events (CASCADE via host_id)
+  |     |     |-- infra_scan_step_results (CASCADE via scan_event_id)
+  |     |-- infra_score_history (CASCADE via host_id)
+  |     |-- infra_finding_suppressions (CASCADE via host_id)
+  |     |-- infra_scan_schedules (CASCADE via host_id)
+  |     |-- infra_reachability_checks (CASCADE via host_id)
+  |     |-- infra_http_header_checks (CASCADE via host_id)
+  |     |-- infra_cdn_origin_records (CASCADE via host_id)
+  |-- infra_cdn_provider_configs (CASCADE)
+  |-- rc_artifacts (CASCADE)
+  |     |-- rc_artifact_versions (CASCADE via artifact_id)
+  |     |-- rc_artifact_events (CASCADE via artifact_id)
+  |     |     |-- rc_attributions (CASCADE via artifact_event_id)
+  |     |-- rc_verifications (CASCADE via artifact_id)
+  |-- rc_ci_notifications (CASCADE)
+  |-- aws_integrations (CASCADE)
+  |     |-- aws_raw_events (CASCADE via integration_id)
+  |-- audit_log (SET NULL on org_id)
+```
+
+Deleting a user triggers a narrower cascade:
+
+```
+users (DELETE)
+  |-- org_memberships (CASCADE)
+  |-- api_keys (CASCADE)
+  |-- detections.created_by (SET NULL)
+  |-- correlation_rules.created_by (SET NULL)
+```
+
+Note that `slack_installations.installed_by` references `users.id` without an
+`onDelete` action, which means deleting a user who installed Slack will fail
+with a foreign key violation unless the installation is removed or reassigned
+first.
 
 ## API-Level Enforcement
 
 Org context is established at the middleware layer and propagated through every
 request. The general flow is:
 
-1. **Authentication middleware** — validates the session cookie or `Authorization`
+1. **Authentication middleware** -- validates the session cookie or `Authorization`
    bearer token (API key). On success, attaches `req.user` and `req.orgId` to
    the request object.
 
-2. **Org context validation** — the user's membership in `req.orgId` is
+2. **Org context validation** -- the user's membership in `req.orgId` is
    confirmed against `org_memberships`. Requests for an org the user does not
    belong to are rejected with `403 Forbidden` before any handler runs.
 
-3. **Route handlers** — receive `req.orgId` as a trusted, already-validated
+3. **Route handlers** -- receive `req.orgId` as a trusted, already-validated
    value. Every database query uses this value as a filter parameter.
 
 API key authentication follows the same pattern: the key is looked up by hash,
 the associated `org_id` is loaded from `api_keys.org_id`, and that value
 becomes `req.orgId` for the duration of the request.
+
+### API Key Scoping
+
+API keys are scoped to a single organization through `api_keys.org_id`. The
+`scopes` JSONB column holds an array of permission strings (default `["read"]`)
+that restrict what the key can do within that org. The available scopes are:
+
+| Scope | Description |
+|---|---|
+| `read` | Read access to detections, alerts, events, and configuration. |
+| `write` | Create and update detections, rules, and notification channels. |
+| `admin` | Full access including API key management and org settings. |
+
+Scope enforcement happens at the route level: each module route declares its
+required scope, and the API key middleware rejects requests whose key does not
+include the necessary scope.
 
 ### Drizzle Query Pattern
 
@@ -124,6 +259,19 @@ await db.insert(schema.events).values({
   occurredAt: new Date(),
 });
 ```
+
+## Session Management
+
+Sessions are stored in the `sessions` table via `connect-pg-simple`. Each
+session row includes plaintext `user_id` and `org_id` columns (in addition to
+the encrypted `sess` JSONB payload) to support efficient indexed operations:
+
+- **Logout all sessions for a user:** `DELETE FROM sessions WHERE user_id = $1`
+- **Invalidate all sessions for an org:** `DELETE FROM sessions WHERE org_id = $1`
+- **Org deletion cleanup:** Session rows can be bulk-deleted by `org_id` without decrypting each row.
+
+These columns are nullable for backward compatibility with session rows created
+before the migration that added them.
 
 ## Cross-Org Data Sharing
 
@@ -198,7 +346,7 @@ await db.insert(schema.rules).values({
   detectionId: detection.id,
   orgId: detection.orgId,   // always copy from the parent
   moduleId: detection.moduleId,
-  // …
+  // ...
 });
 ```
 
@@ -222,3 +370,12 @@ WHERE org_id = $1
 
 Failure to include the `deleted_at` filter exposes deleted channels in the UI
 and may cause delivery attempts to stale endpoints.
+
+### RPC Usage Tracking
+
+The `chain_rpc_usage_hourly` table uses a `text` type for its `org_id` column
+(not `uuid`) with a default of `'_system'`. This is intentional: system-level
+RPC calls that are not attributable to a specific org use the sentinel value
+`_system`. However, this means the column does not have a foreign key
+constraint to `organizations.id`, and org-scoped queries on this table must
+use text comparison rather than UUID comparison.

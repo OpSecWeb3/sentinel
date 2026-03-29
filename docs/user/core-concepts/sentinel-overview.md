@@ -102,6 +102,20 @@ Event Source --> Sentinel Ingestion --> Detection Engine --> Alert --> Notificat
 
 ---
 
+## What You See in the Dashboard
+
+After logging in, the **Dashboard** is your starting point. It displays four sections:
+
+1. **System status** -- Four summary cards showing alerts today, alerts this week, total alerts, and active detections across your organization.
+2. **Severity breakdown** -- A stacked bar chart and text summary showing the distribution of alerts by severity (critical, high, medium, low). A link to **view all alerts** takes you to the full alerts page.
+3. **Chain module status** -- If you use the blockchain monitoring module, this section shows tracked contracts, chain-specific detections, recent chain alerts, and total chain events.
+4. **Recent events** -- The last 10 events received by Sentinel, showing the module, event type, reference ID, and timestamp.
+5. **Recent alerts** -- The most recent alerts across all detections, with severity tags, titles, and timestamps. Click any alert to view its details.
+
+On a fresh installation with no integrations configured yet, all counters show zero -- this is expected.
+
+---
+
 ## Multi-Tenancy
 
 Sentinel is designed for multi-tenant operation. Your organization's data -- events, detections, alerts, channels, integrations, and correlation rules -- is completely isolated from every other organization on the same Sentinel instance. Authentication and API authorization enforce this boundary at every request. Every database query is scoped to your organization ID.
@@ -112,17 +126,17 @@ This means you can safely run Sentinel as a shared service across multiple teams
 
 ## Navigation Reference
 
-The Sentinel web UI sidebar is organized into three sections:
+The Sentinel web UI sidebar is organized into three sections. The sidebar uses a terminal-style file tree layout.
 
 **Main navigation:**
 
 | Item | Description |
 |---|---|
-| **dashboard** | Organization-wide summary statistics and alert trends. |
+| **dashboard** | Organization-wide summary statistics, alert trends, recent events, and recent alerts. |
 | **detections** | List, create, and manage detection rules. |
-| **correlations** | List, create, and manage correlation rules. |
+| **correlations** | List, create, and manage multi-event correlation rules. |
 
-**Modules:**
+**Modules** (expand each to see sub-items):
 
 | Item | Sub-items |
 |---|---|
@@ -136,7 +150,11 @@ The Sentinel web UI sidebar is organized into three sections:
 
 | Item | Description |
 |---|---|
-| **settings** | Organization settings, members, channels, API keys. |
+| **settings** | Organization settings, members, channels, API keys, and account management. |
+
+The top header bar shows your current location as a breadcrumb path (for example, `sentinel:/detections`) and your role within the organization.
+
+The sidebar footer displays your truncated user ID, your role, a **[logout]** button, and the current version.
 
 ---
 

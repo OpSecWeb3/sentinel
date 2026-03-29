@@ -149,7 +149,7 @@ Confirm the URL is correct, the target server is running, and the Sentinel worke
 
 **Problem:** You receive a `429 Too Many Requests` response when making GET requests to the Sentinel API.
 
-**Cause:** Sentinel enforces a rate limit of 100 GET requests per minute per identity. The identity is determined in the following priority order: organization ID, API key prefix, or client IP address.
+**Cause:** Sentinel enforces a rate limit of 100 GET requests per minute per identity. The identity is determined in the following priority order: authenticated user ID, API key prefix, or client IP address.
 
 **Solution:** Reduce the frequency of your requests. The API returns rate limit headers on every response:
 
@@ -159,7 +159,7 @@ Confirm the URL is correct, the target server is running, and the Sentinel worke
 | `X-RateLimit-Remaining` | Requests remaining in the current window |
 | `X-RateLimit-Reset` | Unix timestamp (seconds) when the window resets |
 
-Wait until `X-RateLimit-Reset` before retrying. If you need a higher limit, use an API key scoped to an organization (rate limiting uses `org:<orgId>` as the key rather than your IP address, which may already share the limit with other users behind the same NAT).
+Wait until `X-RateLimit-Reset` before retrying. If you are making unauthenticated requests from behind a shared NAT or proxy, multiple users may share the same IP-based rate limit. Authenticate with an API key or session to receive a dedicated rate limit bucket.
 
 ### Write endpoint rate limited
 
@@ -315,7 +315,7 @@ To reduce memory usage:
 
 **Problem:** The API or worker logs show errors such as "too many connections" or "connection pool exhausted."
 
-**Cause:** The worker initializes a database connection pool with a maximum of 20 connections to support concurrent BullMQ job processing. The API uses the default pool size. If both the API and multiple worker replicas (the production configuration runs 2 replicas) are running, the total connection count can approach the PostgreSQL `max_connections` limit.
+**Cause:** The worker initializes a database connection pool with a maximum of 50 connections to support concurrent BullMQ job processing. The API uses the default pool size. If both the API and multiple worker replicas (the production configuration runs 2 replicas) are running, the total connection count can approach the PostgreSQL `max_connections` limit.
 
 **Solution:** Check the current PostgreSQL connection count:
 
@@ -323,7 +323,7 @@ To reduce memory usage:
 docker compose exec postgres psql -U sentinel -c "SELECT count(*) FROM pg_stat_activity;"
 ```
 
-If the count is near the limit, either increase `max_connections` in the PostgreSQL configuration or reduce the worker pool size. On a shared Hetzner VPS with limited resources, keep total connections below 80. Each worker replica uses up to 20 connections, and the API uses its default pool.
+If the count is near the limit, either increase `max_connections` in the PostgreSQL configuration or reduce the worker pool size. On a shared Hetzner VPS with limited resources, keep total connections below 80. Each worker replica uses up to 50 connections, and the API uses its default pool.
 
 ---
 

@@ -1,12 +1,12 @@
 # Contributing to Sentinel
 
-This guide covers everything you need to contribute code, tests, modules, or documentation to the Sentinel monorepo. Read it top to bottom before opening your first pull request.
+This guide covers everything you need to contribute code, tests, modules, or documentation to the Sentinel monorepo. Read it top to bottom before opening your first pull request (PR).
 
 ---
 
 ## Prerequisites
 
-Install the following tools before you begin. The versions listed are the same versions used in CI (Continuous Integration) and production.
+Install the following tools before you begin. The versions listed are the same versions used in Continuous Integration (CI) and production.
 
 | Tool | Required version | Install |
 |------|-----------------|---------|
@@ -37,7 +37,7 @@ cd sentinel
 
 ### 2. Install dependencies
 
-pnpm installs dependencies for all workspaces in a single pass. Do not use `npm install` or `yarn` — the repository uses a `pnpm-lock.yaml` lockfile that other package managers do not respect.
+pnpm installs dependencies for all workspaces in a single pass. Do not use `npm install` or `yarn` -- the repository uses a `pnpm-lock.yaml` lockfile that other package managers do not respect.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -45,10 +45,10 @@ pnpm install --frozen-lockfile
 
 ### 3. Start infrastructure services
 
-The development Docker Compose file starts PostgreSQL 16 and Redis 7 with stable, predictable credentials. These services are required for the API, worker, and integration tests.
+The development Docker Compose file starts PostgreSQL 16 (port 5434) and Redis 7 (port 6380) with stable, predictable credentials. These services are required for the API, worker, and integration tests.
 
 ```bash
-docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml up -d postgres redis
 ```
 
 Wait for both services to report healthy:
@@ -59,7 +59,7 @@ docker compose -f docker-compose.dev.yml ps
 
 ### 4. Configure environment variables
 
-Copy the example environment file and fill in the required values. Secrets for external integrations (GitHub App credentials, blockchain RPC URLs, AWS credentials) are optional for local development — you only need the ones relevant to the feature you are working on.
+Copy the example environment file and fill in the required values. Secrets for external integrations (GitHub App credentials, blockchain Remote Procedure Call (RPC) URLs, AWS credentials) are optional for local development -- you only need the ones relevant to the feature you are working on.
 
 ```bash
 cp .env.example .env
@@ -67,9 +67,9 @@ cp .env.example .env
 
 Required variables for local development:
 
-```
-DATABASE_URL=postgresql://sentinel:sentinel@localhost:5432/sentinel
-REDIS_URL=redis://:sentinel-dev@localhost:6379/0
+```text
+DATABASE_URL=postgresql://sentinel:sentinel@localhost:5434/sentinel
+REDIS_URL=redis://:sentinel-dev@localhost:6380
 SESSION_SECRET=<at-least-32-random-characters>
 ENCRYPTION_KEY=<64-hex-characters>
 ALLOWED_ORIGINS=http://localhost:3000
@@ -87,15 +87,33 @@ Generate an `ENCRYPTION_KEY`:
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
+> **Warning:** The `.env.example` file ships with a zeroed-out `ENCRYPTION_KEY`. Replace it with a real key before starting the API server. The server encrypts integration credentials with AES-256-GCM, and a weak key compromises all stored secrets.
+
 ### 5. Run database migrations
 
 ```bash
 pnpm db:migrate
 ```
 
-### 6. Start the development servers
+### 6. Install security tooling (optional but recommended)
 
-Run each application in a separate terminal, or use a process manager such as `tmux`.
+Set up local secret scanning with Gitleaks and a pre-commit hook:
+
+```bash
+pnpm run security:setup
+```
+
+This downloads a repository-local Gitleaks binary to `.tools/bin/gitleaks` and installs a Git pre-commit hook that scans staged changes for secrets. See [Security scanning](security-scanning.md) for details.
+
+### 7. Start the development servers
+
+You can start all services at once through Docker Compose:
+
+```bash
+pnpm dev
+```
+
+Or run each application individually in separate terminals:
 
 **API server** (Hono, port 4000):
 
@@ -121,12 +139,12 @@ The web application is available at `http://localhost:3000`. The API is availabl
 
 ## Monorepo workspace structure
 
-The repository uses pnpm workspaces with three top-level workspace groups.
+The repository uses pnpm workspaces with three top-level workspace groups defined in `pnpm-workspace.yaml`.
 
-```
+```text
 sentinel/
 ├── apps/
-│   ├── api/          # Hono REST API — public routes, module mounts, middleware
+│   ├── api/          # Hono REST API -- public routes, module mounts, middleware
 │   ├── web/          # Next.js 15 web application
 │   └── worker/       # BullMQ background job workers
 ├── modules/
@@ -163,76 +181,16 @@ import type { DetectionModule } from '@sentinel/shared/module';
 
 ---
 
-## Running tests
-
-### All tests
-
-```bash
-pnpm test
-```
-
-This runs all unit and integration tests using Vitest. CI runs this exact command after spinning up PostgreSQL 16 and Redis 7 service containers.
-
-### Unit tests only
-
-```bash
-pnpm test:unit
-```
-
-Runs tests in `packages/shared` only. These tests have no external dependencies and run without Docker.
-
-### Integration tests only
-
-```bash
-pnpm test:integration
-```
-
-Runs tests in `apps/api`. Requires a running PostgreSQL and Redis instance. Set `DATABASE_URL` and `REDIS_URL` before running.
-
-### Watch mode
-
-```bash
-pnpm test:watch
-```
-
-### Required environment variables for tests
-
-Integration tests read from the environment. The CI pipeline sets these automatically. For local runs, export them or add them to `.env.test`:
-
-```bash
-export DATABASE_URL=postgresql://sentinel:sentinel@localhost:5432/sentinel_test
-export REDIS_URL=redis://:sentinel-dev@localhost:6379/1
-export SESSION_SECRET=test-session-secret-at-least-32-chars-long!!
-export ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-export ALLOWED_ORIGINS=http://localhost:3000
-export SMTP_FROM=test@sentinel.dev
-export SMTP_URL=smtp://localhost:1025
-export DISABLE_RATE_LIMIT=true
-```
-
-> **Note:** Use a separate Redis database index (e.g., `/1`) for tests to avoid interfering with your development instance running on `/0`.
-
-### Type checking and linting
-
-Run these before pushing. CI fails the build if either check fails.
-
-```bash
-pnpm typecheck
-pnpm lint
-```
-
----
-
 ## Code style requirements
 
 ### TypeScript
 
-- All code is TypeScript 5.7 with `strict: true`. Do not use `any` without a documented justification comment.
-- Enable `noUncheckedIndexedAccess` in workspace-level tsconfig files for new packages.
+- All code is TypeScript 5.7+ with `strict: true` (configured in `tsconfig.base.json`). Do not use `any` without a documented justification comment.
+- The base configuration targets ES2022 with ESNext module resolution (`"moduleResolution": "bundler"`).
 - Prefer explicit return types on public functions and module exports.
 - Use `unknown` instead of `any` for error values; narrow with `instanceof` or type guards.
 
-### Zod validation at API boundaries
+### Zod validation at Application Programming Interface (API) boundaries
 
 All HTTP request bodies and external data sources (webhook payloads, module event payloads) must be validated with a Zod schema before use. Raw `JSON.parse` output must never be assigned to a typed variable directly.
 
@@ -245,7 +203,7 @@ if (!parsed.success) {
 }
 const data = parsed.data; // fully typed
 
-// Incorrect — do not do this
+// Incorrect -- do not do this
 const data = (await c.req.json()) as MyType;
 ```
 
@@ -257,11 +215,61 @@ Every detection module must implement the `DetectionModule` interface from `@sen
 
 Throw `HTTPException` from `hono/http-exception` in route handlers and middleware, not generic `Error` objects. The global error handler in `apps/api/src/index.ts` serializes `HTTPException` correctly and captures everything else to Sentry.
 
-### Commit messages
+---
+
+## Running tests
+
+See [`docs/TESTING.md`](TESTING.md) for the complete testing guide. The summary below covers the essentials.
+
+### All tests
+
+```bash
+pnpm test
+```
+
+### Unit tests only
+
+```bash
+pnpm test:unit
+```
+
+Runs tests in `packages/` and `modules/`. These tests have no external dependencies and run without Docker.
+
+### Integration tests only
+
+```bash
+pnpm test:integration
+```
+
+Runs tests in `apps/` and `test/`. Requires a running PostgreSQL instance with a `sentinel_test` database (port 5434) and Redis (port 6380).
+
+### Type checking and linting
+
+Run these before pushing. CI fails the build if either check fails.
+
+```bash
+pnpm typecheck
+pnpm lint
+```
+
+### Coverage thresholds
+
+The root `vitest.config.ts` enforces minimum coverage thresholds. CI fails the build if coverage drops below these values:
+
+| Metric | Minimum |
+|--------|---------|
+| Lines | 49% |
+| Functions | 62% |
+| Branches | 79% |
+| Statements | 49% |
+
+---
+
+## Commit messages
 
 Use the Conventional Commits format. The type and scope must be lowercase.
 
-```
+```text
 <type>(<scope>): <short description>
 
 [optional body]
@@ -280,13 +288,15 @@ Allowed types:
 | `docs` | Documentation changes only |
 | `chore` | Build scripts, CI, dependency updates |
 | `perf` | Performance improvement |
+| `security` | Security hardening (e.g., hashing algorithm migration, input validation) |
 
 Examples:
 
-```
+```text
 feat(github): add branch protection bypass detection template
 fix(correlation): prevent duplicate sequence step matches in overlapping windows
 docs(api): document rate limit response headers
+security: migrate password hashing from bcrypt to argon2id
 ```
 
 ---
@@ -326,6 +336,53 @@ Confirm the following before requesting review:
 
 Open a draft PR early if you want feedback on direction before the implementation is complete. Mark it ready for review only when all checks pass.
 
+### CI pipeline
+
+Every PR triggers the CI workflow (`.github/workflows/ci.yml`), which runs these jobs in parallel:
+
+| Job | What it checks |
+|-----|----------------|
+| Gitleaks | Scans the repository for leaked secrets |
+| Dependency Audit | Runs `pnpm audit --prod --audit-level=high` for known vulnerabilities |
+| Trivy Filesystem Scan | Scans the filesystem for HIGH and CRITICAL vulnerabilities |
+| Lint and Typecheck | Runs `pnpm lint` and `pnpm typecheck` across all workspaces |
+| Build | Builds all packages with `pnpm build` |
+| Migrations | Applies migrations, runs the three-way sync check, detects schema drift |
+| Tests | Runs unit tests with coverage, then integration tests with coverage |
+
+All jobs must pass before the PR can merge.
+
+---
+
+## Migration policy
+
+**Always use Drizzle Kit to generate migrations -- never hand-write SQL files.**
+
+1. Edit the TypeScript schema in `packages/db/schema/`.
+2. Run `pnpm db:generate` -- Drizzle diffs the schema against its snapshot and produces the SQL file plus an updated snapshot in `migrations/meta/`.
+3. Review the generated SQL for correctness.
+4. Run `pnpm db:migrate` to apply the migration locally.
+5. Commit both the `.sql` file and the `meta/` snapshot together.
+
+If you need custom SQL that `generate` cannot produce (data migrations, backfills), use the custom migration flag:
+
+```bash
+pnpm --filter @sentinel/db drizzle-kit generate --custom --name=description
+```
+
+This creates an empty SQL file **with** the snapshot, keeping the migration chain intact. Never create migration files manually -- missing snapshots cause Drizzle to produce duplicate statements on the next `generate`.
+
+### CI migration sync check
+
+CI runs a **three-way sync check**: SQL file count must equal journal entries must equal applied database rows. It also runs `pnpm db:generate` and fails if the working tree has uncommitted changes in `packages/db/migrations/`, which detects schema drift.
+
+### Production migration rules
+
+Once deployed to production, migrations must be **additive-only**. Never drop, rename, or change column types in the same deploy as the code that depends on the change. Use the two-deploy pattern:
+
+1. First deploy: remove the code dependency on the old column or table.
+2. Second deploy: drop or rename the schema object.
+
 ---
 
 ## Module development
@@ -341,7 +398,9 @@ A module provides:
 - `DetectionTemplate` definitions that users can instantiate from the UI without writing rules manually.
 - Optional `RetentionPolicy` entries that the worker uses to prune stale module-owned rows.
 
-For the full interface specification, field-by-field documentation, and a worked example, see [`docs/app/modules/module-interface.md`](app/modules/module-interface.md).
+The five built-in modules are `github`, `chain`, `infra`, `registry`, and `aws`.
+
+For the full interface specification, field-by-field documentation, and a worked example, see [`docs/app/modules`](app/modules).
 
 ---
 
@@ -357,8 +416,9 @@ Follow the [`docs/STYLE-GUIDE.md`](STYLE-GUIDE.md) for all documentation contrib
 
 - Use active voice and second person ("you").
 - Wrap every code block with a language tag: ` ```typescript `, ` ```bash `, ` ```sql `.
-- Use relative links between docs files.
+- Use relative links between documentation files.
 - Do not use emojis or decorative symbols.
+- Follow the [Diataxis](https://diataxis.fr/) framework: do not mix tutorials, how-to guides, reference, and explanation in a single document.
 
 ### Adding a new page
 
@@ -369,10 +429,6 @@ Follow the [`docs/STYLE-GUIDE.md`](STYLE-GUIDE.md) for all documentation contrib
 ### Updating existing pages
 
 When you change an API endpoint, module interface, or environment variable, update the corresponding documentation in the same PR. Separating code changes from their documentation updates makes the docs stale and is grounds for requesting changes during review.
-
-### Diagrams
-
-Use Mermaid for architecture and flow diagrams. Render diagrams in fenced code blocks with the `mermaid` language tag. See `docs/STYLE-GUIDE.md` for diagram conventions.
 
 ---
 
@@ -385,7 +441,7 @@ Open a GitHub issue using the "Bug Report" template. Include:
 1. **Summary:** A one-sentence description of the unexpected behavior.
 2. **Steps to reproduce:** Numbered steps that a maintainer can follow to trigger the bug. Include exact commands, API requests, or UI actions.
 3. **Expected behavior:** What you expected to happen.
-4. **Actual behavior:** What happened instead. Include error messages, HTTP status codes, or log output.
+4. **Actual behavior:** What happened instead. Include error messages, HTTP (Hypertext Transfer Protocol) status codes, or log output.
 5. **Environment:** Node.js version, operating system, Docker version, and the Sentinel version or commit hash.
 6. **Relevant configuration:** Environment variables (with secrets redacted), detection rule configuration, or module settings that affect the behavior.
 
@@ -407,4 +463,4 @@ Open a GitHub issue using the "Feature Request" template. Describe:
 
 ### Security vulnerabilities
 
-Do not open a public issue for security vulnerabilities. Follow the responsible disclosure process described in `SECURITY.md` at the repository root.
+Do not open a public issue for security vulnerabilities. Follow the responsible disclosure process described in [`SECURITY.md`](../SECURITY.md) at the repository root.

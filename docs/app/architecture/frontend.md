@@ -69,7 +69,11 @@ apps/web/src/app/
 
 ### Route groups
 
-Route groups (folders prefixed with parentheses) affect the URL structure and layout inheritance but do not appear in the URL path. The `(auth)` group renders pages inside a minimal centered-card layout. The `(dashboard)` group renders pages inside the full dashboard shell with the sidebar navigation.
+Route groups (folders prefixed with parentheses) affect the URL structure and layout inheritance but do not appear in the URL path. The `(auth)` group renders pages inside a minimal centered-card layout with the terminal-style "$ SENTINEL" branding. The `(dashboard)` group renders pages inside the full dashboard shell with the sidebar navigation.
+
+The `(auth)` layout is a client component (`"use client"`) that performs a redirect check on mount: it calls `GET /auth/me` to determine whether the user already has a valid session. If the call succeeds, the user is redirected to `/dashboard` immediately, preventing authenticated users from seeing the login form. If the call fails (401), the user stays on the auth page.
+
+The `(dashboard)` layout is a server component that sets `export const dynamic = "force-dynamic"` to opt all dashboard routes out of static prerendering. The actual navigation chrome (sidebar, header, user menu) lives in a separate client component, `dashboard-shell.tsx`.
 
 This means `/login` uses the auth layout and `/dashboard` uses the dashboard layout, even though both are children of the same `app/` directory.
 
@@ -164,3 +168,29 @@ Available primitive components include: `Button`, `Input`, `Badge`, `Combobox`, 
 ### Dark mode
 
 The `dark` class is always present on `<html>`. Tailwind's dark mode variant (`dark:`) is used throughout the component tree for values that need to differ between themes (even though only dark is active). This ensures forward compatibility if a light mode is ever introduced.
+
+## Next.js middleware
+
+The file `apps/web/src/middleware.ts` implements server-side route protection. It runs on every request (excluding `_next/static`, `_next/image`, and `favicon.ico` via the matcher config) and gates dashboard access on the presence of the `sentinel.sid` session cookie.
+
+**Public paths** — The following paths are accessible without a session cookie:
+
+- `/`, `/login`, `/register` (explicit allowlist)
+- `/api/*` and `/_next/*` (framework internals)
+- `/favicon.ico` and any path ending with a file extension (`/foo.svg`, `/manifest.webmanifest`, etc.)
+
+**Redirect behavior** — If a request targets a non-public path and the `sentinel.sid` cookie is absent or empty, the middleware redirects to `/login?next=<original-path>`. The `next` query parameter preserves the user's intended destination so that the login page can redirect back after successful authentication.
+
+The middleware does not validate the session itself. Session validation is the responsibility of the API server. The middleware only prevents unauthenticated users from receiving server-rendered dashboard HTML, which would be useless without data anyway.
+
+## Additional dependencies
+
+Beyond the standard Next.js and React dependencies, the web application includes:
+
+| Package | Purpose |
+|---|---|
+| `leaflet` + `react-leaflet` | Renders the infrastructure worldview map (`/infra/worldview`). |
+| `lucide-react` | Icon library used throughout the dashboard. |
+| `class-variance-authority` | Manages component variant class names (used by `Button`, `Badge`, and similar primitives). |
+| `clsx` + `tailwind-merge` | Utility for conditionally merging Tailwind class names. |
+| `@sentry/nextjs` | Error tracking and performance monitoring in the browser and on the server. |

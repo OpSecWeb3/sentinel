@@ -47,13 +47,13 @@ The optional `ENCRYPTION_KEY_PREV` variable enables backward-compatible key rota
 
 ## Step 4: Start infrastructure
 
-Start PostgreSQL and Redis using Docker Compose:
+Start PostgreSQL and Redis using the development Docker Compose file:
 
 ```bash
-docker compose up postgres redis -d
+pnpm dev:infra
 ```
 
-Docker Compose downloads the `postgres:16-alpine` and `redis:7-alpine` images on first run. The services use named volume `pgdata` so that your data persists across container restarts.
+This runs `docker compose -f docker-compose.dev.yml up postgres redis`, which maps PostgreSQL to host port **5434** and Redis to host port **6380** to avoid conflicts with any host-level instances on the default ports. Docker Compose downloads the `postgres:16-alpine` and `redis:7-alpine` images on first run. The services use named volume `sentinel-pgdata` so that your data persists across container restarts.
 
 Verify both containers are healthy:
 
@@ -86,6 +86,24 @@ pnpm db:studio
 ```
 
 ## Step 6: Start the application services
+
+### Option A: All-in-one Docker Compose (recommended)
+
+Start all services (PostgreSQL, Redis, migrations, API, worker, web) with a single command:
+
+```bash
+pnpm dev
+```
+
+This runs `docker compose -f docker-compose.dev.yml up`, which builds a development image from `Dockerfile.dev`, bind-mounts the source code for hot reload, and starts all services with their correct dependency order. The migration container runs first and exits; then the API, worker, and web services start.
+
+To rebuild the development image after changing dependencies:
+
+```bash
+pnpm dev:build
+```
+
+### Option B: Individual processes
 
 Open three terminal tabs and start each service individually during development, so that you can see each service's log output separately.
 

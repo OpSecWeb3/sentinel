@@ -250,14 +250,43 @@ This evaluator is useful for:
 
 Routes are mounted under `/modules/aws/`.
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/integrations` | Lists configured AWS integrations (SQS queue URL, region, and connection status). |
-| `POST` | `/integrations` | Adds a new AWS integration. Requires SQS queue URL, AWS region, and IAM credentials or a role ARN for cross-account access. |
-| `DELETE` | `/integrations/:id` | Removes an AWS integration. |
-| `POST` | `/integrations/:id/test` | Tests connectivity for the specified integration by attempting to receive one SQS message and listing accessible S3 objects. |
-| `GET` | `/templates` | Lists detection templates provided by this module. |
-| `GET` | `/event-types` | Lists event types this module can produce. |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/integrations` | Session | Lists configured AWS integrations with SQS queue URL, region, polling status, last poll time, and connected account IDs. Sensitive fields (role ARN, credentials) are returned as boolean indicators, not raw values. |
+| `POST` | `/integrations` | Session + Admin | Creates a new AWS integration. Requires an AWS account ID (12 digits), and either a `roleArn` or `accessKeyId` + `secretAccessKey` pair. Optionally accepts `sqsQueueUrl`, `sqsRegion`, `regions`, and `pollIntervalSeconds`. Triggers an initial SQS poll on creation. |
+| `GET` | `/integrations/:id` | Session | Returns detailed information about a specific AWS integration, including configuration and status. |
+| `PATCH` | `/integrations/:id` | Session + Admin/Editor | Updates integration configuration (name, SQS queue, regions, credentials, poll interval, enable/disable). Triggers an immediate poll after update. |
+| `DELETE` | `/integrations/:id` | Session + Admin | Permanently deletes an AWS integration and its associated repeatable poll jobs. Pauses all AWS detections if this was the last active integration. |
+| `POST` | `/integrations/:id/poll` | Session + Admin/Editor | Manually triggers an SQS poll for the specified integration. Requires the integration to have an SQS queue URL configured. |
+| `GET` | `/events` | Session | Lists raw CloudTrail events from the short-retention buffer. Supports pagination (`?page=`, `?limit=`) and filtering by `integrationId` and `eventName`. |
+| `GET` | `/overview` | Session | Returns aggregated dashboard statistics: integration count, total events, error events, and recent integration statuses. |
+| `GET` | `/templates` | Session | Lists detection templates provided by this module. |
+
+---
+
+## Templates
+
+The AWS module provides 17 pre-built detection templates:
+
+| Template slug | Name | Category | Default severity |
+|---|---|---|---|
+| `aws-root-account-usage` | Root Account Usage | identity | critical |
+| `aws-console-login-anomaly` | Console Login Anomaly | identity | high |
+| `aws-iam-user-changes` | IAM User Changes | identity | high |
+| `aws-iam-privilege-escalation` | IAM Privilege Escalation | identity | critical |
+| `aws-federated-identity-abuse` | Federated Identity Abuse | identity | high |
+| `aws-mfa-deactivated` | MFA Deactivated | identity | critical |
+| `aws-cloudtrail-disabled` | CloudTrail Disabled | defense-evasion | critical |
+| `aws-config-evasion` | Config Service Evasion | defense-evasion | critical |
+| `aws-security-group-opened` | Security Group Opened | network | high |
+| `aws-ec2-ssh-access` | EC2 SSH Key Access | network | high |
+| `aws-ec2-unusual-launch` | EC2 Unusual Launch | compute | medium |
+| `aws-spot-eviction` | Spot Instance Eviction | compute | medium |
+| `aws-s3-public-access` | S3 Public Access Change | data | critical |
+| `aws-kms-key-action` | KMS Key Action | data | high |
+| `aws-secrets-access` | Secrets Manager Access | data | high |
+| `aws-access-denied` | Access Denied Spike | anomaly | medium |
+| `aws-full-security` | Full AWS Security Suite | comprehensive | high |
 
 ---
 

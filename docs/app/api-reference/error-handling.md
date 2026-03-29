@@ -139,7 +139,7 @@ A `401 Unauthorized` response means that the request could not be authenticated.
 | `"Authentication required"` | Protected route accessed with no session cookie and no `Authorization` header |
 | `"Invalid API key"` | `Bearer sk_...` key not found in database, already revoked, hash mismatch, or the issuing user is no longer a member of the org |
 | `"API key expired"` | Key was created with an `expiresInDays` value and the expiry date has passed |
-| `"Invalid username or password"` | Login failed; response timing is equalized via a dummy bcrypt comparison to prevent user-enumeration via timing |
+| `"Invalid username or password"` | Login failed; response timing is equalized via a dummy argon2id comparison to prevent user-enumeration via timing |
 | `"Current password is incorrect"` | `POST /auth/change-password` called with wrong `currentPassword` |
 
 **Example 401 response:**

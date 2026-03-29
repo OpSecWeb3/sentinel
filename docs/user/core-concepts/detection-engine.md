@@ -85,7 +85,7 @@ When you create a detection from a template, Sentinel interpolates your form inp
 
 Templates are organized by module and category. The GitHub module includes categories such as:
 
-- **access-control** -- Member changes, team permissions
+- **access-control** -- Member changes, team permissions, repository visibility
 - **code-protection** -- Branch protection, secret scanning
 - **secrets** -- Secret exposure detection
 - **organization** -- Organization-level settings changes
@@ -99,16 +99,36 @@ The AWS module includes categories such as:
 - **data** -- S3 and data store access changes
 - **compute** -- EC2 and Lambda changes
 - **reconnaissance** -- Enumeration and discovery activity
+- **comprehensive** -- Broad AWS security coverage
 
-Other modules (chain, infra, registry) derive their categories dynamically from the available templates.
+Other modules (chain, infra, registry) derive their categories dynamically from the available templates. The chain module also supports keyword search across templates.
+
+### Template Input Types
+
+Templates define typed inputs that map to specific form controls:
+
+| Input Type | Form Control | Example Use |
+|---|---|---|
+| `text` | Single-line text field | Repository name, label |
+| `number` | Numeric field with optional min/max | Threshold value, timeout |
+| `boolean` | True/false toggle | Enable/disable a feature |
+| `select` | Dropdown | Choose from predefined options |
+| `string-array` | Multi-line textarea | List of addresses, patterns |
+| `address` | Text field (monospace) | Blockchain address |
+| `contract` | Dropdown of registered contracts | Contract selector |
+| `network` | Dropdown of registered networks | Network selector |
+
+Some inputs are conditionally visible -- they appear only after a related input is filled in. Required inputs are marked with a red asterisk.
 
 ### Creating a Detection from a Template
 
-1. Navigate to **detections** > **New Detection**.
-2. Select the module tab.
-3. Click a template card.
-4. Fill in the required inputs and adjust severity and cooldown as needed.
-5. Click **Create Detection**.
+1. Navigate to **detections** in the sidebar.
+2. Click **+ New Detection**.
+3. Select the module tab (**[github]**, **[infra]**, **[chain]**, **[registry]**, or **[aws]**).
+4. Optionally, filter by category or search (chain module only).
+5. Click a template card to select it.
+6. Fill in the required inputs and adjust the detection name, severity, and cooldown as needed.
+7. Click **Create Detection**.
 
 The detection is created in the `active` state and begins evaluating events immediately.
 
@@ -118,13 +138,23 @@ The detection is created in the `active` state and begins evaluating events imme
 
 A detection moves through the following states:
 
-**Active** -- The detection is running and evaluating incoming events. All of its rules are active.
+**Active** -- The detection is running and evaluating incoming events. All of its rules are active. Shown as **[active]** in green in the detection list.
 
-**Paused** -- An admin or editor manually paused the detection. No events are evaluated while paused. All rules under the detection are also paused. When you resume a paused detection, both the detection and its rules return to active. Pausing is useful when you know a maintenance window will cause many expected alerts that you want to silence temporarily.
+**Paused** -- An admin or editor manually paused the detection. No events are evaluated while paused. All rules under the detection are also paused. When you resume a paused detection, both the detection and its rules return to active. Shown as **[paused]** in yellow. Pausing is useful when you know a maintenance window will cause many expected alerts that you want to silence temporarily.
 
-**Error** -- The detection's rule encountered a processing error. Check the detection's details for more information and update the configuration to resolve it.
+**Error** -- The detection's rule encountered a processing error. Check the detection's details for more information and update the configuration to resolve it. Shown as **[error]** in red.
 
-**Disabled (archived)** -- An admin has archived the detection. Archived detections cannot be updated or reactivated. All rules under an archived detection are also disabled. Archiving is a soft delete -- the detection and its alert history remain in the database for audit purposes.
+**Disabled (archived)** -- An admin has archived the detection. Archived detections cannot be updated or reactivated through the standard controls -- only a **[view]** link is available. All rules under an archived detection are also disabled. Archiving is a soft delete -- the detection and its alert history remain in the database for audit purposes. Shown as **[archived]** in grey.
+
+### Managing Detections
+
+The **Detections** page provides the following controls for each detection:
+
+- **[pause]** / **[resume]** -- Toggle a detection between active and paused states.
+- **[edit]** -- Navigate to the detection edit page to modify its configuration.
+- **[archive]** -- Soft-delete the detection. Sentinel asks for confirmation before archiving.
+
+You can filter the detection list by **status** (active, paused, archived), **severity** (critical, high, medium, low), and **module** (chain, github, infra, registry). A search bar lets you find detections by name.
 
 ---
 
