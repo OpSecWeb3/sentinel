@@ -98,10 +98,12 @@ if [ "$HAS_MIGRATIONS" = true ]; then
   bash ./scripts/backup-db.sh || { echo "ERROR: Pre-migration backup failed — aborting deploy"; exit 1; }
 fi
 
-npx drizzle-kit migrate --config packages/db/drizzle.config.ts
+# Use workspace drizzle-kit (lockfile-pinned). Plain `npx drizzle-kit` can
+# fetch a newer global copy that mismatches drizzle-orm and aborts migrate.
+pnpm db:migrate
 
 echo "==> Seeding database..."
-npx tsx packages/db/src/seed.ts
+pnpm db:seed
 
 echo "==> Starting containers..."
 docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
