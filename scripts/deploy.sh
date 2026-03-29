@@ -17,6 +17,7 @@ if [ "$ENV_PERMS" != "600" ]; then
 fi
 
 # ── Capture current state for rollback ──────────────────────────────────────
+NEW_SHA=""       # set after git pull; pre-initialised so rollback can reference it safely
 PREV_SHA=$(git rev-parse HEAD)
 echo "==> Current commit: ${PREV_SHA:0:12}"
 
@@ -37,6 +38,7 @@ fi
 
 # ── Rollback function ──────────────────────────────────────────────────────
 rollback() {
+  trap - ERR  # prevent re-entry if a command inside rollback fails
   echo ""
   echo "==> DEPLOY FAILED — initiating rollback"
 
@@ -73,6 +75,8 @@ rollback() {
   docker compose -f "$COMPOSE_FILE" logs --tail=50
   exit 1
 }
+
+trap 'rollback' ERR
 
 echo "==> Ensuring Docker networks exist..."
 docker network create gateway 2>/dev/null || true

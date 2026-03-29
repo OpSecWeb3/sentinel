@@ -42,7 +42,7 @@ const WEBHOOK_RATE_WINDOW_SEC = 60;
 const _inMemoryFallback = new Map<string, { count: number; resetAt: number }>();
 
 async function isWebhookRateLimited(ip: string): Promise<boolean> {
-  if (process.env.DISABLE_RATE_LIMIT === 'true') return false;
+  if (env().DISABLE_RATE_LIMIT === 'true' && env().NODE_ENV !== 'production') return false;
 
   const redis = _rateLimitRedis;
   if (redis) {

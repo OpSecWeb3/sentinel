@@ -203,7 +203,22 @@ echo ""
 handle_param "SLACK_CLIENT_ID"     "Slack Client ID"                                   "Slack OAuth client ID"
 handle_param "SLACK_CLIENT_SECRET" "Slack Client Secret"                               "Slack OAuth client secret"
 handle_param "GITHUB_APP_ID"       "GitHub App ID"                                     "GitHub App ID"
-handle_param "GITHUB_APP_PRIVATE_KEY" "GitHub App Private Key (PEM, single line)"      "GitHub App private key for JWT signing"
+# PEM keys have real newlines — read until Ctrl+D so the user can paste directly
+# from the .pem file without any manual formatting. Newlines are collapsed to \n
+# before storage so the value fits on a single line in .env / Docker env_file.
+if should_handle "GITHUB_APP_PRIVATE_KEY"; then
+  echo ""
+  echo "GitHub App Private Key — paste the PEM contents, then press Ctrl+D:"
+  [ -n "$CURRENT_VALUE" ] && echo "  (press Ctrl+D immediately to keep existing value)"
+  raw=$(cat)
+  if [ -z "$raw" ] && [ -n "$CURRENT_VALUE" ]; then
+    raw="$CURRENT_VALUE"
+  fi
+  # Collapse actual newlines to literal \n for single-line .env compatibility
+  value="${raw//$'\n'/\\n}"
+  put_param "GITHUB_APP_PRIVATE_KEY" "$value" "GitHub App private key for JWT signing"
+  echo ""
+fi
 handle_param "GITHUB_APP_WEBHOOK_SECRET" "GitHub App Webhook Secret"                   "GitHub webhook HMAC secret"
 handle_param "GITHUB_APP_CLIENT_ID"    "GitHub App Client ID"                          "GitHub App OAuth client ID"
 handle_param "GITHUB_APP_CLIENT_SECRET" "GitHub App Client Secret"                     "GitHub App OAuth client secret"

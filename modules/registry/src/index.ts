@@ -10,6 +10,7 @@ import { eventTypes } from './event-types.js';
 import { templates } from './templates/index.js';
 
 export { initVerification } from './verification.js';
+export { setRegistryWebhookRateLimitRedis } from './router.js';
 
 export const RegistryModule: DetectionModule = {
   id: 'registry',

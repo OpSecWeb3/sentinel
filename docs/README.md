@@ -35,6 +35,7 @@ Use this table to find the right page for your task.
 | Build a new detection module | [Module interface](app/modules) |
 | Set up a local development environment | [Getting started (developer)](app/getting-started) |
 | Deploy to production | [Deployment guide](app/deployment) |
+| Set up free secret scanning | [Secret scanning](security-scanning.md) |
 | Manage users, roles, and organizations | [Administration](user/administration) |
 | Create and rotate API keys | [Administration](user/administration) |
 | Understand data retention policies | [Data model](app/data-model) |

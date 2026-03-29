@@ -22,14 +22,8 @@ function encryptSession(data: SessionData): { _encrypted: string } {
   return { _encrypted: encrypt(JSON.stringify(data)) };
 }
 
-/**
- * Decrypt session data from the JSONB column.
- * Handles both encrypted (`{ _encrypted: "..." }`) and legacy plaintext formats
- * for backward compatibility during migration.
- */
 function decryptSession(sess: unknown): SessionData | null {
   try {
-    // New encrypted format: { _encrypted: "base64..." }
     if (
       typeof sess === 'object' &&
       sess !== null &&
@@ -39,20 +33,6 @@ function decryptSession(sess: unknown): SessionData | null {
       const plaintext = decrypt((sess as { _encrypted: string })._encrypted);
       return JSON.parse(plaintext) as SessionData;
     }
-
-    // Legacy plaintext JSONB format: { userId, orgId, role }
-    // This path should only be hit for sessions written before encryption was
-    // introduced. All new sessions are stored encrypted (see encryptSession).
-    // Log a warning so operators know legacy sessions are still in the store;
-    // they can be invalidated by clearing the sessions table or waiting for
-    // natural expiry. Once no warnings appear in production logs, this branch
-    // can be removed.
-    const legacy = sess as Record<string, unknown>;
-    if (legacy && typeof legacy.userId === 'string') {
-      rootLogger.warn({ userId: legacy.userId }, 'session: decrypted legacy plaintext session — encryption migration incomplete');
-      return legacy as unknown as SessionData;
-    }
-
     return null;
   } catch {
     return null;

@@ -11,6 +11,9 @@ coverage/
 apps/web/.next/
 apps/web/out/
 
+# Local tooling binaries
+.tools/
+
 # Claude Code
 .claude/
 memory/

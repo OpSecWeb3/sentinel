@@ -21,7 +21,12 @@
     "test:integration": "vitest run apps/ test/",
     "test:watch": "vitest watch",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "security:tools:install": "bash scripts/install-gitleaks.sh",
+    "security:secrets": ".tools/bin/gitleaks dir . --config .gitleaks.toml --redact",
+    "security:secrets:history": ".tools/bin/gitleaks git . --config .gitleaks.toml --redact",
+    "security:hooks:install": "bash scripts/install-pre-commit-hook.sh",
+    "security:setup": "pnpm run security:tools:install && pnpm run security:hooks:install"
   },
   "pnpm": {
     "overrides": {

@@ -35,7 +35,7 @@ import { githubAnalyticsRouter } from './routes/github-analytics.js';
 
 // Module imports
 import { GitHubModule, setWebhookRateLimitRedis } from '@sentinel/module-github';
-import { RegistryModule } from '@sentinel/module-registry';
+import { RegistryModule, setRegistryWebhookRateLimitRedis } from '@sentinel/module-registry';
 import { ChainModule } from '@sentinel/module-chain';
 import { InfraModule } from '@sentinel/module-infra';
 import { AwsModule } from '@sentinel/module-aws';
@@ -63,6 +63,7 @@ const log = createLogger({ service: 'sentinel-api', level: config.LOG_LEVEL });
   setSharedRedis(redis);
   // Register with GitHub module webhook rate limiter
   setWebhookRateLimitRedis(redis);
+  setRegistryWebhookRateLimitRedis(redis);
 }
 
 await initSentry({

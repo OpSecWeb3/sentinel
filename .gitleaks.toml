@@ -1,0 +1,15 @@
+title = "sentinel-gitleaks-config"
+
+[allowlist]
+description = "Allow known non-production fixtures and documentation examples"
+paths = [
+  '''^docs/''',
+  '''^test/''',
+  '''^.*__tests__/.*$''',
+  '''^.*\.test\.ts$'''
+]
+regexes = [
+  '''AKIA[0-9A-Z]{16}EXAMPLE''',
+  '''0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef''',
+  '''test-session-secret-at-least-32-chars-long!!'''
+]

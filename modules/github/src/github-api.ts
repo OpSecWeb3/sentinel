@@ -22,6 +22,10 @@ export function generateAppJwt(): string {
     throw new Error('GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are required');
   }
 
+  // PEM keys stored in SSM as single-line values use literal \n separators.
+  // Docker env_file passes them through unchanged, so normalize before use.
+  const normalizedKey = privateKey.replace(/\\n/g, '\n');
+
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: 'RS256', typ: 'JWT' };
   const payload = {
@@ -36,7 +40,7 @@ export function generateAppJwt(): string {
 
   const sign = crypto.createSign('RSA-SHA256');
   sign.update(signingInput);
-  const signature = sign.sign(privateKey, 'base64url');
+  const signature = sign.sign(normalizedKey, 'base64url');
 
   return `${signingInput}.${signature}`;
 }

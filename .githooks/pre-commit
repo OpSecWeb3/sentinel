@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+LOCAL_GITLEAKS="$ROOT_DIR/.tools/bin/gitleaks"
+
+if command -v gitleaks >/dev/null 2>&1; then
+  GITLEAKS_BIN="$(command -v gitleaks)"
+elif [ -x "$LOCAL_GITLEAKS" ]; then
+  GITLEAKS_BIN="$LOCAL_GITLEAKS"
+else
+  echo "gitleaks is required for pre-commit secret scanning."
+  echo "Install it with: pnpm run security:tools:install"
+  exit 1
+fi
+
+if "$GITLEAKS_BIN" help 2>/dev/null | grep -q "protect"; then
+  "$GITLEAKS_BIN" protect --staged --redact --config .gitleaks.toml
+else
+  "$GITLEAKS_BIN" git --staged --redact --config .gitleaks.toml
+fi
