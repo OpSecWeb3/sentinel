@@ -328,12 +328,13 @@ auth.get('/api-keys', requireAuth, requireOrg, requireScope('api:read'), async (
 
 auth.delete('/api-keys/:id', requireAuth, requireOrg, requireScope('api:write'), async (c) => {
   const orgId = c.get('orgId')!;
+  const userId = c.get('userId')!;
   const keyId = c.req.param('id')!;
   const db = getDb();
 
   const [revoked] = await db.update(apiKeys)
     .set({ revoked: true })
-    .where(and(eq(apiKeys.id, keyId), eq(apiKeys.orgId, orgId)))
+    .where(and(eq(apiKeys.id, keyId), eq(apiKeys.orgId, orgId), eq(apiKeys.userId, userId)))
     .returning({ name: apiKeys.name });
 
   if (!revoked) return c.json({ error: 'API key not found' }, 404);
