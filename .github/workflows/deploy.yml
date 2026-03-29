@@ -92,40 +92,43 @@ jobs:
           # Append secrets (using printf to handle multi-line values like PEM keys)
           # Note: [ -n ] && printf returns exit code 1 when the var is empty,
           # which kills the script under bash -e. Append || true to optional lines.
+          # Single-quote all values so `source .env` in deploy.sh
+          # doesn't try to interpret special chars (e.g. PEM keys).
+          sq() { printf "%s='%s'\n" "$1" "${2//\'/\'\\\'\'}"; }
           {
-            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
-            printf 'REDIS_URL=redis://:%s@redis:6379\n' "$REDIS_PASSWORD"
-            printf 'TRUSTED_PROXY_COUNT=%s\n' "$TRUSTED_PROXY_COUNT"
-            printf 'SESSION_SECRET=%s\n' "$SESSION_SECRET"
-            printf 'ENCRYPTION_KEY=%s\n' "$ENCRYPTION_KEY"
-            [ -n "$ENCRYPTION_KEY_PREV" ] && printf 'ENCRYPTION_KEY_PREV=%s\n' "$ENCRYPTION_KEY_PREV" || true
-            printf 'ALLOWED_ORIGINS=%s\n' "$ALLOWED_ORIGINS"
-            printf 'NEXT_PUBLIC_API_URL=%s\n' "$NEXT_PUBLIC_API_URL"
-            printf 'API_BASE_URL=%s\n' "$NEXT_PUBLIC_API_URL"
-            [ -n "$SENTINEL_AWS_ACCESS_KEY_ID" ] && printf 'AWS_ACCESS_KEY_ID=%s\n' "$SENTINEL_AWS_ACCESS_KEY_ID" || true
-            [ -n "$SENTINEL_AWS_SECRET_ACCESS_KEY" ] && printf 'AWS_SECRET_ACCESS_KEY=%s\n' "$SENTINEL_AWS_SECRET_ACCESS_KEY" || true
-            [ -n "$SENTINEL_AWS_ROLE_ARN" ] && printf 'AWS_SENTINEL_ROLE_ARN=%s\n' "$SENTINEL_AWS_ROLE_ARN" || true
-            printf 'SLACK_CLIENT_ID=%s\n' "$SLACK_CLIENT_ID"
-            printf 'SLACK_CLIENT_SECRET=%s\n' "$SLACK_CLIENT_SECRET"
-            printf 'GITHUB_APP_ID=%s\n' "$GITHUB_APP_ID"
-            printf 'GITHUB_APP_PRIVATE_KEY=%s\n' "${GITHUB_APP_PRIVATE_KEY//$'\n'/\\n}"
-            printf 'GITHUB_APP_WEBHOOK_SECRET=%s\n' "$GITHUB_APP_WEBHOOK_SECRET"
-            printf 'GITHUB_APP_CLIENT_ID=%s\n' "$GITHUB_APP_CLIENT_ID"
-            printf 'GITHUB_APP_CLIENT_SECRET=%s\n' "$GITHUB_APP_CLIENT_SECRET"
-            printf 'GITHUB_APP_SLUG=%s\n' "$GITHUB_APP_SLUG"
-            printf 'GITHUB_TOKEN=%s\n' "$GITHUB_TOKEN"
-            printf 'SMTP_URL=%s\n' "$SMTP_URL"
-            printf 'SMTP_FROM=%s\n' "$SMTP_FROM"
-            printf 'SENTRY_DSN=%s\n' "$SENTRY_DSN"
-            printf 'SENTRY_ENVIRONMENT=%s\n' "$SENTRY_ENVIRONMENT"
-            [ -n "$SENTRY_DSN" ] && printf 'NEXT_PUBLIC_SENTRY_DSN=%s\n' "$SENTRY_DSN" || true
-            printf 'NEXT_PUBLIC_SENTRY_ENVIRONMENT=%s\n' "$SENTRY_ENVIRONMENT"
-            [ -n "$SENTRY_ORG" ] && printf 'SENTRY_ORG=%s\n' "$SENTRY_ORG" || true
-            [ -n "$SENTRY_PROJECT" ] && printf 'SENTRY_PROJECT=%s\n' "$SENTRY_PROJECT" || true
-            [ -n "$SENTRY_AUTH_TOKEN" ] && printf 'SENTRY_AUTH_TOKEN=%s\n' "$SENTRY_AUTH_TOKEN" || true
-            printf 'ETHERSCAN_API_KEY=%s\n' "$ETHERSCAN_API_KEY"
-            printf 'RPC_ETHEREUM=%s\n' "$RPC_ETHEREUM"
-            [ -n "$METRICS_TOKEN" ] && printf 'METRICS_TOKEN=%s\n' "$METRICS_TOKEN" || true
+            sq DATABASE_URL "$DATABASE_URL"
+            sq REDIS_URL "redis://:${REDIS_PASSWORD}@redis:6379"
+            sq TRUSTED_PROXY_COUNT "$TRUSTED_PROXY_COUNT"
+            sq SESSION_SECRET "$SESSION_SECRET"
+            sq ENCRYPTION_KEY "$ENCRYPTION_KEY"
+            [ -n "$ENCRYPTION_KEY_PREV" ] && sq ENCRYPTION_KEY_PREV "$ENCRYPTION_KEY_PREV" || true
+            sq ALLOWED_ORIGINS "$ALLOWED_ORIGINS"
+            sq NEXT_PUBLIC_API_URL "$NEXT_PUBLIC_API_URL"
+            sq API_BASE_URL "$NEXT_PUBLIC_API_URL"
+            [ -n "$SENTINEL_AWS_ACCESS_KEY_ID" ] && sq AWS_ACCESS_KEY_ID "$SENTINEL_AWS_ACCESS_KEY_ID" || true
+            [ -n "$SENTINEL_AWS_SECRET_ACCESS_KEY" ] && sq AWS_SECRET_ACCESS_KEY "$SENTINEL_AWS_SECRET_ACCESS_KEY" || true
+            [ -n "$SENTINEL_AWS_ROLE_ARN" ] && sq AWS_SENTINEL_ROLE_ARN "$SENTINEL_AWS_ROLE_ARN" || true
+            sq SLACK_CLIENT_ID "$SLACK_CLIENT_ID"
+            sq SLACK_CLIENT_SECRET "$SLACK_CLIENT_SECRET"
+            sq GITHUB_APP_ID "$GITHUB_APP_ID"
+            sq GITHUB_APP_PRIVATE_KEY "${GITHUB_APP_PRIVATE_KEY//$'\n'/\\n}"
+            sq GITHUB_APP_WEBHOOK_SECRET "$GITHUB_APP_WEBHOOK_SECRET"
+            sq GITHUB_APP_CLIENT_ID "$GITHUB_APP_CLIENT_ID"
+            sq GITHUB_APP_CLIENT_SECRET "$GITHUB_APP_CLIENT_SECRET"
+            sq GITHUB_APP_SLUG "$GITHUB_APP_SLUG"
+            sq GITHUB_TOKEN "$GITHUB_TOKEN"
+            sq SMTP_URL "$SMTP_URL"
+            sq SMTP_FROM "$SMTP_FROM"
+            sq SENTRY_DSN "$SENTRY_DSN"
+            sq SENTRY_ENVIRONMENT "$SENTRY_ENVIRONMENT"
+            [ -n "$SENTRY_DSN" ] && sq NEXT_PUBLIC_SENTRY_DSN "$SENTRY_DSN" || true
+            sq NEXT_PUBLIC_SENTRY_ENVIRONMENT "$SENTRY_ENVIRONMENT"
+            [ -n "$SENTRY_ORG" ] && sq SENTRY_ORG "$SENTRY_ORG" || true
+            [ -n "$SENTRY_PROJECT" ] && sq SENTRY_PROJECT "$SENTRY_PROJECT" || true
+            [ -n "$SENTRY_AUTH_TOKEN" ] && sq SENTRY_AUTH_TOKEN "$SENTRY_AUTH_TOKEN" || true
+            sq ETHERSCAN_API_KEY "$ETHERSCAN_API_KEY"
+            sq RPC_ETHEREUM "$RPC_ETHEREUM"
+            [ -n "$METRICS_TOKEN" ] && sq METRICS_TOKEN "$METRICS_TOKEN" || true
           } >> /tmp/sentinel.env
 
           # Validate required SSM parameters before SCP
