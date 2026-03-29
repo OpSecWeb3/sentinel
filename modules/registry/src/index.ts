@@ -25,4 +25,9 @@ export const RegistryModule: DetectionModule = {
   jobHandlers: [webhookProcessHandler, pollHandler, attributionHandler, ciNotifyHandler, verifyHandler, verifyAggregateHandler],
   eventTypes,
   templates,
+  retentionPolicies: [
+    // CI build notifications: one row per CI workflow report. Low volume but
+    // unbounded without a policy. 90 days matches infra scan step results.
+    { table: 'rc_ci_notifications', timestampColumn: 'created_at', retentionDays: 90 },
+  ],
 };

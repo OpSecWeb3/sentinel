@@ -57,8 +57,9 @@ All Sentinel parameters follow the naming convention `/sentinel/<environment>/<V
 | `/sentinel/production/GITHUB_TOKEN` | `GITHUB_TOKEN` | Personal access token for GitHub API calls. |
 | `/sentinel/production/SMTP_URL` | `SMTP_URL` | SMTP connection string, e.g. `smtps://user:pass@smtp.example.com:465`. |
 | `/sentinel/production/SMTP_FROM` | `SMTP_FROM` | From address for outbound email. Defaults to `alerts@sentinel.dev`. |
-| `/sentinel/production/SENTRY_DSN` | `SENTRY_DSN` | Sentry ingest DSN for error reporting. |
-| `/sentinel/production/SENTRY_ENVIRONMENT` | `SENTRY_ENVIRONMENT` | Sentry environment tag. Defaults to `production`. |
+| `/sentinel/production/SENTRY_DSN` | `SENTRY_DSN` | Single Sentry project DSN for API, worker, and web. Deploy copies this value into `NEXT_PUBLIC_SENTRY_DSN` for the Next.js build (browser telemetry). |
+| `/sentinel/production/SENTRY_ENVIRONMENT` | `SENTRY_ENVIRONMENT` | Sentry environment tag. Defaults to `production`. Deploy also writes `NEXT_PUBLIC_SENTRY_ENVIRONMENT` to match for client events. |
+| `/sentinel/production/SENTRY_AUTH_TOKEN` | `SENTRY_AUTH_TOKEN` | Sentry auth token for source map uploads during Docker build. Generate at `sentry.io/settings/auth-tokens/`. |
 | `/sentinel/production/ETHERSCAN_API_KEY` | `ETHERSCAN_API_KEY` | Etherscan API key for on-chain module queries. |
 | `/sentinel/production/RPC_ETHEREUM` | `RPC_ETHEREUM` | Ethereum Mainnet RPC URL(s), comma-separated. Overrides seeded public fallbacks. |
 
@@ -97,8 +98,8 @@ The script processes parameters in two groups:
 
 1. **Required parameters**: `DATABASE_URL`, `SESSION_SECRET`, `ENCRYPTION_KEY`,
    `ENCRYPTION_KEY_PREV`, `ALLOWED_ORIGINS`, `NEXT_PUBLIC_API_URL`.
-2. **Optional parameters**: Slack, GitHub App, SMTP, Sentry, Etherscan, and RPC credentials.
-   Press Enter at any prompt to skip.
+2. **Optional parameters**: Slack, GitHub App, SMTP, Sentry (server + client DSN, auth token),
+   Etherscan, and RPC credentials. Press Enter at any prompt to skip.
 
 All parameters are stored as `SecureString` type in SSM under the prefix
 `/sentinel/production/`. The default region is `eu-west-2` (overridable via the `AWS_REGION`

@@ -163,8 +163,11 @@ schemes are rejected or warned).
 | Variable | Required | Default | Sensitive | Validation | Description | Example |
 |----------|----------|---------|-----------|------------|-------------|---------|
 | `LOG_LEVEL` | No | `info` | No | Validated. Enum: `trace`, `debug`, `info`, `warn`, `error`, `fatal`. | Minimum log level emitted by [Pino](https://getpino.io/). Use `debug` or `trace` only in development; these levels are verbose in production. | `warn` |
-| `SENTRY_DSN` | No | -- | **Yes** | Validated. Optional, must be a valid URL when set. | Sentry Data Source Name. When set, unhandled exceptions and fatal errors are reported to Sentry. If not set, Sentry is not initialized. | `https://abc123@o123456.ingest.sentry.io/1234567` |
-| `SENTRY_ENVIRONMENT` | No | -- | No | Validated. Optional string. | Environment tag sent with Sentry events. If not set, falls back to `NODE_ENV`. | `production` |
+| `SENTRY_DSN` | No | -- | **Yes** | Validated. Optional, must be a valid URL when set. | Sentry DSN for the API and worker. Production deploy reuses this value as `NEXT_PUBLIC_SENTRY_DSN` for the Next.js build so browser and server events share one project. If not set, server-side Sentry is not initialized. | `https://abc123@o123456.ingest.sentry.io/1234567` |
+| `SENTRY_ENVIRONMENT` | No | -- | No | Validated. Optional string. | Environment tag for API and worker Sentry events. If not set, falls back to `NODE_ENV`. Production deploy sets `NEXT_PUBLIC_SENTRY_ENVIRONMENT` to the same value for the Next.js client. | `production` |
+| `NEXT_PUBLIC_SENTRY_DSN` | No | -- | No | Build-time for Next.js. Read by `@sentry/nextjs` on the **client**. | Must match `SENTRY_DSN` when using a single Sentry project. Inlined at build time (Docker build arg / local `pnpm build`). If not set, client-side error reporting is disabled. | `https://abc123@o123456.ingest.sentry.io/1234567` |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | No | -- | No | Build-time for Next.js. | Environment tag for client Sentry events. Should match `SENTRY_ENVIRONMENT`. If not set, the client falls back to `NODE_ENV`. | `production` |
+| `SENTRY_AUTH_TOKEN` | No | -- | **Yes** | Build-time only. Used by `@sentry/nextjs` during `next build`. | Sentry authentication token for uploading source maps during the Docker build. Generate at `sentry.io/settings/auth-tokens/`. If not set, source maps are not uploaded and production stack traces will be minified. | `sntrys_...` |
 
 ---
 
@@ -214,6 +217,9 @@ The following table lists every environment variable in a single view for quick 
 | `LOG_LEVEL` | Observability | No | `info` | No | Yes |
 | `SENTRY_DSN` | Observability | No | -- | **Yes** | Yes |
 | `SENTRY_ENVIRONMENT` | Observability | No | -- | No | Yes |
+| `NEXT_PUBLIC_SENTRY_DSN` | Observability | No | -- | No | No |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | Observability | No | -- | No | No |
+| `SENTRY_AUTH_TOKEN` | Observability | No | -- | **Yes** | No |
 | `DISABLE_RATE_LIMIT` | Override | No | -- | No | No |
 | `TRUSTED_PROXY_COUNT` | Override | No | `0` | No | No |
 
