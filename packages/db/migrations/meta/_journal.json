@@ -5,64 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1774707846467,
-      "tag": "0000_bouncy_killer_shrike",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1774713829566,
-      "tag": "0001_bumpy_blonde_phantom",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1774800000000,
-      "tag": "0002_session_lookup_columns",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1774886400000,
-      "tag": "0003_aws_schema_fixes",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1774972800000,
-      "tag": "0004_missing_fk_indexes",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1775059200000,
-      "tag": "0005_add_org_id_indexes",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1774779781352,
-      "tag": "0006_chief_white_tiger",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1774782659780,
-      "tag": "0007_funny_zarda",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1774789353813,
-      "tag": "0008_fast_starhawk",
+      "when": 1774802352271,
+      "tag": "0000_sparkling_callisto",
       "breakpoints": true
     }
   ]

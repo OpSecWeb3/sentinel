@@ -16,7 +16,7 @@ CREATE TABLE "aws_integrations" (
 	"error_message" text,
 	"last_polled_at" timestamp with time zone,
 	"next_poll_at" timestamp with time zone,
-	"poll_interval_seconds" text DEFAULT '60' NOT NULL,
+	"poll_interval_seconds" integer DEFAULT 60 NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -188,7 +188,7 @@ CREATE TABLE "api_keys" (
 --> statement-breakpoint
 CREATE TABLE "audit_log" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"org_id" uuid NOT NULL,
+	"org_id" uuid,
 	"user_id" uuid,
 	"action" text NOT NULL,
 	"resource_type" text NOT NULL,
@@ -296,7 +296,9 @@ CREATE TABLE "rules" (
 CREATE TABLE "sessions" (
 	"sid" text PRIMARY KEY NOT NULL,
 	"sess" jsonb NOT NULL,
-	"expire" timestamp with time zone NOT NULL
+	"expire" timestamp with time zone NOT NULL,
+	"user_id" uuid,
+	"org_id" uuid
 );
 --> statement-breakpoint
 CREATE TABLE "slack_installations" (
@@ -391,7 +393,7 @@ CREATE TABLE "infra_cdn_provider_configs" (
 	"org_id" uuid NOT NULL,
 	"provider" text NOT NULL,
 	"display_name" text NOT NULL,
-	"host_pattern" text,
+	"host_pattern" text DEFAULT '*' NOT NULL,
 	"encrypted_credentials" text NOT NULL,
 	"is_valid" boolean DEFAULT false NOT NULL,
 	"last_validated_at" timestamp with time zone,
@@ -757,6 +759,7 @@ CREATE TABLE "rc_verifications" (
 );
 --> statement-breakpoint
 ALTER TABLE "aws_integrations" ADD CONSTRAINT "aws_integrations_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "aws_raw_events" ADD CONSTRAINT "aws_raw_events_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "aws_raw_events" ADD CONSTRAINT "aws_raw_events_integration_id_aws_integrations_id_fk" FOREIGN KEY ("integration_id") REFERENCES "public"."aws_integrations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "chain_block_cursors" ADD CONSTRAINT "chain_block_cursors_network_id_chain_networks_id_fk" FOREIGN KEY ("network_id") REFERENCES "public"."chain_networks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "chain_contracts" ADD CONSTRAINT "chain_contracts_network_id_chain_networks_id_fk" FOREIGN KEY ("network_id") REFERENCES "public"."chain_networks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -767,27 +770,27 @@ ALTER TABLE "chain_org_rpc_configs" ADD CONSTRAINT "chain_org_rpc_configs_org_id
 ALTER TABLE "chain_org_rpc_configs" ADD CONSTRAINT "chain_org_rpc_configs_network_id_chain_networks_id_fk" FOREIGN KEY ("network_id") REFERENCES "public"."chain_networks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "chain_state_snapshots" ADD CONSTRAINT "chain_state_snapshots_rule_id_rules_id_fk" FOREIGN KEY ("rule_id") REFERENCES "public"."rules"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "chain_state_snapshots" ADD CONSTRAINT "chain_state_snapshots_detection_id_detections_id_fk" FOREIGN KEY ("detection_id") REFERENCES "public"."detections"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "chain_state_snapshots" ADD CONSTRAINT "chain_state_snapshots_network_id_chain_networks_id_fk" FOREIGN KEY ("network_id") REFERENCES "public"."chain_networks"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "alerts" ADD CONSTRAINT "alerts_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "chain_state_snapshots" ADD CONSTRAINT "chain_state_snapshots_network_id_chain_networks_id_fk" FOREIGN KEY ("network_id") REFERENCES "public"."chain_networks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "alerts" ADD CONSTRAINT "alerts_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "alerts" ADD CONSTRAINT "alerts_detection_id_detections_id_fk" FOREIGN KEY ("detection_id") REFERENCES "public"."detections"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "alerts" ADD CONSTRAINT "alerts_rule_id_rules_id_fk" FOREIGN KEY ("rule_id") REFERENCES "public"."rules"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "alerts" ADD CONSTRAINT "alerts_event_id_events_id_fk" FOREIGN KEY ("event_id") REFERENCES "public"."events"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "audit_log" ADD CONSTRAINT "audit_log_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "audit_log" ADD CONSTRAINT "audit_log_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "detections" ADD CONSTRAINT "detections_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "detections" ADD CONSTRAINT "detections_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "events" ADD CONSTRAINT "events_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "detections" ADD CONSTRAINT "detections_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "events" ADD CONSTRAINT "events_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notification_channels" ADD CONSTRAINT "notification_channels_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notification_deliveries" ADD CONSTRAINT "notification_deliveries_alert_id_alerts_id_fk" FOREIGN KEY ("alert_id") REFERENCES "public"."alerts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_memberships" ADD CONSTRAINT "org_memberships_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "org_memberships" ADD CONSTRAINT "org_memberships_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "rules" ADD CONSTRAINT "rules_detection_id_detections_id_fk" FOREIGN KEY ("detection_id") REFERENCES "public"."detections"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "rules" ADD CONSTRAINT "rules_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "rules" ADD CONSTRAINT "rules_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "slack_installations" ADD CONSTRAINT "slack_installations_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "slack_installations" ADD CONSTRAINT "slack_installations_installed_by_users_id_fk" FOREIGN KEY ("installed_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "correlation_rules" ADD CONSTRAINT "correlation_rules_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "correlation_rules" ADD CONSTRAINT "correlation_rules_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "correlation_rules" ADD CONSTRAINT "correlation_rules_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "github_installations" ADD CONSTRAINT "github_installations_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "github_repositories" ADD CONSTRAINT "github_repositories_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "github_repositories" ADD CONSTRAINT "github_repositories_installation_id_github_installations_id_fk" FOREIGN KEY ("installation_id") REFERENCES "public"."github_installations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -843,22 +846,34 @@ CREATE INDEX "idx_chain_snapshots_address_slot" ON "chain_state_snapshots" USING
 CREATE INDEX "idx_chain_snapshots_triggered" ON "chain_state_snapshots" USING btree ("detection_id","polled_at") WHERE triggered = true;--> statement-breakpoint
 CREATE INDEX "idx_alerts_org" ON "alerts" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_alerts_detection" ON "alerts" USING btree ("detection_id");--> statement-breakpoint
+CREATE INDEX "idx_alerts_created_at" ON "alerts" USING btree ("created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_alerts_event_detection_rule" ON "alerts" USING btree ("event_id","detection_id","rule_id") WHERE event_id IS NOT NULL AND detection_id IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_alerts_event_correlation" ON "alerts" USING btree ("event_id",(trigger_data->>'correlationRuleId')) WHERE trigger_type = 'correlated' AND event_id IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_api_keys_hash" ON "api_keys" USING btree ("key_hash");--> statement-breakpoint
 CREATE INDEX "idx_api_keys_org" ON "api_keys" USING btree ("org_id");--> statement-breakpoint
+CREATE INDEX "idx_audit_log_org" ON "audit_log" USING btree ("org_id");--> statement-breakpoint
+CREATE INDEX "idx_audit_log_user" ON "audit_log" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "idx_detections_org" ON "detections" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_detections_module" ON "detections" USING btree ("module_id");--> statement-breakpoint
 CREATE INDEX "idx_detections_status" ON "detections" USING btree ("status") WHERE status = 'active';--> statement-breakpoint
+CREATE INDEX "idx_detections_created_by" ON "detections" USING btree ("created_by");--> statement-breakpoint
 CREATE INDEX "idx_events_org_module" ON "events" USING btree ("org_id","module_id");--> statement-breakpoint
 CREATE INDEX "idx_events_type" ON "events" USING btree ("event_type");--> statement-breakpoint
 CREATE INDEX "idx_events_external" ON "events" USING btree ("external_id");--> statement-breakpoint
+CREATE INDEX "idx_events_received_at" ON "events" USING btree ("received_at");--> statement-breakpoint
+CREATE INDEX "idx_notification_channels_org" ON "notification_channels" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_notif_deliveries_alert" ON "notification_deliveries" USING btree ("alert_id");--> statement-breakpoint
 CREATE INDEX "idx_notif_deliveries_status" ON "notification_deliveries" USING btree ("status");--> statement-breakpoint
 CREATE INDEX "idx_notif_deliveries_created" ON "notification_deliveries" USING btree ("created_at");--> statement-breakpoint
 CREATE INDEX "idx_rules_detection" ON "rules" USING btree ("detection_id");--> statement-breakpoint
+CREATE INDEX "idx_rules_org" ON "rules" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_rules_org_module" ON "rules" USING btree ("org_id","module_id") WHERE status = 'active';--> statement-breakpoint
 CREATE INDEX "idx_rules_module_type_active" ON "rules" USING btree ("module_id","rule_type") WHERE status = 'active';--> statement-breakpoint
 CREATE INDEX "idx_sessions_expire" ON "sessions" USING btree ("expire");--> statement-breakpoint
+CREATE INDEX "idx_sessions_user_id" ON "sessions" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "idx_sessions_org_id" ON "sessions" USING btree ("org_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_slack_org" ON "slack_installations" USING btree ("org_id");--> statement-breakpoint
+CREATE INDEX "idx_slack_installations_installed_by" ON "slack_installations" USING btree ("installed_by");--> statement-breakpoint
 CREATE INDEX "idx_correlation_rules_org" ON "correlation_rules" USING btree ("org_id");--> statement-breakpoint
 CREATE INDEX "idx_correlation_rules_status" ON "correlation_rules" USING btree ("status") WHERE status = 'active';--> statement-breakpoint
 CREATE INDEX "idx_gh_install_org" ON "github_installations" USING btree ("org_id");--> statement-breakpoint
