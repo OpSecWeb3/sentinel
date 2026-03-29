@@ -61,10 +61,46 @@ const envSchema = z.object({
   // Prometheus /metrics endpoint bearer token (optional — unauthenticated when unset)
   METRICS_TOKEN: z.string().optional(),
 
+  // AWS — intermediate SentinelService role for cross-account assumption.
+  // Required when running off-AWS with IAM user creds. The bootstrap IAM user
+  // assumes this role first; the role then assumes customer cross-account roles.
+  // When running on AWS with an instance profile, leave unset.
+  AWS_SENTINEL_ROLE_ARN: z.string().startsWith('arn:aws:iam::').optional(),
+
   // Observability (optional)
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   SENTRY_DSN: z.string().url().optional(),
   SENTRY_ENVIRONMENT: z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (data.NODE_ENV !== 'production') return;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(data.REDIS_URL);
+  } catch {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['REDIS_URL'],
+      message: 'REDIS_URL must be a valid URL',
+    });
+    return;
+  }
+
+  if (parsed.protocol !== 'redis:' && parsed.protocol !== 'rediss:') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['REDIS_URL'],
+      message: 'REDIS_URL must use redis:// or rediss://',
+    });
+  }
+
+  if (!parsed.password) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['REDIS_URL'],
+      message: 'Production REDIS_URL must include an auth password',
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;

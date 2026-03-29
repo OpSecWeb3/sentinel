@@ -33,6 +33,8 @@ const ALLOWED_TABLES: ReadonlySet<string> = new Set([
   'chain_state_snapshots',
   'chain_container_metrics',
   'chain_rpc_usage_hourly',
+  // Registry module tables
+  'rc_ci_notifications',
 ]);
 
 /**

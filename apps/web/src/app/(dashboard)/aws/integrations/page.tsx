@@ -358,11 +358,11 @@ export default function AwsIntegrationsPage() {
 
               {form.isOrgIntegration && (
                 <div className="rounded border border-primary/20 bg-primary/5 p-3">
-                  <p className="text-xs text-muted-foreground font-mono mb-2">
-                    -- org trail: events from all member accounts flow through the management account&apos;s SQS queue
-                  </p>
                   <div>
-                    <label className="text-xs text-muted-foreground">AWS Organization ID (optional)</label>
+                    <label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      AWS Organization ID (optional)
+                      <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted-foreground/40 text-[9px] text-muted-foreground cursor-help" title="Events from all member accounts flow through the management account's SQS queue">i</span>
+                    </label>
                     <input
                       value={form.awsOrgId}
                       onChange={(e) => setForm((f) => ({ ...f, awsOrgId: e.target.value }))}
@@ -373,49 +373,46 @@ export default function AwsIntegrationsPage() {
                 </div>
               )}
 
-              <div className="rounded border border-border/50 bg-muted/10 p-3 space-y-3">
-                <p className="text-xs text-muted-foreground font-mono">-- auth: IAM role (recommended)</p>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="text-xs text-muted-foreground">Role ARN</label>
-                    <input
-                      value={form.roleArn}
-                      onChange={(e) => setForm((f) => ({ ...f, roleArn: e.target.value }))}
-                      placeholder="arn:aws:iam::123456789012:role/SentinelRole"
-                      className="mt-1 w-full rounded border border-border bg-background px-3 py-1.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground">External ID (optional)</label>
-                    <input
-                      value={form.externalId}
-                      onChange={(e) => setForm((f) => ({ ...f, externalId: e.target.value }))}
-                      placeholder="sentinel-external-id"
-                      className="mt-1 w-full rounded border border-border bg-background px-3 py-1.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="text-xs text-muted-foreground">Role ARN <span className="text-primary">(recommended)</span></label>
+                  <input
+                    value={form.roleArn}
+                    onChange={(e) => setForm((f) => ({ ...f, roleArn: e.target.value }))}
+                    placeholder="arn:aws:iam::123456789012:role/SentinelRole"
+                    className="mt-1 w-full rounded border border-border bg-background px-3 py-1.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
                 </div>
-                <p className="text-xs text-muted-foreground font-mono">-- auth: static credentials (fallback)</p>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="text-xs text-muted-foreground">Access Key ID</label>
-                    <input
-                      value={form.accessKeyId}
-                      onChange={(e) => setForm((f) => ({ ...f, accessKeyId: e.target.value }))}
-                      placeholder="AKIAIOSFODNN7EXAMPLE"
-                      className="mt-1 w-full rounded border border-border bg-background px-3 py-1.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground">Secret Access Key</label>
-                    <input
-                      type="password"
-                      value={form.secretAccessKey}
-                      onChange={(e) => setForm((f) => ({ ...f, secretAccessKey: e.target.value }))}
-                      placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-                      className="mt-1 w-full rounded border border-border bg-background px-3 py-1.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">External ID (optional)</label>
+                  <input
+                    value={form.externalId}
+                    onChange={(e) => setForm((f) => ({ ...f, externalId: e.target.value }))}
+                    placeholder="sentinel-external-id"
+                    className="mt-1 w-full rounded border border-border bg-background px-3 py-1.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="text-xs text-muted-foreground">Access Key ID</label>
+                  <input
+                    value={form.accessKeyId}
+                    onChange={(e) => setForm((f) => ({ ...f, accessKeyId: e.target.value }))}
+                    placeholder="AKIAIOSFODNN7EXAMPLE"
+                    className="mt-1 w-full rounded border border-border bg-background px-3 py-1.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Secret Access Key</label>
+                  <input
+                    type="password"
+                    value={form.secretAccessKey}
+                    onChange={(e) => setForm((f) => ({ ...f, secretAccessKey: e.target.value }))}
+                    placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+                    className="mt-1 w-full rounded border border-border bg-background px-3 py-1.5 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
                 </div>
               </div>
 

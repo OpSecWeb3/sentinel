@@ -39,6 +39,12 @@ function buildRegistry(...evaluators: RuleEvaluator[]): Map<string, RuleEvaluato
   return map;
 }
 
+function minimatchCompat(value: string, pattern: string): boolean {
+  const mod = require('minimatch');
+  const fn = typeof mod === 'function' ? mod : mod.minimatch;
+  return fn(value, pattern);
+}
+
 function makeEvent(overrides: Partial<NormalizedEvent>): NormalizedEvent {
   return {
     id: 'evt_test_1',
@@ -984,8 +990,6 @@ describe('Edge Cases & Adversarial', () => {
 
   it('resource filter: exclude takes precedence over include', () => {
     // Test the matching logic directly
-    const { minimatch } = require('minimatch');
-
     const resourceId = 'org/repo-secret';
     const filter = {
       include: ['org/repo-*'],
@@ -993,11 +997,11 @@ describe('Edge Cases & Adversarial', () => {
     };
 
     // Exclude check first
-    const excluded = filter.exclude.some((p: string) => minimatch(resourceId, p));
+    const excluded = filter.exclude.some((p: string) => minimatchCompat(resourceId, p));
     expect(excluded).toBe(true);
 
     // Even though include matches too
-    const included = filter.include.some((p: string) => minimatch(resourceId, p));
+    const included = filter.include.some((p: string) => minimatchCompat(resourceId, p));
     expect(included).toBe(true);
 
     // But exclude takes precedence in the engine
@@ -1005,12 +1009,10 @@ describe('Edge Cases & Adversarial', () => {
   });
 
   it('resource filter glob matching (org/repo-*)', () => {
-    const { minimatch } = require('minimatch');
-
-    expect(minimatch('org/repo-alpha', 'org/repo-*')).toBe(true);
-    expect(minimatch('org/repo-beta', 'org/repo-*')).toBe(true);
-    expect(minimatch('org/other-repo', 'org/repo-*')).toBe(false);
-    expect(minimatch('other/repo-alpha', 'org/repo-*')).toBe(false);
+    expect(minimatchCompat('org/repo-alpha', 'org/repo-*')).toBe(true);
+    expect(minimatchCompat('org/repo-beta', 'org/repo-*')).toBe(true);
+    expect(minimatchCompat('org/other-repo', 'org/repo-*')).toBe(false);
+    expect(minimatchCompat('other/repo-alpha', 'org/repo-*')).toBe(false);
   });
 
   it('cooldown key generation with special characters', () => {

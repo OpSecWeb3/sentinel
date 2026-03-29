@@ -174,6 +174,26 @@ handle_param "TRUSTED_PROXY_COUNT" \
   "Trusted proxy count for X-Forwarded-For IP extraction" \
   "1"
 
+# ── AWS cross-account role assumption ─────────────────────────────────
+
+echo ""
+echo "AWS integration (cross-account role assumption):"
+echo "The worker assumes the SentinelService role, then assumes each customer's role."
+echo "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are the bootstrap IAM user creds."
+echo ""
+
+handle_param "AWS_ACCESS_KEY_ID" \
+  "AWS access key ID (bootstrap IAM user for STS)" \
+  "IAM user access key for assuming SentinelService role"
+
+handle_param "AWS_SECRET_ACCESS_KEY" \
+  "AWS secret access key (bootstrap IAM user for STS)" \
+  "IAM user secret key for assuming SentinelService role"
+
+handle_param "AWS_SENTINEL_ROLE_ARN" \
+  "SentinelService role ARN (e.g. arn:aws:iam::123456789012:role/SentinelService)" \
+  "Intermediate IAM role ARN for cross-account assumption"
+
 # ── Optional parameters ───────────────────────────────────────────────
 
 echo ""
@@ -193,8 +213,15 @@ handle_param "SMTP_URL"            "SMTP connection URL"                        
 handle_param "SMTP_FROM"           "SMTP from address"                                  "Email sender address" "alerts@sentinel.dev"
 handle_param "METRICS_TOKEN"       "Prometheus /metrics bearer token (generate a strong random string)" \
   "Bearer token for the /metrics endpoint — required in production"
-handle_param "SENTRY_DSN"          "Sentry DSN (error tracking)"                       "Sentry DSN for error tracking"
+handle_param "SENTRY_DSN"          "Sentry DSN (single project — API, worker & web; deploy copies to NEXT_PUBLIC_ for the Next build)" \
+  "Sentry DSN for error tracking (same value is used for browser telemetry at build time)"
 handle_param "SENTRY_ENVIRONMENT"  "Sentry environment"                                 "Sentry environment name" "production"
+handle_param "SENTRY_ORG"          "Sentry org slug (from sentry.io/settings/)" \
+  "Sentry organization slug for source map uploads"
+handle_param "SENTRY_PROJECT"      "Sentry project slug (from project settings)" \
+  "Sentry project slug for source map uploads"
+handle_param "SENTRY_AUTH_TOKEN"   "Sentry auth token (for source map uploads during build)" \
+  "Sentry auth token for source map uploads — generate at sentry.io/settings/auth-tokens/"
 handle_param "ETHERSCAN_API_KEY"   "Etherscan API key (chain module)"                  "Etherscan API key for blockchain data"
 handle_param "RPC_ETHEREUM"        "Ethereum RPC URL(s), comma-separated (skip to use public fallbacks)" \
   "Ethereum Mainnet RPC URL(s), comma-separated — overrides seeded public fallbacks"

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ── Postgres Backup (host-side) ─────────────────────────────────────────────
-# Dumps via docker exec, compresses, optionally uploads to S3, cleans old backups.
+# Dumps via DATABASE_URL (preferred) or docker exec fallback, compresses,
+# optionally uploads to S3, and cleans old backups.
 #
 # Usage:
 #   ./scripts/backup-db.sh                    # manual run
@@ -8,7 +9,8 @@
 #   # 0 2 * * * /path/to/scripts/backup-db.sh >> /var/log/sentinel-backup.log 2>&1
 #
 # Config (env vars or edit defaults below):
-#   CONTAINER         Docker container name (default: chainalert-postgres-1)
+#   DATABASE_URL      PostgreSQL connection URL (preferred)
+#   CONTAINER         Docker container name (fallback mode only)
 #   DB_USER           Postgres user (default: sentinel)
 #   DB_NAME           Database name (default: sentinel)
 #   BACKUP_DIR        Local backup dir (default: /backups/postgres)
@@ -33,12 +35,25 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
 die() { log "ERROR: $*"; exit 1; }
 
 # ── Preflight ───────────────────────────────────────────────────────────────
-docker inspect "$CONTAINER" >/dev/null 2>&1 || die "Container '$CONTAINER' not found"
 mkdir -p "$BACKUP_DIR" || die "Cannot create $BACKUP_DIR"
 
+MODE="container"
+if [ -n "${DATABASE_URL:-}" ]; then
+  MODE="url"
+fi
+
+if [ "$MODE" = "container" ]; then
+  docker inspect "$CONTAINER" >/dev/null 2>&1 || die "Container '$CONTAINER' not found"
+fi
+
 # ── Dump ────────────────────────────────────────────────────────────────────
-log "Backing up ${DB_NAME} from ${CONTAINER}..."
-docker exec "$CONTAINER" pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner --no-privileges | gzip > "$FILEPATH"
+if [ "$MODE" = "url" ]; then
+  log "Backing up database from DATABASE_URL..."
+  pg_dump "$DATABASE_URL" --no-owner --no-privileges | gzip > "$FILEPATH"
+else
+  log "Backing up ${DB_NAME} from ${CONTAINER}..."
+  docker exec "$CONTAINER" pg_dump -U "$DB_USER" -d "$DB_NAME" --no-owner --no-privileges | gzip > "$FILEPATH"
+fi
 
 if [ ! -s "$FILEPATH" ]; then
   rm -f "$FILEPATH"
