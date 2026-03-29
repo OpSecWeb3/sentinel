@@ -123,7 +123,7 @@ export const chainStateSnapshots = pgTable('chain_state_snapshots', {
   id: bigserial('id', { mode: 'bigint' }).primaryKey(),
   ruleId: uuid('rule_id').notNull().references(() => rules.id, { onDelete: 'cascade' }),
   detectionId: uuid('detection_id').references(() => detections.id, { onDelete: 'set null' }),
-  networkId: integer('network_id').notNull().references(() => chainNetworks.id),
+  networkId: integer('network_id').notNull().references(() => chainNetworks.id, { onDelete: 'cascade' }),
   address: text('address').notNull(),
   snapshotType: text('snapshot_type').notNull(),
   slot: text('slot'),

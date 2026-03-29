@@ -57,6 +57,13 @@
       "when": 1774782659780,
       "tag": "0007_funny_zarda",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1774789353813,
+      "tag": "0008_fast_starhawk",
+      "breakpoints": true
     }
   ]
 }

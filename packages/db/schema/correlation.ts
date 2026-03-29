@@ -19,7 +19,7 @@ const updatedAt = timestamp('updated_at', { withTimezone: true }).defaultNow().n
 export const correlationRules = pgTable('correlation_rules', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
-  createdBy: uuid('created_by').references(() => users.id),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   name: text('name').notNull(),
   description: text('description'),
   severity: text('severity').notNull().default('high'),
