@@ -63,11 +63,11 @@ describe('Chunk 011 — Session encryption & decryption', () => {
     expect(me.user.role).toBe('admin');
   });
 
-  it('should handle legacy plaintext session format', async () => {
+  it('should reject legacy plaintext session format', async () => {
     const sql = getTestSql();
     const admin = await setupAdmin(app);
 
-    // Manually insert a legacy plaintext session
+    // Manually insert a legacy plaintext session (unencrypted)
     const legacySid = 'legacy-session-' + Date.now();
     const expire = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
@@ -80,14 +80,12 @@ describe('Chunk 011 — Session encryption & decryption', () => {
       })}::jsonb, ${expire.toISOString()}, ${admin.userId}, ${admin.orgId})
     `;
 
-    // Use the legacy session
+    // Legacy plaintext sessions should be rejected — only encrypted format is supported
     const meRes = await appRequest(app, 'GET', '/auth/me', {
       cookie: `sentinel.sid=${legacySid}`,
     });
 
-    expect(meRes.status).toBe(200);
-    const me = await meRes.json() as any;
-    expect(me.user.userId).toBe(admin.userId);
+    expect(meRes.status).toBe(401);
   });
 
   it('should reject expired sessions', async () => {

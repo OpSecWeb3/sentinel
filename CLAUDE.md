@@ -23,11 +23,29 @@ Security monitoring platform — monorepo with pnpm workspaces.
 
 ## Migration Policy
 
-Migrations must be **additive-only** once deployed to production. Never drop,
-rename, or change column types in the same deploy as the code that depends on
-the change. Use the two-deploy pattern: first deploy removes the code dependency,
-second deploy removes the schema object. This enables safe auto-rollback on
-failed deploys. See `docs/app/data-model/migrations.md` for full details.
+**Always use Drizzle Kit to generate migrations — never hand-write SQL files.**
+
+1. Edit the TypeScript schema in `packages/db/schema/`
+2. Run `pnpm db:generate` — Drizzle diffs schema against its snapshot and
+   produces the SQL + updated snapshot in `migrations/meta/`
+3. Review the generated SQL for correctness
+4. Run `pnpm db:migrate` to apply locally
+5. Commit both the `.sql` file and the `meta/` snapshot together
+
+If you need custom SQL that `generate` cannot produce (data migrations,
+backfills), use `drizzle-kit generate --custom --name=description`. This
+creates an empty SQL file **with** the snapshot, keeping the chain intact.
+Never create migration files manually — missing snapshots cause Drizzle to
+produce duplicate statements on the next `generate`.
+
+CI runs a **three-way sync check**: SQL file count == journal entries ==
+applied DB rows. It also runs `pnpm db:generate` to detect uncommitted
+schema drift.
+
+Once deployed to production, migrations must be **additive-only**. Never
+drop, rename, or change column types in the same deploy as the code that
+depends on the change. Use the two-deploy pattern: first deploy removes the
+code dependency, second deploy removes the schema object.
 
 ## Infrastructure
 

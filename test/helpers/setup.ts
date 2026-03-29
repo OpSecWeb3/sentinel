@@ -18,6 +18,7 @@ import { drizzle } from '@sentinel/db';
 import { sql as drizzleSql } from '@sentinel/db';
 import crypto from 'node:crypto';
 import Redis from 'ioredis';
+import { encrypt } from '@sentinel/shared/crypto';
 
 // Re-export schema so tests can import from one place.
 import * as coreSchema from '../../packages/db/schema/core.js';
@@ -209,12 +210,8 @@ async function pushSchema(sql: ReturnType<typeof postgres>): Promise<void> {
   const { fileURLToPath } = await import('node:url');
 
   const migrationsDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../packages/db/migrations');
-  const migrationFiles = [
-    '0000_bouncy_killer_shrike.sql',
-    '0001_bumpy_blonde_phantom.sql',
-    '0002_session_lookup_columns.sql',
-    '0003_aws_schema_fixes.sql',
-  ];
+  const journal = JSON.parse(readFileSync(resolve(migrationsDir, 'meta/_journal.json'), 'utf-8'));
+  const migrationFiles = (journal.entries as { tag: string }[]).map((e) => `${e.tag}.sql`);
 
   for (const file of migrationFiles) {
     const migrationSql = readFileSync(resolve(migrationsDir, file), 'utf-8');
@@ -1093,16 +1090,11 @@ export async function createTestSession(
   const sid = crypto.randomBytes(24).toString('base64url');
   const expire = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
-  const sess = {
-    userId,
-    orgId,
-    role,
-    cookie: { originalMaxAge: 86400000, httpOnly: true, secure: false },
-  };
+  const sess = { _encrypted: encrypt(JSON.stringify({ userId, orgId, role })) };
 
   await sql`
-    INSERT INTO sessions (sid, sess, expire)
-    VALUES (${sid}, ${JSON.stringify(sess)}::jsonb, ${expire.toISOString()})
+    INSERT INTO sessions (sid, sess, expire, user_id, org_id)
+    VALUES (${sid}, ${JSON.stringify(sess)}::jsonb, ${expire.toISOString()}, ${userId}::uuid, ${orgId}::uuid)
   `;
 
   // The cookie format depends on the session middleware. This is a generic
