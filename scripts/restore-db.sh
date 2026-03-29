@@ -27,8 +27,10 @@ BACKUP_FILE="${1:-}"
 
 echo ""
 if [ -n "${DATABASE_URL:-}" ]; then
+  log "Using DATABASE_URL (direct connection)"
   echo "  WARNING: This will DROP and RECREATE schema 'public' in the DATABASE_URL target."
 else
+  log "Using docker exec fallback (container: ${CONTAINER})"
   echo "  WARNING: This will DROP and RECREATE '${DB_NAME}' on container '${CONTAINER}'."
 fi
 echo "  Backup: ${BACKUP_FILE}"

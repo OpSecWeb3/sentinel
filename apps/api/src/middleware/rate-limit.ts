@@ -27,7 +27,33 @@ interface RateLimitOptions {
   windowMs: number;
   limit: number;
   prefix: string;
+  slidingWindow?: boolean;
 }
+
+// Fixed-window Lua: INCR + EXPIRE in one round-trip.
+const FIXED_WINDOW_LUA = `
+  local current = redis.call('INCR', KEYS[1])
+  if current == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+  end
+  local ttl = redis.call('TTL', KEYS[1])
+  return {current, ttl}
+`;
+
+// Sliding-window Lua: ZSET with timestamp scores. Removes entries older than
+// the window, adds the current request, and returns the count. Prevents the
+// 2x burst at fixed-window boundaries.
+const SLIDING_WINDOW_LUA = `
+  local key = KEYS[1]
+  local now = tonumber(ARGV[1])
+  local windowMs = tonumber(ARGV[2])
+  local windowSec = tonumber(ARGV[3])
+  redis.call('ZREMRANGEBYSCORE', key, 0, now - windowMs)
+  redis.call('ZADD', key, now, now .. ':' .. math.random(1000000))
+  redis.call('EXPIRE', key, windowSec)
+  local count = redis.call('ZCARD', key)
+  return count
+`;
 
 function createLimiter(opts: RateLimitOptions) {
   return async (c: AuthContext, next: Next) => {
@@ -37,29 +63,26 @@ function createLimiter(opts: RateLimitOptions) {
     const key = `sentinel:rl:${opts.prefix}:${getKey(c)}`;
     const windowSec = Math.ceil(opts.windowMs / 1000);
 
-    // Use a Lua script to atomically INCR, set EXPIRE, and return both the
-    // current count and TTL in one round-trip to avoid an extra redis.ttl()
-    // call and the race conditions where a crash between INCR and EXPIRE
-    // leaves a key without a TTL.
-    const luaScript = `
-      local current = redis.call('INCR', KEYS[1])
-      if current == 1 then
-        redis.call('EXPIRE', KEYS[1], ARGV[1])
-      end
-      local ttl = redis.call('TTL', KEYS[1])
-      return {current, ttl}
-    `;
-    const result = await redis.eval(luaScript, 1, key, windowSec) as [number, number];
-    const current = result[0];
-    const ttl = result[1];
+    let current: number;
+    let resetEpoch: number;
+
+    if (opts.slidingWindow) {
+      const now = Date.now();
+      current = await redis.eval(SLIDING_WINDOW_LUA, 1, key, now, opts.windowMs, windowSec) as number;
+      resetEpoch = Math.ceil(now / 1000) + windowSec;
+    } else {
+      const result = await redis.eval(FIXED_WINDOW_LUA, 1, key, windowSec) as [number, number];
+      current = result[0];
+      const ttl = result[1];
+      resetEpoch = Math.ceil(Date.now() / 1000) + (ttl > 0 ? ttl : windowSec);
+    }
 
     // Set standard rate limit headers
     const remaining = Math.max(0, opts.limit - current);
-    const reset = Math.ceil(Date.now() / 1000) + (ttl > 0 ? ttl : windowSec);
 
     c.header('X-RateLimit-Limit', String(opts.limit));
     c.header('X-RateLimit-Remaining', String(remaining));
-    c.header('X-RateLimit-Reset', String(reset));
+    c.header('X-RateLimit-Reset', String(resetEpoch));
 
     if (current > opts.limit) {
       throw new HTTPException(429, { message: 'Too many requests, please try again later' });
@@ -74,6 +97,7 @@ export const authLimiter = createLimiter({
   windowMs: 15 * 60 * 1000,
   limit: 10,
   prefix: 'auth',
+  slidingWindow: true,
 });
 
 /** 100 requests per minute — for read endpoints */

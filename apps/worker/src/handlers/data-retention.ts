@@ -14,11 +14,12 @@ export interface RetentionPolicy {
 }
 
 /**
- * Allowlist of permitted table names for retention policies.
+ * Base allowlist of permitted table names for retention policies.
  * Prevents SQL identifier injection via crafted job payloads
- * (e.g. if Redis is compromised).
+ * (e.g. if Redis is compromised). Additional tables declared in
+ * validated policies (from module retentionPolicies) are also accepted.
  */
-const ALLOWED_TABLES: ReadonlySet<string> = new Set([
+const BASE_ALLOWED_TABLES: ReadonlySet<string> = new Set([
   'events',
   'alerts',
   'notification_deliveries',
@@ -38,9 +39,9 @@ const ALLOWED_TABLES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Allowlist of permitted timestamp column names for retention policies.
+ * Base allowlist of permitted timestamp column names for retention policies.
  */
-const ALLOWED_TIMESTAMP_COLUMNS: ReadonlySet<string> = new Set([
+const BASE_ALLOWED_TIMESTAMP_COLUMNS: ReadonlySet<string> = new Set([
   'received_at',
   'created_at',
   'updated_at',
@@ -52,17 +53,37 @@ const ALLOWED_TIMESTAMP_COLUMNS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Allowlist of permitted filter expressions for retention policies.
- * Any filter not in this set will be rejected to prevent SQL injection
- * via crafted job payloads (e.g. if Redis is compromised).
+ * Base allowlist of permitted filter expressions for retention policies.
+ * Any filter not in this set (and not declared by a policy in the job) will
+ * be rejected to prevent SQL injection via crafted job payloads.
  */
-const ALLOWED_FILTERS: ReadonlySet<string> = new Set([
+const BASE_ALLOWED_FILTERS: ReadonlySet<string> = new Set([
   "module_id = 'aws'",
   "module_id = 'github'",
   "module_id = 'registry'",
   "module_id = 'chain'",
   "module_id = 'infra'",
 ]);
+
+/**
+ * Build effective allowlists by merging the base sets with values declared
+ * in the policies array. Because policies originate from module code
+ * (merged in apps/worker/src/index.ts), they are trusted; this lets new
+ * modules declare retention policies without updating the hardcoded sets.
+ */
+function buildAllowlists(policies: RetentionPolicy[]) {
+  const tables = new Set(BASE_ALLOWED_TABLES);
+  const columns = new Set(BASE_ALLOWED_TIMESTAMP_COLUMNS);
+  const filters = new Set(BASE_ALLOWED_FILTERS);
+
+  for (const p of policies) {
+    tables.add(p.table);
+    columns.add(p.timestampColumn);
+    if (p.filter) filters.add(p.filter);
+  }
+
+  return { tables, columns, filters } as const;
+}
 
 export const DEFAULT_RETENTION_POLICIES: RetentionPolicy[] = [
   { table: 'events', timestampColumn: 'received_at', retentionDays: 90 },
@@ -78,11 +99,12 @@ export const dataRetentionHandler: JobHandler = {
   async process(job: Job) {
     const policies = (job.data?.policies as RetentionPolicy[]) ?? DEFAULT_RETENTION_POLICIES;
     const db = getDb();
+    const allowed = buildAllowlists(policies);
 
     for (const policy of policies) {
       // Validate table and timestampColumn against allowlists to prevent
       // SQL identifier injection via crafted job payloads.
-      if (!ALLOWED_TABLES.has(policy.table)) {
+      if (!allowed.tables.has(policy.table)) {
         _log.warn(
           { table: policy.table },
           'Skipping retention policy with unrecognised table name',
@@ -90,7 +112,7 @@ export const dataRetentionHandler: JobHandler = {
         continue;
       }
 
-      if (!ALLOWED_TIMESTAMP_COLUMNS.has(policy.timestampColumn)) {
+      if (!allowed.columns.has(policy.timestampColumn)) {
         _log.warn(
           { table: policy.table, timestampColumn: policy.timestampColumn },
           'Skipping retention policy with unrecognised timestamp column',
@@ -110,7 +132,7 @@ export const dataRetentionHandler: JobHandler = {
       }
 
       // Validate filter against allowlist to prevent SQL injection via crafted job payloads
-      if (policy.filter && !ALLOWED_FILTERS.has(policy.filter)) {
+      if (policy.filter && !allowed.filters.has(policy.filter)) {
         _log.warn(
           { table: policy.table, filter: policy.filter },
           'Skipping retention policy with unrecognised filter expression',
