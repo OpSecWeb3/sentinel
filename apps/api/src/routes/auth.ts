@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import bcrypt from 'bcrypt';
+import argon2 from 'argon2';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { getDb } from '@sentinel/db';
@@ -14,7 +14,13 @@ import { requireScope } from '../middleware/scope.js';
 import { authLimiter, apiReadLimiter, apiWriteLimiter } from '../middleware/rate-limit.js';
 import { generateNotifyKey } from '../middleware/notify-key.js';
 
-const SALT_ROUNDS = 12;
+// OWASP-recommended argon2id parameters: m=19456 (19 MiB), t=2, p=1.
+const ARGON2_OPTIONS: argon2.Options = {
+  type: argon2.argon2id,
+  memoryCost: 19456,
+  timeCost: 2,
+  parallelism: 1,
+};
 
 // Lockout policy constants for brute-force protection on the login endpoint.
 const MAX_ATTEMPTS = 5;
@@ -32,12 +38,12 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 // Lazily computed dummy hash for constant-time login responses when user is not found.
-// This prevents timing-based user enumeration (bcrypt compare takes ~200ms).
+// This prevents timing-based user enumeration (argon2 verify takes ~50–100ms).
 // Using lazy init avoids blocking the event loop during module import.
 let _dummyHash: string | null = null;
 async function getDummyHash(): Promise<string> {
   if (!_dummyHash) {
-    _dummyHash = await bcrypt.hash('dummy-password-for-timing', SALT_ROUNDS);
+    _dummyHash = await argon2.hash('dummy-password-for-timing', ARGON2_OPTIONS);
   }
   return _dummyHash;
 }
@@ -69,7 +75,7 @@ auth.post('/register', authLimiter, async (c) => {
   }
   const body = parsed.data;
   const db = getDb();
-  const passwordHash = await bcrypt.hash(body.password, SALT_ROUNDS);
+  const passwordHash = await argon2.hash(body.password, ARGON2_OPTIONS);
 
   // Check if user already exists
   const [existing] = await db.select({ id: users.id })
@@ -196,9 +202,9 @@ auth.post('/login', authLimiter, async (c) => {
     .limit(1);
 
   if (!user) {
-    // Perform a dummy bcrypt compare to equalize response timing and prevent
+    // Perform a dummy argon2 verify to equalize response timing and prevent
     // user-existence enumeration via timing side-channel.
-    await bcrypt.compare(password, await getDummyHash());
+    await argon2.verify(await getDummyHash(), password);
     return c.json({ error: 'Invalid username or password' }, 401);
   }
 
@@ -207,7 +213,7 @@ auth.post('/login', authLimiter, async (c) => {
     return c.json({ error: 'Account temporarily locked. Try again later.' }, 423);
   }
 
-  if (!(await bcrypt.compare(password, user.passwordHash))) {
+  if (!(await argon2.verify(user.passwordHash, password))) {
     // Increment failed attempts and potentially lock
     const newAttempts = (user.failedLoginAttempts ?? 0) + 1;
     await db.update(users)
@@ -615,11 +621,11 @@ auth.post('/change-password', authLimiter, requireAuth, async (c) => {
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!user) return c.json({ error: 'User not found' }, 404);
 
-  if (!(await bcrypt.compare(currentPassword, user.passwordHash))) {
+  if (!(await argon2.verify(user.passwordHash, currentPassword))) {
     return c.json({ error: 'Current password is incorrect' }, 401);
   }
 
-  const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  const passwordHash = await argon2.hash(newPassword, ARGON2_OPTIONS);
   await db.update(users).set({ passwordHash, failedLoginAttempts: 0, lockedUntil: null }).where(eq(users.id, userId));
 
   // Invalidate all other sessions for this user (except current).

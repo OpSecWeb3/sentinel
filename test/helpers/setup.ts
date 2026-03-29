@@ -17,6 +17,7 @@ import postgres from 'postgres';
 import { drizzle } from '@sentinel/db';
 import { sql as drizzleSql } from '@sentinel/db';
 import crypto from 'node:crypto';
+import argon2 from 'argon2';
 import Redis from 'ioredis';
 import { encrypt } from '@sentinel/shared/crypto';
 
@@ -814,8 +815,7 @@ export async function createTestUser(overrides: Partial<{
   const email = overrides.email ?? `${username}@test.sentinel.dev`;
   const password = overrides.password ?? 'TestPass123!';
 
-  // Use a simple hash for tests -- bcrypt is slow and unnecessary here.
-  const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+  const passwordHash = await argon2.hash(password);
 
   const [row] = await sql`
     INSERT INTO users (username, email, password_hash)

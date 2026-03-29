@@ -481,8 +481,8 @@ describe('Org scoping', () => {
     `;
 
     // Create user2 directly
-    const bcrypt = await import('bcrypt');
-    const pwHash = await bcrypt.hash('testpass123!', 4);
+    const argon2 = await import('argon2');
+    const pwHash = await argon2.hash('testpass123!');
     const [user2] = await sql`
       INSERT INTO users (username, email, password_hash)
       VALUES ('user2', 'user2@test.com', ${pwHash})
@@ -516,8 +516,8 @@ describe('Org scoping', () => {
       VALUES ('Org Two', 'org-two', 'secret-org-2')
       RETURNING id
     `;
-    const bcrypt = await import('bcrypt');
-    const pwHash = await bcrypt.hash('testpass123!', 4);
+    const argon2 = await import('argon2');
+    const pwHash = await argon2.hash('testpass123!');
     const [user2] = await sql`
       INSERT INTO users (username, email, password_hash)
       VALUES ('user2', 'user2@test.com', ${pwHash})
