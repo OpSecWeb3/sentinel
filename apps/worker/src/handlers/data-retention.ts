@@ -65,24 +65,12 @@ const BASE_ALLOWED_FILTERS: ReadonlySet<string> = new Set([
   "module_id = 'infra'",
 ]);
 
-/**
- * Build effective allowlists by merging the base sets with values declared
- * in the policies array. Because policies originate from module code
- * (merged in apps/worker/src/index.ts), they are trusted; this lets new
- * modules declare retention policies without updating the hardcoded sets.
- */
-function buildAllowlists(policies: RetentionPolicy[]) {
-  const tables = new Set(BASE_ALLOWED_TABLES);
-  const columns = new Set(BASE_ALLOWED_TIMESTAMP_COLUMNS);
-  const filters = new Set(BASE_ALLOWED_FILTERS);
-
-  for (const p of policies) {
-    tables.add(p.table);
-    columns.add(p.timestampColumn);
-    if (p.filter) filters.add(p.filter);
-  }
-
-  return { tables, columns, filters } as const;
+function buildAllowlists() {
+  return {
+    tables: BASE_ALLOWED_TABLES,
+    columns: BASE_ALLOWED_TIMESTAMP_COLUMNS,
+    filters: BASE_ALLOWED_FILTERS,
+  } as const;
 }
 
 export const DEFAULT_RETENTION_POLICIES: RetentionPolicy[] = [
@@ -99,7 +87,7 @@ export const dataRetentionHandler: JobHandler = {
   async process(job: Job) {
     const policies = (job.data?.policies as RetentionPolicy[]) ?? DEFAULT_RETENTION_POLICIES;
     const db = getDb();
-    const allowed = buildAllowlists(policies);
+    const allowed = buildAllowlists();
 
     for (const policy of policies) {
       // Validate table and timestampColumn against allowlists to prevent

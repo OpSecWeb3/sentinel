@@ -99,7 +99,7 @@ increment-and-expire. This approach has the following precision characteristics:
 | Window alignment | Per-key, based on first request in the window |
 | Boundary behavior | A client can make up to 2x the limit at a window boundary (e.g., 100 requests at the end of window 1 and 100 at the start of window 2) |
 | Clock source | Redis server clock (TTL-based) |
-| Key isolation | Rate limit keys are scoped by org ID, API key prefix, or client IP (in that priority order) |
+| Key isolation | Rate limit keys are scoped by user ID, API key prefix, or client IP (in that priority order) |
 
 **Configured limits:**
 
@@ -190,6 +190,35 @@ deliberate architectural decision with the following trade-offs:
 The `platform.session.cleanup` job (running every hour) deletes rows from the `sessions`
 table where `expire < now()`. Sessions are encrypted at rest using AES-256-GCM and are
 subject to key rotation by the `platform.key.rotation` job.
+
+---
+
+## Encryption key rotation requires ENCRYPTION_KEY_PREV until completion
+
+The `platform.key.rotation` job re-encrypts rows in batches of 100 across all encrypted
+columns (org secrets, Slack/GitHub/AWS credentials, CDN configs, registry artifacts, and
+sessions). The `decrypt()` function falls back to `ENCRYPTION_KEY_PREV` when the current
+key fails, so rows not yet re-encrypted remain readable throughout the rotation.
+
+**If `ENCRYPTION_KEY_PREV` is removed before all rows have been re-encrypted**, any row
+still holding ciphertext from the old key will fail to decrypt. For sessions this means an
+immediate forced logout for affected users; for integration credentials it means those
+integrations stop functioning until the row is manually re-encrypted or the old key is
+restored.
+
+**There is no completion indicator.** The schema stores no key-version column
+(`key-rotation.ts` comment, line 109), so the job cannot confirm that rotation is 100%
+complete — it detects remaining work by calling `needsReEncrypt()` on each row at read time.
+
+**Operational guidance:**
+- Keep `ENCRYPTION_KEY_PREV` set for at least one full rotation cycle after all workers have
+  been restarted with the new `ENCRYPTION_KEY`. The job runs every 5 minutes; allow at least
+  30 minutes (six cycles) on a quiescent system before removing the previous key.
+- On a system with large row counts, monitor worker logs for `Re-encrypted rows` messages
+  and wait until the job logs `totalRotated: 0` for several consecutive cycles before
+  unsetting `ENCRYPTION_KEY_PREV`.
+- Do not restart workers with the old key removed mid-rotation. Restart order matters:
+  deploy with both keys set → wait for rotation to complete → remove the old key → redeploy.
 
 ---
 
