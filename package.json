@@ -1,6 +1,7 @@
 {
   "name": "sentinel",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "dev": "docker compose -f docker-compose.dev.yml up",
