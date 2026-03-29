@@ -62,6 +62,7 @@ async function queryCrtSh(domain: string): Promise<CtLogEntry[]> {
       seen.add(serial);
 
       entries.push({
+        crtShId: entry.id,
         issuerName: entry.issuer_name,
         commonName: entry.common_name,
         nameValue: entry.name_value,

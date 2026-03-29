@@ -221,6 +221,7 @@ export function normalizeScanResult(
           payload: {
             resourceId: hostname,
             hostname,
+            crtShId: entry.crtShId ?? null,
             issuerName: entry.issuerName ?? null,
             commonName: entry.commonName ?? null,
             nameValue: entry.nameValue ?? null,
