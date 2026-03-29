@@ -138,6 +138,8 @@ async function main() {
 
   // ── Dead-letter queue for permanently failed jobs ────────────────────
   const deadLetterQueue = getQueue('sentinel-dead-letter');
+  const DLQ_FALLBACK_PATH = '/tmp/sentinel-dead-letter.ndjson';
+  const { appendFileSync } = await import('node:fs');
 
   // ── Metrics ─────────────────────────────────────────────────────────
   const { jobsProcessedTotal, jobDuration, deadLetterTotal, queueDepth } = await import('@sentinel/shared/metrics');
@@ -184,13 +186,25 @@ async function main() {
             deadLetterTotal.inc({ queue: queueName, jobName });
             log.warn({ queue: queueName, jobName, jobId: job?.id, attemptsMade }, 'Job moved to dead-letter queue after exhausting retries');
           } catch (dlErr) {
-            log.error({ dlErr, jobName, jobId: job?.id }, 'Failed to enqueue dead-letter job');
+            log.error({ dlErr, jobName, jobId: job?.id }, 'Failed to enqueue dead-letter job — writing to fallback file');
             captureException(dlErr, {
               queue: queueName,
               jobName,
               jobId: String(job?.id ?? ''),
               attemptsMade,
             });
+            try {
+              const payload = JSON.stringify({
+                originalQueue: queueName,
+                jobName,
+                jobId: job?.id,
+                data: job?.data,
+                error: err?.message,
+                failedAt: new Date().toISOString(),
+                attemptsMade,
+              });
+              appendFileSync(DLQ_FALLBACK_PATH, payload + '\n');
+            } catch { /* filesystem fallback is best-effort */ }
           }
         })();
       }
@@ -303,11 +317,11 @@ async function main() {
       process.exit(1);
     }, 15_000).unref();
 
-    // closeAllQueues() closes all tracked Workers AND Queues in one pass.
-    // Previously workers were closed here AND inside closeAllQueues(), causing
-    // a double-close that could reject or leave connections dangling.
+    // closeAllQueues() closes all tracked Workers, Queues, AND the shared
+    // Redis connection in one pass. Do NOT call redis.quit() separately —
+    // that would double-quit the same connection and both calls can hang if
+    // Redis is unresponsive.
     await closeAllQueues();
-    await redis.quit();
     await closeDb();
     log.info('Shutdown complete');
     process.exit(0);

@@ -40,10 +40,13 @@ mkdir -p "$BACKUP_DIR" || die "Cannot create $BACKUP_DIR"
 MODE="container"
 if [ -n "${DATABASE_URL:-}" ]; then
   MODE="url"
+  log "Using DATABASE_URL (direct connection)"
+else
+  log "Using docker exec fallback (container: ${CONTAINER})"
 fi
 
 if [ "$MODE" = "container" ]; then
-  docker inspect "$CONTAINER" >/dev/null 2>&1 || die "Container '$CONTAINER' not found"
+  docker inspect "$CONTAINER" >/dev/null 2>&1 || die "Container '$CONTAINER' not found — set DATABASE_URL or CONTAINER env var"
 fi
 
 # ── Dump ────────────────────────────────────────────────────────────────────

@@ -13,9 +13,29 @@ import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import type { CorrelationRuleConfig, CorrelationInstance } from '@sentinel/shared/correlation-types';
 import { ABSENCE_INDEX_KEY } from '@sentinel/shared/correlation-engine';
 import { logger as rootLogger, type Logger } from '@sentinel/shared/logger';
+import { randomBytes } from 'node:crypto';
 import type { Redis } from 'ioredis';
 
 const ABSENCE_KEY_PREFIX = 'sentinel:corr:absence:';
+
+/**
+ * Lua script for safe lock release.
+ * Only deletes the lock key if its value matches the caller's token,
+ * preventing a worker from releasing a lock that was re-acquired by
+ * another worker after TTL expiry.
+ */
+const UNLOCK_SCRIPT = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+else
+  return 0
+end
+`;
+
+/** Atomically release a lock only if we still own it. */
+async function releaseLock(redis: Redis, lockKey: string, token: string): Promise<void> {
+  await redis.eval(UNLOCK_SCRIPT, 1, lockKey, token);
+}
 
 /**
  * Maximum number of expired keys to process per sweep invocation.
@@ -120,14 +140,15 @@ async function processAbsenceKey(
   _log: Logger,
 ): Promise<ProcessResult> {
   try {
-    // Acquire per-key lock
+    // Acquire per-key lock with a unique token so we can safely release it
     const lockKey = `${key}:processing-lock`;
-    const lockAcquired = await redis.set(lockKey, '1', 'PX', EXPIRY_LOCK_TTL_MS, 'NX');
+    const lockToken = randomBytes(16).toString('hex');
+    const lockAcquired = await redis.set(lockKey, lockToken, 'PX', EXPIRY_LOCK_TTL_MS, 'NX');
     if (!lockAcquired) return 'skipped';
 
     const raw = await redis.get(key);
     if (!raw) {
-      await redis.del(lockKey);
+      await releaseLock(redis, lockKey, lockToken);
       // Clean up stale index entry
       await redis.zrem(ABSENCE_INDEX_KEY, key);
       return 'skipped';
@@ -137,7 +158,7 @@ async function processAbsenceKey(
 
     // Skip if not yet expired
     if (instance.expiresAt > now) {
-      await redis.del(lockKey);
+      await releaseLock(redis, lockKey, lockToken);
       return 'skipped';
     }
 
@@ -149,7 +170,8 @@ async function processAbsenceKey(
 
     if (!rule || rule.status !== 'active') {
       // Rule deleted or paused — clean up everything
-      await redis.del(key, lockKey);
+      await redis.del(key);
+      await releaseLock(redis, lockKey, lockToken);
       await redis.zrem(ABSENCE_INDEX_KEY, key);
       return 'processed';
     }
@@ -207,7 +229,8 @@ async function processAbsenceKey(
 
       if (!alert) {
         // Duplicate — constraint caught it. Clean up key + index + lock.
-        await redis.del(key, lockKey);
+        await redis.del(key);
+        await releaseLock(redis, lockKey, lockToken);
         await redis.zrem(ABSENCE_INDEX_KEY, key);
         return 'processed';
       }
@@ -221,15 +244,16 @@ async function processAbsenceKey(
       await alertsQueue.add('alert.dispatch', { alertId: String(alert.id) });
 
       // Insert succeeded — now safe to delete the Redis key + index + lock
-      await redis.del(key, lockKey);
+      await redis.del(key);
+      await releaseLock(redis, lockKey, lockToken);
       await redis.zrem(ABSENCE_INDEX_KEY, key);
 
       _log.info({ alertId: alert.id, ruleId: rule.id, correlationKey: instance.correlationKeyValues }, 'Created absence alert');
       return 'created';
     } catch (insertErr) {
       // DB insert failed — leave the Redis key alive for the next sweep.
-      // Only delete the processing lock so the key can be retried.
-      await redis.del(lockKey);
+      // Only release the processing lock so the key can be retried.
+      await releaseLock(redis, lockKey, lockToken);
 
       // Track retryCount in the serialised instance so we can detect keys
       // that repeatedly fail and alert on them.

@@ -135,6 +135,16 @@ export function createWorker(
   const worker = new Worker(queueName, processor, {
     connection,
     concurrency: 5,
+    settings: {
+      backoffStrategy: (attemptsMade, _type, _err, job) => {
+        const baseDelay = job?.opts?.backoff && typeof job.opts.backoff === 'object'
+          ? (job.opts.backoff as { delay?: number }).delay ?? 2000
+          : 2000;
+        const exponential = baseDelay * Math.pow(2, attemptsMade - 1);
+        const jitter = exponential * (0.75 + Math.random() * 0.5);
+        return Math.min(Math.round(jitter), 60_000);
+      },
+    },
     ...opts,
   });
 
@@ -174,7 +184,12 @@ export async function closeAllQueues(): Promise<void> {
   queues.clear();
   workers.clear();
   if (_connection && typeof _connection.quit === 'function') {
-    await _connection.quit();
+    // Race quit() against a 5-second timeout so an unresponsive Redis
+    // connection doesn't consume the entire shutdown budget.
+    await Promise.race([
+      _connection.quit(),
+      new Promise<void>((resolve) => setTimeout(resolve, 5_000).unref()),
+    ]);
     _connection = undefined;
   }
 }

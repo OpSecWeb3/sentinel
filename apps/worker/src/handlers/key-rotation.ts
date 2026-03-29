@@ -71,12 +71,17 @@ async function rotateColumn(target: RotationTarget): Promise<number> {
         const plaintext = decrypt(row.value);
         const reEncrypted = encrypt(plaintext);
 
-        await db
+        const result = await db
           .update(tbl)
           .set({ [target.column]: reEncrypted })
           .where(and(eq(tbl.id, row.id), eq(col, row.value)));
 
-        batchRotated++;
+        const rowCount = (result as any).rowCount ?? (result as any).count ?? 0;
+        if (rowCount === 0) {
+          _log.warn({ target: target.name, id: row.id }, 'Row modified concurrently during key rotation, will retry next cycle');
+        } else {
+          batchRotated++;
+        }
       } catch (err) {
         _log.warn({ target: target.name, id: row.id, err }, 'Failed to re-encrypt row, skipping');
       }
