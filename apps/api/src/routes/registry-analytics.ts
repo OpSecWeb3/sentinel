@@ -38,7 +38,8 @@ router.get('/artifacts/summary', requireScope('api:read'), async (c) => {
     })
     .from(rcArtifacts)
     .where(eq(rcArtifacts.orgId, orgId))
-    .orderBy(rcArtifacts.name);
+    .orderBy(rcArtifacts.name)
+    .limit(1000);
 
   return c.json({ data: rows });
 });
@@ -152,7 +153,8 @@ router.get('/unsigned-releases', requireScope('api:read'), validate('query', uns
     .from(rcArtifactVersions)
     .innerJoin(rcArtifacts, eq(rcArtifacts.id, rcArtifactVersions.artifactId))
     .where(and(...conditions))
-    .orderBy(desc(rcArtifactVersions.createdAt));
+    .orderBy(desc(rcArtifactVersions.createdAt))
+    .limit(1000);
 
   return c.json({ count: rows.length, data: rows });
 });

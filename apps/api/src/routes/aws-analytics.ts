@@ -118,7 +118,8 @@ router.get('/principal/:principalId/activity', requireScope('api:read'), validat
       .from(awsRawEvents)
       .where(and(...conditions))
       .groupBy(awsRawEvents.eventName, awsRawEvents.errorCode)
-      .orderBy(desc(count())),
+      .orderBy(desc(count()))
+      .limit(1000),
   ]);
 
   return c.json({ principalId, summary, timeline });
@@ -257,7 +258,8 @@ router.get('/integrations/summary', requireScope('api:read'), async (c) => {
     nextPollAt: awsIntegrations.nextPollAt,
   })
     .from(awsIntegrations)
-    .where(eq(awsIntegrations.orgId, orgId));
+    .where(eq(awsIntegrations.orgId, orgId))
+    .limit(1000);
 
   return c.json({ data: integrations });
 });

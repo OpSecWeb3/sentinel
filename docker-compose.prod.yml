@@ -3,6 +3,12 @@
 # Postgres: use ?sslmode=require in DATABASE_URL for encrypted connections.
 # Both services run on the shared-infra network and are NOT defined here.
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 networks:
   gateway:
     external: true
@@ -24,6 +30,7 @@ services:
     networks:
       - gateway
       - shared-infra
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4100/health"]
       interval: 15s
@@ -44,6 +51,7 @@ services:
     env_file: .env
     networks:
       - shared-infra
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "node", "-e", "const fs=require('fs'); try { const s=fs.statSync('/tmp/.worker-heartbeat'); process.exit(Date.now()-s.mtimeMs<60000?0:1); } catch { process.exit(1); }"]
       interval: 30s
@@ -73,6 +81,7 @@ services:
       - "3100:3100"
     networks:
       - gateway
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/"]
       interval: 15s

@@ -141,7 +141,8 @@ router.get('/network-status', requireScope('api:read'), requireRole('admin'), as
       JOIN chain_contracts cc ON cc.id = oc.contract_id
       WHERE cc.network_id = ${chainBlockCursors.networkId}
         AND oc.org_id = ${orgId}
-    )`);
+    )`)
+    .limit(1000);
 
   return c.json({ data: rows });
 });
@@ -174,7 +175,8 @@ router.get('/rpc-usage', requireScope('api:read'), validate('query', rpcUsageSch
   const rows = await db.select()
     .from(chainRpcUsageHourly)
     .where(and(...conditions))
-    .orderBy(desc(chainRpcUsageHourly.bucket));
+    .orderBy(desc(chainRpcUsageHourly.bucket))
+    .limit(1000);
 
   return c.json({ data: rows });
 });

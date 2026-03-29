@@ -14,6 +14,8 @@ export interface RetentionPolicy {
   retentionDays: number;
   /** Optional SQL fragment appended as an extra AND condition (e.g. "module_id = 'aws'") */
   filter?: string;
+  /** Use ctid for batched deletes on tables without an `id` column (e.g. composite PKs). */
+  useCtid?: boolean;
 }
 
 // ---------------------------------------------------------------------------

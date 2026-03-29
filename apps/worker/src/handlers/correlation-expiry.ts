@@ -89,10 +89,13 @@ export function createCorrelationExpiryHandler(redis: Redis, log?: Logger): JobH
       const lastScanRaw = await redis.get(LAST_SCAN_FALLBACK_KEY);
       const lastScanFallbackAt = lastScanRaw ? Number(lastScanRaw) : 0;
       if (now - lastScanFallbackAt >= SCAN_FALLBACK_INTERVAL_MS) {
-        await redis.set(LAST_SCAN_FALLBACK_KEY, String(now));
         const scanResult = await scanFallback(redis, db, alertsQueue, now, _log);
         processedCount += scanResult.processed;
         alertsCreated += scanResult.created;
+        // Write timestamp AFTER scan completes successfully.
+        // Previously this was written before the scan, which meant a failed
+        // scan would suppress retries for 30 minutes (Bug M27).
+        await redis.set(LAST_SCAN_FALLBACK_KEY, String(now));
       }
 
       if (processedCount > 0 || alertsCreated > 0) {

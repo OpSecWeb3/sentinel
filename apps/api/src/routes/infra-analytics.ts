@@ -41,7 +41,8 @@ router.get('/hosts', requireScope('api:read'), validate('query', listHostsSchema
     .select()
     .from(infraHosts)
     .where(and(...conditions))
-    .orderBy(infraHosts.hostname);
+    .orderBy(infraHosts.hostname)
+    .limit(1000);
 
   return c.json({ data: rows });
 });
@@ -70,10 +71,12 @@ router.get('/hosts/:hostname', requireScope('api:read'), async (c) => {
       .limit(1),
     db.select().from(infraCdnOriginRecords)
       .where(eq(infraCdnOriginRecords.hostId, host.id))
-      .orderBy(desc(infraCdnOriginRecords.observedAt)),
+      .orderBy(desc(infraCdnOriginRecords.observedAt))
+      .limit(1000),
     db.select().from(infraDnsRecords)
       .where(eq(infraDnsRecords.hostId, host.id))
-      .orderBy(infraDnsRecords.recordType),
+      .orderBy(infraDnsRecords.recordType)
+      .limit(1000),
   ]);
 
   return c.json({ data: { host, snapshot: snapshot[0] ?? null, cdnOrigins, dnsRecords } });
@@ -96,7 +99,8 @@ router.get('/hosts/:hostname/origin', requireScope('api:read'), async (c) => {
 
   const rows = await db.select().from(infraCdnOriginRecords)
     .where(eq(infraCdnOriginRecords.hostId, host.id))
-    .orderBy(desc(infraCdnOriginRecords.observedAt));
+    .orderBy(desc(infraCdnOriginRecords.observedAt))
+    .limit(1000);
 
   return c.json({ data: rows });
 });
@@ -126,7 +130,8 @@ router.get('/hosts/:hostname/dns-history', requireScope('api:read'), validate('q
 
   const rows = await db.select().from(infraDnsChanges)
     .where(and(...conditions))
-    .orderBy(desc(infraDnsChanges.detectedAt));
+    .orderBy(desc(infraDnsChanges.detectedAt))
+    .limit(1000);
 
   return c.json({ data: rows });
 });
@@ -157,7 +162,8 @@ router.get('/cert-expiry', requireScope('api:read'), validate('query', certExpir
       eq(infraHosts.orgId, orgId),
       lte(infraCertificates.notAfter, cutoff),
     ))
-    .orderBy(infraCertificates.notAfter);
+    .orderBy(infraCertificates.notAfter)
+    .limit(1000);
 
   return c.json({ daysAhead: query.daysAhead, count: rows.length, data: rows });
 });

@@ -103,7 +103,8 @@ router.get('/installations', requireScope('api:read'), async (c) => {
     createdAt: githubInstallations.createdAt,
   })
     .from(githubInstallations)
-    .where(eq(githubInstallations.orgId, orgId));
+    .where(eq(githubInstallations.orgId, orgId))
+    .limit(1000);
 
   return c.json({ data: rows });
 });
@@ -139,7 +140,8 @@ router.get('/repos', requireScope('api:read'), validate('query', githubReposSche
   })
     .from(githubRepositories)
     .where(and(...conditions))
-    .orderBy(githubRepositories.fullName);
+    .orderBy(githubRepositories.fullName)
+    .limit(1000);
 
   return c.json({ data: rows });
 });
