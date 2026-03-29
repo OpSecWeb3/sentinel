@@ -41,7 +41,7 @@ jobs:
               if [ -n "$default" ]; then
                 echo "$default"
               else
-                echo "::warning::SSM fetch failed for ${name}: ${value}" >&2
+                echo "::notice::SSM param not found: ${name}" >&2
                 echo ""
               fi
               return
@@ -89,19 +89,21 @@ jobs:
           printf 'NODE_ENV=production\nPORT=4100\n' > /tmp/sentinel.env
 
           # Append secrets (using printf to handle multi-line values like PEM keys)
+          # Note: [ -n ] && printf returns exit code 1 when the var is empty,
+          # which kills the script under bash -e. Append || true to optional lines.
           {
             printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
             printf 'REDIS_URL=redis://:%s@redis:6379\n' "$REDIS_PASSWORD"
             printf 'TRUSTED_PROXY_COUNT=%s\n' "$TRUSTED_PROXY_COUNT"
             printf 'SESSION_SECRET=%s\n' "$SESSION_SECRET"
             printf 'ENCRYPTION_KEY=%s\n' "$ENCRYPTION_KEY"
-            [ -n "$ENCRYPTION_KEY_PREV" ] && printf 'ENCRYPTION_KEY_PREV=%s\n' "$ENCRYPTION_KEY_PREV"
+            [ -n "$ENCRYPTION_KEY_PREV" ] && printf 'ENCRYPTION_KEY_PREV=%s\n' "$ENCRYPTION_KEY_PREV" || true
             printf 'ALLOWED_ORIGINS=%s\n' "$ALLOWED_ORIGINS"
             printf 'NEXT_PUBLIC_API_URL=%s\n' "$NEXT_PUBLIC_API_URL"
             printf 'API_BASE_URL=%s\n' "$NEXT_PUBLIC_API_URL"
-            [ -n "$SENTINEL_AWS_ACCESS_KEY_ID" ] && printf 'AWS_ACCESS_KEY_ID=%s\n' "$SENTINEL_AWS_ACCESS_KEY_ID"
-            [ -n "$SENTINEL_AWS_SECRET_ACCESS_KEY" ] && printf 'AWS_SECRET_ACCESS_KEY=%s\n' "$SENTINEL_AWS_SECRET_ACCESS_KEY"
-            [ -n "$SENTINEL_AWS_ROLE_ARN" ] && printf 'AWS_SENTINEL_ROLE_ARN=%s\n' "$SENTINEL_AWS_ROLE_ARN"
+            [ -n "$SENTINEL_AWS_ACCESS_KEY_ID" ] && printf 'AWS_ACCESS_KEY_ID=%s\n' "$SENTINEL_AWS_ACCESS_KEY_ID" || true
+            [ -n "$SENTINEL_AWS_SECRET_ACCESS_KEY" ] && printf 'AWS_SECRET_ACCESS_KEY=%s\n' "$SENTINEL_AWS_SECRET_ACCESS_KEY" || true
+            [ -n "$SENTINEL_AWS_ROLE_ARN" ] && printf 'AWS_SENTINEL_ROLE_ARN=%s\n' "$SENTINEL_AWS_ROLE_ARN" || true
             printf 'SLACK_CLIENT_ID=%s\n' "$SLACK_CLIENT_ID"
             printf 'SLACK_CLIENT_SECRET=%s\n' "$SLACK_CLIENT_SECRET"
             printf 'GITHUB_APP_ID=%s\n' "$GITHUB_APP_ID"
@@ -115,20 +117,19 @@ jobs:
             printf 'SMTP_FROM=%s\n' "$SMTP_FROM"
             printf 'SENTRY_DSN=%s\n' "$SENTRY_DSN"
             printf 'SENTRY_ENVIRONMENT=%s\n' "$SENTRY_ENVIRONMENT"
-            # Same Sentry project as the API/worker; browser bundle requires NEXT_PUBLIC_*.
-            [ -n "$SENTRY_DSN" ] && printf 'NEXT_PUBLIC_SENTRY_DSN=%s\n' "$SENTRY_DSN"
+            [ -n "$SENTRY_DSN" ] && printf 'NEXT_PUBLIC_SENTRY_DSN=%s\n' "$SENTRY_DSN" || true
             printf 'NEXT_PUBLIC_SENTRY_ENVIRONMENT=%s\n' "$SENTRY_ENVIRONMENT"
-            [ -n "$SENTRY_ORG" ] && printf 'SENTRY_ORG=%s\n' "$SENTRY_ORG"
-            [ -n "$SENTRY_PROJECT" ] && printf 'SENTRY_PROJECT=%s\n' "$SENTRY_PROJECT"
-            [ -n "$SENTRY_AUTH_TOKEN" ] && printf 'SENTRY_AUTH_TOKEN=%s\n' "$SENTRY_AUTH_TOKEN"
+            [ -n "$SENTRY_ORG" ] && printf 'SENTRY_ORG=%s\n' "$SENTRY_ORG" || true
+            [ -n "$SENTRY_PROJECT" ] && printf 'SENTRY_PROJECT=%s\n' "$SENTRY_PROJECT" || true
+            [ -n "$SENTRY_AUTH_TOKEN" ] && printf 'SENTRY_AUTH_TOKEN=%s\n' "$SENTRY_AUTH_TOKEN" || true
             printf 'ETHERSCAN_API_KEY=%s\n' "$ETHERSCAN_API_KEY"
             printf 'RPC_ETHEREUM=%s\n' "$RPC_ETHEREUM"
-            [ -n "$METRICS_TOKEN" ] && printf 'METRICS_TOKEN=%s\n' "$METRICS_TOKEN"
+            [ -n "$METRICS_TOKEN" ] && printf 'METRICS_TOKEN=%s\n' "$METRICS_TOKEN" || true
           } >> /tmp/sentinel.env
 
           # Validate required SSM parameters before SCP
           MISSING=""
-          check_var() { eval "val=\$$1"; [ -z "$val" ] && MISSING="$MISSING $1($2)"; }
+          check_var() { eval "val=\$$1"; [ -z "$val" ] && MISSING="$MISSING $1($2)" || true; }
           check_var DATABASE_URL        /sentinel/production/DATABASE_URL
           check_var SESSION_SECRET      /sentinel/production/SESSION_SECRET
           check_var ENCRYPTION_KEY      /sentinel/production/ENCRYPTION_KEY
