@@ -47,7 +47,7 @@ Copy `.env.example` to `.env` to get started in development. See
 **Production note**: The application does not use read replicas. All queries (reads and
 writes) go to the single primary PostgreSQL instance. The worker initializes a larger
 connection pool (`maxConnections: 20`) to support concurrent BullMQ job processing. See
-[Limitations](../limitations.md#no-horizontal-database-scaling) for details.
+[#6](https://github.com/OpSecWeb3/sentinel/issues/6) for read replica support.
 
 ---
 

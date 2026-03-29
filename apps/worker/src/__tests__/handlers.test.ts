@@ -523,6 +523,49 @@ describe('event-processing handler', () => {
 
     expect(mockQueueAdd).not.toHaveBeenCalledWith('correlation.evaluate', expect.anything());
   });
+
+  it('throws when alert dispatch enqueue fails so BullMQ retries', async () => {
+    const fakeEvent = {
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      orgId: 'org-1',
+      moduleId: 'github',
+      eventType: 'push',
+      externalId: 'ext-1',
+      payload: {},
+      occurredAt: new Date(),
+      receivedAt: new Date(),
+    };
+    const fakeAlert = { id: BigInt(42), detectionId: 'det-1' };
+
+    mockDb.limit.mockResolvedValueOnce([fakeEvent]);
+    mockRuleEngineEvaluate.mockResolvedValueOnce({
+      candidates: [{
+        orgId: 'org-1',
+        detectionId: 'det-1',
+        ruleId: 'rule-1',
+        eventId: fakeEvent.id,
+        severity: 'high',
+        title: 'Test Alert',
+        description: 'desc',
+        triggerType: 'rule',
+        triggerData: {},
+      }],
+      advancedRuleIds: new Set(),
+      startedRuleIds: new Set(),
+    });
+
+    // Correlation count — no active rules
+    mockDb.then.mockImplementationOnce((resolve: any) => resolve([{ activeRuleCount: 0 }]));
+    // Transaction: insert alert returning
+    mockDb.returning.mockResolvedValueOnce([fakeAlert]);
+
+    // Make dispatch enqueue fail
+    mockQueueAdd.mockRejectedValueOnce(new Error('Redis connection lost'));
+
+    const job = mockJob({ eventId: fakeEvent.id });
+
+    await expect(handler.process(job)).rejects.toThrow('Failed to enqueue dispatch');
+  });
 });
 
 // ---------------------------------------------------------------------------

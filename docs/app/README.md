@@ -47,7 +47,6 @@ For end-user guides covering the dashboard, detection authoring, and alert routi
 | [Modules](./modules/) | Per-module implementation guides |
 | [Services](./services/) | Service-level details (API, worker, web) |
 | [External Dependencies](./external-dependencies/) | Third-party service integrations |
-| [Limitations](./limitations.md) | Known limitations and constraints |
 
 ## Repository layout (top level)
 

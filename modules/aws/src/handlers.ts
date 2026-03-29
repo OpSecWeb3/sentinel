@@ -167,17 +167,25 @@ export const pollSweepHandler: JobHandler = {
     if (due.length === 0) return;
 
     const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
-    await Promise.all(
-      due.map((row) =>
-        queue.add('aws.sqs.poll', { integrationId: row.id, orgId: row.orgId }, {
+    const failedIds: string[] = [];
+    for (const row of due) {
+      try {
+        await queue.add('aws.sqs.poll', { integrationId: row.id, orgId: row.orgId }, {
           jobId: `aws-poll-${row.id}-${Math.floor(Date.now() / 60_000)}`,
           removeOnComplete: { age: 300 },
           removeOnFail: { age: 3600 },
-        }),
-      ),
-    );
+        });
+      } catch (err) {
+        log.error({ err, integrationId: row.id }, 'Failed to enqueue SQS poll job');
+        failedIds.push(row.id);
+      }
+    }
 
-    log.debug({ count: due.length }, 'Enqueued SQS poll jobs');
+    log.debug({ count: due.length, failed: failedIds.length }, 'Enqueued SQS poll jobs');
+
+    if (failedIds.length > 0) {
+      throw new Error(`Failed to enqueue ${failedIds.length}/${due.length} SQS poll job(s): ${failedIds.join(', ')}`);
+    }
   },
 };
 

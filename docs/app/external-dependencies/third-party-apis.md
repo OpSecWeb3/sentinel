@@ -113,7 +113,7 @@ are rejected with an error.
 
 Sentinel supports a single GitHub App installation per organization. Installing the same
 Sentinel GitHub App in multiple GitHub organizations requires a separate Sentinel organization
-for each. See [Limitations](../limitations.md#github-app-single-installation-per-org).
+for each.
 
 ---
 

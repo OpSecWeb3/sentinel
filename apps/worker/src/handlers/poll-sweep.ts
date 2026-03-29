@@ -50,6 +50,7 @@ export const pollSweepHandler: JobHandler = {
     log.info({ count: enabledDue.length }, 'Poll sweep: enqueueing poll jobs');
 
     const moduleJobsQueue = getQueue(QUEUE_NAMES.MODULE_JOBS);
+    const failedIds: string[] = [];
 
     // Batch-load all stored versions for every due artifact in a single query
     // instead of issuing one SELECT per artifact (N+1 pattern).
@@ -107,7 +108,12 @@ export const pollSweepHandler: JobHandler = {
         log.debug({ artifactId: artifact.id, name: artifact.name }, 'Enqueued poll job');
       } catch (err) {
         log.error({ err, artifactId: artifact.id, name: artifact.name }, 'Failed to enqueue poll job');
+        failedIds.push(artifact.id);
       }
+    }
+
+    if (failedIds.length > 0) {
+      throw new Error(`Failed to enqueue ${failedIds.length}/${enabledDue.length} registry poll job(s): ${failedIds.join(', ')}`);
     }
   },
 };

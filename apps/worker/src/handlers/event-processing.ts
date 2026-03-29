@@ -131,12 +131,20 @@ export function createEventProcessingHandler(
         // rolled back if a later candidate insert fails. Alerts that were
         // committed are dispatched; a subsequent retry will see none of them
         // if the transaction rolled back.
+        const failedDispatchIds: string[] = [];
         for (const created of createdAlerts) {
           try {
             await alertsQueue.add('alert.dispatch', { alertId: String(created.id) });
           } catch (err) {
             _log.error({ err, alertId: String(created.id) }, 'Failed to enqueue alert dispatch');
+            failedDispatchIds.push(String(created.id));
           }
+        }
+
+        // Re-throw so BullMQ retries. On retry, alert inserts hit
+        // onConflictDoNothing (idempotent) and dispatch is re-attempted.
+        if (failedDispatchIds.length > 0) {
+          throw new Error(`Failed to enqueue dispatch for ${failedDispatchIds.length} alert(s): ${failedDispatchIds.join(', ')}`);
         }
       }
     },
