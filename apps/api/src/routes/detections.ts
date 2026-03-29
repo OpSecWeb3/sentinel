@@ -10,9 +10,161 @@ import { getDb } from '@sentinel/db';
 import { detections, rules } from '@sentinel/db/schema/core';
 import { eq, and, sql, count, desc, asc, ilike, inArray, ne } from '@sentinel/db';
 import type { AppEnv } from '@sentinel/shared/hono-types';
+import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
 import { requireAuth, requireOrg, requireRole } from '../middleware/rbac.js';
 import { requireScope } from '../middleware/scope.js';
 import { validate, getValidated } from '../middleware/validate.js';
+import { logger as rootLogger } from '@sentinel/shared/logger';
+
+const log = rootLogger.child({ component: 'detections-router' });
+
+// ---------------------------------------------------------------------------
+// Rule sync: notify module poll systems when rules change
+// ---------------------------------------------------------------------------
+
+const MODULES_WITH_RULE_SYNC = new Set(['chain']);
+
+async function syncRulesToModule(
+  action: 'add' | 'update' | 'remove' | 'reconcile',
+  moduleId: string,
+  ruleRows: Array<{ id: string; ruleType: string; config: unknown }>,
+) {
+  if (!MODULES_WITH_RULE_SYNC.has(moduleId)) return;
+
+  const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
+  for (const rule of ruleRows) {
+    try {
+      await queue.add('chain.rule.sync', {
+        action,
+        ruleId: rule.id,
+        config: { ...rule.config as Record<string, unknown>, ruleType: rule.ruleType },
+      }, { jobId: `rule-sync-${rule.id}-${Date.now()}` });
+    } catch (err) {
+      log.error({ err, ruleId: rule.id, action }, 'Failed to enqueue rule sync');
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Prerequisite validation: ensure upstream resources exist before creating
+// detections. Without these, rules evaluate against events that never arrive.
+// ---------------------------------------------------------------------------
+
+import { infraHosts, infraScanSchedules } from '@sentinel/db/schema/infra';
+import { rcArtifacts } from '@sentinel/db/schema/registry';
+import { awsIntegrations } from '@sentinel/db/schema/aws';
+import { githubInstallations } from '@sentinel/db/schema/github';
+import { chainContracts, chainNetworks } from '@sentinel/db/schema/chain';
+
+interface PrereqResult {
+  ok: boolean;
+  error?: string;
+  warnings?: string[];
+}
+
+async function validatePrerequisites(
+  moduleId: string,
+  orgId: string,
+  config: Record<string, unknown>,
+  ruleConfigs: Array<Record<string, unknown>>,
+): Promise<PrereqResult> {
+  const db = getDb();
+  const warnings: string[] = [];
+
+  if (moduleId === 'infra') {
+    // Infra detections need at least one active host with a scan schedule
+    const hosts = await db.select({ id: infraHosts.id })
+      .from(infraHosts)
+      .innerJoin(infraScanSchedules, eq(infraScanSchedules.hostId, infraHosts.id))
+      .where(and(eq(infraHosts.orgId, orgId), eq(infraHosts.isActive, true), eq(infraScanSchedules.enabled, true)))
+      .limit(1);
+
+    if (hosts.length === 0) {
+      return { ok: false, error: 'No active hosts with scanning enabled. Add a host at /infra/hosts before creating infra detections.' };
+    }
+  }
+
+  if (moduleId === 'registry') {
+    // Registry detections need at least one monitored artifact
+    const artifactName = config.artifactName as string | undefined;
+    if (artifactName) {
+      const [artifact] = await db.select({ id: rcArtifacts.id, enabled: rcArtifacts.enabled })
+        .from(rcArtifacts)
+        .where(and(eq(rcArtifacts.orgId, orgId), eq(rcArtifacts.name, artifactName)))
+        .limit(1);
+
+      if (!artifact) {
+        return { ok: false, error: `Artifact "${artifactName}" is not registered for monitoring. Add it at /registry/images or /registry/packages first.` };
+      }
+      if (!artifact.enabled) {
+        warnings.push(`Artifact "${artifactName}" exists but is disabled. Enable it to receive events.`);
+      }
+    } else {
+      // No specific artifact — check org has at least one
+      const artifacts = await db.select({ id: rcArtifacts.id })
+        .from(rcArtifacts)
+        .where(and(eq(rcArtifacts.orgId, orgId), eq(rcArtifacts.enabled, true)))
+        .limit(1);
+
+      if (artifacts.length === 0) {
+        return { ok: false, error: 'No monitored images or packages found. Add an artifact at /registry/images or /registry/packages before creating registry detections.' };
+      }
+    }
+  }
+
+  if (moduleId === 'aws') {
+    const integrations = await db.select({ id: awsIntegrations.id })
+      .from(awsIntegrations)
+      .where(and(eq(awsIntegrations.orgId, orgId), eq(awsIntegrations.enabled, true), eq(awsIntegrations.status, 'active')))
+      .limit(1);
+
+    if (integrations.length === 0) {
+      return { ok: false, error: 'No active AWS integrations found. Connect an AWS account at /aws/integrations before creating AWS detections.' };
+    }
+  }
+
+  if (moduleId === 'github') {
+    const installations = await db.select({ id: githubInstallations.id })
+      .from(githubInstallations)
+      .where(and(eq(githubInstallations.orgId, orgId), eq(githubInstallations.status, 'active')))
+      .limit(1);
+
+    if (installations.length === 0) {
+      return { ok: false, error: 'No active GitHub App installations found. Install the GitHub App at /github/installations before creating GitHub detections.' };
+    }
+  }
+
+  if (moduleId === 'chain') {
+    // Chain needs a valid network, and contract if referenced
+    const networkId = config.networkId as number | undefined;
+    if (networkId) {
+      const [network] = await db.select({ id: chainNetworks.id })
+        .from(chainNetworks)
+        .where(eq(chainNetworks.chainId, networkId))
+        .limit(1);
+
+      if (!network) {
+        return { ok: false, error: `Network with chain ID ${networkId} not found. Add the network at /chain/networks first.` };
+      }
+    }
+
+    const contractAddress = (config.contractAddress as string) ?? ruleConfigs.find((r) => r.contractAddress)?.contractAddress as string | undefined;
+    const contractId = (config.contractId as number) ?? ruleConfigs.find((r) => r.contractId)?.contractId as number | undefined;
+
+    if (contractId) {
+      const [contract] = await db.select({ id: chainContracts.id })
+        .from(chainContracts)
+        .where(eq(chainContracts.id, contractId))
+        .limit(1);
+
+      if (!contract) {
+        return { ok: false, error: `Contract ID ${contractId} not found. Register the contract at /chain/contracts first.` };
+      }
+    }
+  }
+
+  return { ok: true, warnings: warnings.length > 0 ? warnings : undefined };
+}
 
 const router = new Hono<AppEnv>();
 router.use('*', requireAuth, requireOrg);
@@ -88,6 +240,12 @@ router.post('/', requireRole('admin', 'editor'), requireScope('api:write'), vali
   const userId = c.get('userId');
   const db = getDb();
 
+  // Validate upstream resources exist before creating detection
+  const prereq = await validatePrerequisites(
+    body.moduleId, orgId, body.config, body.rules.map((r) => r.config),
+  );
+  if (!prereq.ok) return c.json({ error: prereq.error }, 400);
+
   const result = await db.transaction(async (tx) => {
     const [detection] = await tx.insert(detections).values({
       orgId,
@@ -119,7 +277,10 @@ router.post('/', requireRole('admin', 'editor'), requireScope('api:write'), vali
     return { detection, rules: ruleRows };
   });
 
-  return c.json({ data: result }, 201);
+  // Notify module poll systems about new rules
+  await syncRulesToModule('add', body.moduleId, result.rules);
+
+  return c.json({ data: result, ...(prereq.warnings ? { warnings: prereq.warnings } : {}) }, 201);
 });
 
 // ---------------------------------------------------------------------------
@@ -311,13 +472,17 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
     updateSet.status = body.status;
 
     // Pausing detection pauses its rules; activating reactivates them.
-    // Include orgId for defence-in-depth — the detection ownership check above
-    // already guards against cross-org access, but belt-and-suspenders here
-    // ensures stale/dangling rules from another org can never be touched.
     const ruleStatus = body.status === 'paused' ? 'paused' : 'active';
     await db.update(rules)
       .set({ status: ruleStatus })
       .where(and(eq(rules.detectionId, id), eq(rules.orgId, orgId)));
+
+    // Notify module poll systems: pause removes schedules, activate re-adds them
+    const affectedRules = await db.select({ id: rules.id, ruleType: rules.ruleType, config: rules.config })
+      .from(rules)
+      .where(and(eq(rules.detectionId, id), eq(rules.orgId, orgId)));
+    const action = body.status === 'paused' ? 'remove' : 'add';
+    await syncRulesToModule(action as 'add' | 'remove', existing.moduleId, affectedRules);
   }
 
   // Replace rules if provided (delete existing, insert new).
@@ -333,9 +498,16 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
     );
     updateSet.config = mergedConfig;
 
+    // Remove old rules' poll schedules before replacing
+    const oldRules = await db.select({ id: rules.id, ruleType: rules.ruleType, config: rules.config })
+      .from(rules)
+      .where(and(eq(rules.detectionId, id), eq(rules.orgId, orgId)));
+    await syncRulesToModule('remove', existing.moduleId, oldRules);
+
+    let newRuleRows: Array<{ id: string; ruleType: string; config: unknown }> = [];
     const [updated] = await db.transaction(async (tx) => {
       await tx.delete(rules).where(eq(rules.detectionId, id));
-      await tx.insert(rules).values(
+      newRuleRows = await tx.insert(rules).values(
         body.rules!.map((r) => ({
           detectionId: id,
           orgId,
@@ -345,12 +517,15 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
           action: r.action,
           priority: r.priority,
         })),
-      );
+      ).returning();
       return tx.update(detections)
         .set(updateSet)
         .where(and(eq(detections.id, id), eq(detections.orgId, orgId)))
         .returning();
     });
+
+    // Sync new rules to module poll systems
+    await syncRulesToModule('add', existing.moduleId, newRuleRows);
 
     return c.json({ data: updated });
   }
@@ -381,9 +556,16 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
     // Keep config in sync so the edit page can pre-fill on next load
     updateSet.config = { ...inputsMap, ...(body.overrides ?? {}) };
 
+    // Remove old rules' poll schedules before replacing
+    const oldRules = await db.select({ id: rules.id, ruleType: rules.ruleType, config: rules.config })
+      .from(rules)
+      .where(and(eq(rules.detectionId, id), eq(rules.orgId, orgId)));
+    await syncRulesToModule('remove', existing.moduleId, oldRules);
+
+    let newRuleRows: Array<{ id: string; ruleType: string; config: unknown }> = [];
     const [updated] = await db.transaction(async (tx) => {
       await tx.delete(rules).where(eq(rules.detectionId, id));
-      await tx.insert(rules).values(
+      newRuleRows = await tx.insert(rules).values(
         template.rules.map((r, i) => ({
           detectionId: id,
           orgId,
@@ -393,12 +575,15 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
           action: r.action,
           priority: r.priority ?? 50,
         })),
-      );
+      ).returning();
       return tx.update(detections)
         .set(updateSet)
         .where(and(eq(detections.id, id), eq(detections.orgId, orgId)))
         .returning();
     });
+
+    // Sync new rules to module poll systems
+    await syncRulesToModule('add', existing.moduleId, newRuleRows);
 
     return c.json({ data: updated });
   }
@@ -421,6 +606,18 @@ router.delete('/:id', requireRole('admin'), requireScope('api:write'), validate(
   const orgId = c.get('orgId');
   const db = getDb();
 
+  // Load the detection's moduleId and rules BEFORE disabling, so we can notify the module
+  const [existing] = await db.select({ moduleId: detections.moduleId })
+    .from(detections)
+    .where(and(eq(detections.id, id), eq(detections.orgId, orgId)))
+    .limit(1);
+
+  const existingRules = existing
+    ? await db.select({ id: rules.id, ruleType: rules.ruleType, config: rules.config })
+        .from(rules)
+        .where(and(eq(rules.detectionId, id), eq(rules.orgId, orgId)))
+    : [];
+
   const result = await db.transaction(async (tx) => {
     // Verify ownership FIRST — before touching any rules
     const [detection] = await tx.update(detections)
@@ -440,6 +637,12 @@ router.delete('/:id', requireRole('admin'), requireScope('api:write'), validate(
   });
 
   if (!result) return c.json({ error: 'Detection not found' }, 404);
+
+  // Notify module to remove poll schedules for disabled rules
+  if (existing && existingRules.length > 0) {
+    await syncRulesToModule('remove', existing.moduleId, existingRules);
+  }
+
   return c.json({ data: { id: result.id, name: result.name, status: 'disabled' } });
 });
 
@@ -540,6 +743,13 @@ router.post('/from-template', requireRole('admin', 'editor'), requireScope('api:
     return c.json({ error: `Missing required inputs: ${unresolved.join(', ')}` }, 400);
   }
 
+  // Validate upstream resources exist
+  const mergedConfig = { ...body.inputs, ...body.overrides };
+  const prereq = await validatePrerequisites(body.moduleId, orgId, mergedConfig, builtConfigs);
+  if (!prereq.ok) {
+    return c.json({ error: prereq.error }, 400);
+  }
+
   const result = await db.transaction(async (tx) => {
     const [detection] = await tx.insert(detections).values({
       orgId,
@@ -571,7 +781,10 @@ router.post('/from-template', requireRole('admin', 'editor'), requireScope('api:
     return { detection, rules: ruleRows };
   });
 
-  return c.json({ data: result }, 201);
+  // Notify module poll systems about new rules
+  await syncRulesToModule('add', body.moduleId, result.rules);
+
+  return c.json({ data: result, ...(prereq.warnings ? { warnings: prereq.warnings } : {}) }, 201);
 });
 
 // ---------------------------------------------------------------------------

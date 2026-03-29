@@ -20,6 +20,7 @@ COPY modules/github/package.json ./modules/github/
 COPY modules/chain/package.json ./modules/chain/
 COPY modules/infra/package.json ./modules/infra/
 COPY modules/registry/package.json ./modules/registry/
+COPY modules/aws/package.json ./modules/aws/
 
 # Install all dependencies (including devDependencies for the build)
 RUN pnpm install --frozen-lockfile

@@ -6,24 +6,83 @@
  */
 import { logger as rootLogger } from '@sentinel/shared/logger';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import crypto from 'node:crypto';
 import { getDb } from '@sentinel/db';
 import { organizations } from '@sentinel/db/schema/core';
-import { rcArtifacts, rcArtifactVersions, rcArtifactEvents } from '@sentinel/db/schema/registry';
-import { eq, and, desc } from '@sentinel/db';
+import { rcArtifacts, rcArtifactVersions, rcArtifactEvents, rcVerifications } from '@sentinel/db/schema/registry';
+import { eq, and, desc, inArray, sql, count } from '@sentinel/db';
 import { encrypt, decrypt } from '@sentinel/shared/crypto';
 import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
 import type { AppEnv, AuthContext } from '@sentinel/shared/hono-types';
+import { getClientIp } from '@sentinel/shared/ip';
 import { searchNpmScope } from './npm-registry.js';
 import { preflightTagCount } from './preflight.js';
 import { templates as rcTemplates } from './templates/index.js';
-import { count, sql } from '@sentinel/db';
 import { detections, alerts } from '@sentinel/db/schema/core';
+import type IORedis from 'ioredis';
 
 const log = rootLogger.child({ component: 'registry-router' });
 
 export const registryRouter = new Hono<AppEnv>();
+
+// ---------------------------------------------------------------------------
+// Redis-backed rate limiter for webhook endpoints.
+// Same pattern as modules/github — uses shared Redis when available, falls
+// back to an in-memory Map for test/dev when Redis is unavailable.
+// ---------------------------------------------------------------------------
+
+let _rateLimitRedis: IORedis | undefined;
+
+/** Call once at startup to share the Redis connection for rate limiting. */
+export function setRegistryWebhookRateLimitRedis(redis: IORedis): void {
+  _rateLimitRedis = redis;
+}
+
+const WEBHOOK_RATE_LIMIT = 100;
+const WEBHOOK_RATE_WINDOW_SEC = 60;
+
+const _inMemoryFallback = new Map<string, { count: number; resetAt: number }>();
+
+async function isWebhookRateLimited(ip: string): Promise<boolean> {
+  if (process.env.DISABLE_RATE_LIMIT === 'true') return false;
+
+  const redis = _rateLimitRedis;
+  if (redis) {
+    const luaScript = `
+      local current = redis.call('INCR', KEYS[1])
+      if current == 1 then
+        redis.call('EXPIRE', KEYS[1], ARGV[1])
+      end
+      return current
+    `;
+    const key = `sentinel:rl:registry-webhook:ip:${ip}`;
+    const current = (await redis.eval(luaScript, 1, key, WEBHOOK_RATE_WINDOW_SEC)) as number;
+    return current > WEBHOOK_RATE_LIMIT;
+  }
+
+  // Fallback: in-memory limiter for tests / local dev without Redis
+  const now = Date.now();
+  const entry = _inMemoryFallback.get(ip);
+  if (!entry || now >= entry.resetAt) {
+    _inMemoryFallback.set(ip, { count: 1, resetAt: now + WEBHOOK_RATE_WINDOW_SEC * 1000 });
+    return false;
+  }
+  entry.count++;
+  return entry.count > WEBHOOK_RATE_LIMIT;
+}
+
+// A pre-encrypted dummy secret used in constant-time fallback loops so that
+// orgs without a configured webhook secret still incur a decrypt + HMAC cost,
+// preventing timing side-channels that would reveal which orgs have secrets.
+const DUMMY_SECRET_ENCRYPTED = encrypt('sentinel-dummy-webhook-secret-unused');
+
+// Cap on the number of orgs checked during the fallback "iterate all orgs" loop.
+// This bounds worst-case CPU cost to O(MAX_FALLBACK_ORGS) decrypt + HMAC ops per
+// webhook, preventing DoS amplification if the deployment grows to many orgs.
+// The DB query itself is also limited so we never load unbounded rows.
+const MAX_FALLBACK_ORGS = 50;
 
 // ---------------------------------------------------------------------------
 // Shared detail helper
@@ -166,7 +225,12 @@ async function safeEnqueue(
 // Docker Hub webhook receiver with HMAC-SHA256 verification.
 // ---------------------------------------------------------------------------
 
-registryRouter.post('/webhooks/docker', async (c) => {
+registryRouter.post('/webhooks/docker', bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c) => {
+  const clientIp = getClientIp(c);
+  if (await isWebhookRateLimited(clientIp)) {
+    return c.json({ error: 'Too many requests' }, 429);
+  }
+
   const signature = c.req.header('X-Hub-Signature-256')?.replace('sha256=', '')
     ?? c.req.header('X-Signature')?.replace('sha256=', '');
 
@@ -225,23 +289,34 @@ registryRouter.post('/webhooks/docker', async (c) => {
 
   // Fallback: if artifact not found in DB (e.g. first webhook before monitoring
   // is configured), iterate orgs to find a matching secret.
-  // SECURITY: Always iterate ALL orgs to prevent timing oracles that leak org
-  // count.  Do not break early on match — record the first match and continue.
+  // SECURITY: Do not break early on match — record the first match and continue
+  // through all loaded orgs so timing is constant for the set we check.
+  // Orgs without secrets still get a dummy decrypt + HMAC to keep per-iteration
+  // cost constant (the previous `continue` was a timing leak).
+  // Capped at MAX_FALLBACK_ORGS to bound CPU cost and prevent DoS amplification.
   if (!matchedOrgId && !artifact) {
     const orgs = await db
       .select({
         id: organizations.id,
         webhookSecretEncrypted: organizations.webhookSecretEncrypted,
       })
-      .from(organizations);
+      .from(organizations)
+      .limit(MAX_FALLBACK_ORGS);
+
+    if (orgs.length >= MAX_FALLBACK_ORGS) {
+      log.warn(
+        { orgCount: orgs.length },
+        'Docker webhook fallback hit MAX_FALLBACK_ORGS cap — consider restructuring webhook URLs to include org identifier',
+      );
+    }
 
     for (const org of orgs) {
-      if (!org.webhookSecretEncrypted) continue;
-
       try {
-        const secret = decrypt(org.webhookSecretEncrypted);
+        const ciphertext = org.webhookSecretEncrypted || DUMMY_SECRET_ENCRYPTED;
+        const secret = decrypt(ciphertext);
         const valid = verifyHmacSha256(rawBody, signature, secret);
-        if (valid && !matchedOrgId) {
+        // Only record a match from a real secret, never from the dummy
+        if (valid && !matchedOrgId && org.webhookSecretEncrypted) {
           matchedOrgId = org.id;
         }
       } catch (err) {
@@ -276,7 +351,12 @@ registryRouter.post('/webhooks/docker', async (c) => {
 // npm hooks use HMAC-SHA256 in the x-npm-signature header.
 // ---------------------------------------------------------------------------
 
-registryRouter.post('/webhooks/npm', async (c) => {
+registryRouter.post('/webhooks/npm', bodyLimit({ maxSize: 5 * 1024 * 1024 }), async (c) => {
+  const clientIp = getClientIp(c);
+  if (await isWebhookRateLimited(clientIp)) {
+    return c.json({ error: 'Too many requests' }, 429);
+  }
+
   const signature = c.req.header('x-npm-signature')?.replace('sha256=', '');
 
   if (!signature) {
@@ -330,23 +410,34 @@ registryRouter.post('/webhooks/npm', async (c) => {
   }
 
   // Fallback for unregistered artifacts.
-  // SECURITY: Always iterate ALL orgs to prevent timing oracles that leak org
-  // count.  Do not break early on match — record the first match and continue.
+  // SECURITY: Do not break early on match — record the first match and continue
+  // through all loaded orgs so timing is constant for the set we check.
+  // Orgs without secrets still get a dummy decrypt + HMAC to keep per-iteration
+  // cost constant (the previous `continue` was a timing leak).
+  // Capped at MAX_FALLBACK_ORGS to bound CPU cost and prevent DoS amplification.
   if (!matchedOrgId && !artifact) {
     const orgs = await db
       .select({
         id: organizations.id,
         webhookSecretEncrypted: organizations.webhookSecretEncrypted,
       })
-      .from(organizations);
+      .from(organizations)
+      .limit(MAX_FALLBACK_ORGS);
+
+    if (orgs.length >= MAX_FALLBACK_ORGS) {
+      log.warn(
+        { orgCount: orgs.length },
+        'npm webhook fallback hit MAX_FALLBACK_ORGS cap — consider restructuring webhook URLs to include org identifier',
+      );
+    }
 
     for (const org of orgs) {
-      if (!org.webhookSecretEncrypted) continue;
-
       try {
-        const secret = decrypt(org.webhookSecretEncrypted);
+        const ciphertext = org.webhookSecretEncrypted || DUMMY_SECRET_ENCRYPTED;
+        const secret = decrypt(ciphertext);
         const valid = verifyHmacSha256(rawBody, signature, secret);
-        if (valid && !matchedOrgId) {
+        // Only record a match from a real secret, never from the dummy
+        if (valid && !matchedOrgId && org.webhookSecretEncrypted) {
           matchedOrgId = org.id;
         }
       } catch (err) {
@@ -448,7 +539,50 @@ registryRouter.get('/images', async (c) => {
     .limit(limit)
     .offset(offset);
 
-  return c.json({ data: artifacts.map(({ credentialsEncrypted, ...rest }) => ({ ...rest, hasCredentials: !!credentialsEncrypted })) });
+  const ids = artifacts.map((a) => a.id);
+
+  const [versionCounts, lastEvents, latestVersions, verificationStatuses] = ids.length > 0
+    ? await Promise.all([
+        db.select({ artifactId: rcArtifactVersions.artifactId, count: count() })
+          .from(rcArtifactVersions)
+          .where(inArray(rcArtifactVersions.artifactId, ids))
+          .groupBy(rcArtifactVersions.artifactId),
+        db.select({ artifactId: rcArtifactEvents.artifactId, lastEvent: sql<string>`max(${rcArtifactEvents.createdAt})::text` })
+          .from(rcArtifactEvents)
+          .where(inArray(rcArtifactEvents.artifactId, ids))
+          .groupBy(rcArtifactEvents.artifactId),
+        db.select({ artifactId: rcArtifactVersions.artifactId, version: sql<string>`max(${rcArtifactVersions.version})` })
+          .from(rcArtifactVersions)
+          .where(and(inArray(rcArtifactVersions.artifactId, ids), eq(rcArtifactVersions.status, 'active')))
+          .groupBy(rcArtifactVersions.artifactId),
+        db.select({
+          artifactId: rcVerifications.artifactId,
+          hasSig: sql<boolean>`bool_or(${rcVerifications.hasSignature})`,
+          hasProv: sql<boolean>`bool_or(${rcVerifications.hasProvenance})`,
+        })
+          .from(rcVerifications)
+          .where(inArray(rcVerifications.artifactId, ids))
+          .groupBy(rcVerifications.artifactId),
+      ])
+    : [[], [], [], []];
+
+  const countMap = new Map(versionCounts.map((v) => [v.artifactId, Number(v.count)]));
+  const eventMap = new Map(lastEvents.map((v) => [v.artifactId, v.lastEvent]));
+  const versionMap = new Map(latestVersions.map((v) => [v.artifactId, v.version]));
+  const verifyMap = new Map(verificationStatuses.map((v) => [v.artifactId, v.hasSig || v.hasProv ? 'verified' : 'unverified']));
+
+  return c.json({
+    data: artifacts.map(({ credentialsEncrypted, tagWatchPatterns, tagIgnorePatterns, ...rest }) => ({
+      ...rest,
+      tagPatterns: tagWatchPatterns as string[],
+      ignorePatterns: tagIgnorePatterns as string[],
+      tagCount: countMap.get(rest.id) ?? 0,
+      lastEvent: eventMap.get(rest.id) ?? null,
+      latestVersion: versionMap.get(rest.id) ?? null,
+      verificationStatus: verifyMap.get(rest.id) ?? null,
+      hasCredentials: !!credentialsEncrypted,
+    })),
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -572,8 +706,38 @@ registryRouter.put('/images/:id', async (c) => {
     .returning();
 
   if (!updated) return c.json({ error: 'Image not found' }, 404);
-  const { credentialsEncrypted: _creds, ...safeUpdated } = updated;
-  return c.json({ data: { ...safeUpdated, hasCredentials: !!_creds } });
+
+  // Trigger a poll so changes (new patterns, interval, etc.) take effect immediately
+  if (updated.enabled) {
+    const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
+    await queue.add('registry.poll', { artifactId: updated.id, orgId }, { jobId: `poll-update-${updated.id}-${Date.now()}` });
+  }
+
+  const { credentialsEncrypted: _creds, tagWatchPatterns, tagIgnorePatterns, ...safeUpdated } = updated;
+  return c.json({ data: { ...safeUpdated, tagPatterns: tagWatchPatterns as string[], ignorePatterns: tagIgnorePatterns as string[], hasCredentials: !!_creds } });
+});
+
+// ---------------------------------------------------------------------------
+// POST /modules/registry/images/:id/poll -- trigger an immediate poll
+// ---------------------------------------------------------------------------
+
+registryRouter.post('/images/:id/poll', async (c) => {
+  const orgId = c.get('orgId');
+  if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+
+  const id = c.req.param('id')!;
+  const db = getDb();
+  const [artifact] = await db.select({ id: rcArtifacts.id, name: rcArtifacts.name })
+    .from(rcArtifacts)
+    .where(and(eq(rcArtifacts.id, id), eq(rcArtifacts.orgId, orgId), eq(rcArtifacts.artifactType, 'docker_image')))
+    .limit(1);
+
+  if (!artifact) return c.json({ error: 'Image not found' }, 404);
+
+  const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
+  const job = await queue.add('registry.poll', { artifactId: artifact.id, orgId }, { jobId: `poll-manual-${artifact.id}-${Date.now()}` });
+
+  return c.json({ data: { jobId: job.id, status: 'queued' } }, 202);
 });
 
 // ---------------------------------------------------------------------------
@@ -595,9 +759,26 @@ registryRouter.delete('/images/:id', async (c) => {
       eq(rcArtifacts.orgId, orgId),
       eq(rcArtifacts.artifactType, 'docker_image'),
     ))
-    .returning({ id: rcArtifacts.id });
+    .returning({ id: rcArtifacts.id, name: rcArtifacts.name });
 
   if (!updated) return c.json({ error: 'Image not found' }, 404);
+
+  // Pause detections that reference this artifact by name
+  const paused = await db
+    .update(detections)
+    .set({ status: 'paused', updatedAt: new Date() })
+    .where(and(
+      eq(detections.orgId, orgId),
+      eq(detections.moduleId, 'registry'),
+      eq(detections.status, 'active'),
+      sql`${detections.config}->>'artifactName' = ${updated.name}`,
+    ))
+    .returning({ id: detections.id });
+
+  if (paused.length > 0) {
+    log.warn({ orgId, artifactName: updated.name, pausedCount: paused.length }, 'Docker image disabled — paused referencing detections');
+  }
+
   return c.json({ status: 'ok', id: updated.id });
 });
 
@@ -621,7 +802,50 @@ registryRouter.get('/packages', async (c) => {
     .limit(limit)
     .offset(offset);
 
-  return c.json({ data: artifacts.map(({ credentialsEncrypted, ...rest }) => ({ ...rest, hasCredentials: !!credentialsEncrypted })) });
+  const ids = artifacts.map((a) => a.id);
+
+  const [versionCounts, lastEvents, latestVersions, verificationStatuses] = ids.length > 0
+    ? await Promise.all([
+        db.select({ artifactId: rcArtifactVersions.artifactId, count: count() })
+          .from(rcArtifactVersions)
+          .where(inArray(rcArtifactVersions.artifactId, ids))
+          .groupBy(rcArtifactVersions.artifactId),
+        db.select({ artifactId: rcArtifactEvents.artifactId, lastEvent: sql<string>`max(${rcArtifactEvents.createdAt})::text` })
+          .from(rcArtifactEvents)
+          .where(inArray(rcArtifactEvents.artifactId, ids))
+          .groupBy(rcArtifactEvents.artifactId),
+        db.select({ artifactId: rcArtifactVersions.artifactId, version: sql<string>`max(${rcArtifactVersions.version})` })
+          .from(rcArtifactVersions)
+          .where(and(inArray(rcArtifactVersions.artifactId, ids), eq(rcArtifactVersions.status, 'active')))
+          .groupBy(rcArtifactVersions.artifactId),
+        db.select({
+          artifactId: rcVerifications.artifactId,
+          hasSig: sql<boolean>`bool_or(${rcVerifications.hasSignature})`,
+          hasProv: sql<boolean>`bool_or(${rcVerifications.hasProvenance})`,
+        })
+          .from(rcVerifications)
+          .where(inArray(rcVerifications.artifactId, ids))
+          .groupBy(rcVerifications.artifactId),
+      ])
+    : [[], [], [], []];
+
+  const countMap = new Map(versionCounts.map((v) => [v.artifactId, Number(v.count)]));
+  const eventMap = new Map(lastEvents.map((v) => [v.artifactId, v.lastEvent]));
+  const versionMap = new Map(latestVersions.map((v) => [v.artifactId, v.version]));
+  const verifyMap = new Map(verificationStatuses.map((v) => [v.artifactId, v.hasSig || v.hasProv ? 'verified' : 'unverified']));
+
+  return c.json({
+    data: artifacts.map(({ credentialsEncrypted, tagWatchPatterns, tagIgnorePatterns, ...rest }) => ({
+      ...rest,
+      tagPatterns: tagWatchPatterns as string[],
+      ignorePatterns: tagIgnorePatterns as string[],
+      tagCount: countMap.get(rest.id) ?? 0,
+      lastEvent: eventMap.get(rest.id) ?? null,
+      latestVersion: versionMap.get(rest.id) ?? null,
+      provenanceStatus: verifyMap.get(rest.id) ?? null,
+      hasCredentials: !!credentialsEncrypted,
+    })),
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -748,8 +972,37 @@ registryRouter.put('/packages/:id', async (c) => {
     .returning();
 
   if (!updated) return c.json({ error: 'Package not found' }, 404);
-  const { credentialsEncrypted: _creds, ...safeUpdated } = updated;
-  return c.json({ data: { ...safeUpdated, hasCredentials: !!_creds } });
+
+  if (updated.enabled) {
+    const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
+    await queue.add('registry.poll', { artifactId: updated.id, orgId }, { jobId: `poll-update-${updated.id}-${Date.now()}` });
+  }
+
+  const { credentialsEncrypted: _creds, tagWatchPatterns, tagIgnorePatterns, ...safeUpdated } = updated;
+  return c.json({ data: { ...safeUpdated, tagPatterns: tagWatchPatterns as string[], ignorePatterns: tagIgnorePatterns as string[], hasCredentials: !!_creds } });
+});
+
+// ---------------------------------------------------------------------------
+// POST /modules/registry/packages/:id/poll -- trigger an immediate poll
+// ---------------------------------------------------------------------------
+
+registryRouter.post('/packages/:id/poll', async (c) => {
+  const orgId = c.get('orgId');
+  if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+
+  const id = c.req.param('id')!;
+  const db = getDb();
+  const [artifact] = await db.select({ id: rcArtifacts.id, name: rcArtifacts.name })
+    .from(rcArtifacts)
+    .where(and(eq(rcArtifacts.id, id), eq(rcArtifacts.orgId, orgId), eq(rcArtifacts.artifactType, 'npm_package')))
+    .limit(1);
+
+  if (!artifact) return c.json({ error: 'Package not found' }, 404);
+
+  const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
+  const job = await queue.add('registry.poll', { artifactId: artifact.id, orgId }, { jobId: `poll-manual-${artifact.id}-${Date.now()}` });
+
+  return c.json({ data: { jobId: job.id, status: 'queued' } }, 202);
 });
 
 // ---------------------------------------------------------------------------
@@ -771,9 +1024,26 @@ registryRouter.delete('/packages/:id', async (c) => {
       eq(rcArtifacts.orgId, orgId),
       eq(rcArtifacts.artifactType, 'npm_package'),
     ))
-    .returning({ id: rcArtifacts.id });
+    .returning({ id: rcArtifacts.id, name: rcArtifacts.name });
 
   if (!updated) return c.json({ error: 'Package not found' }, 404);
+
+  // Pause detections that reference this artifact by name
+  const paused = await db
+    .update(detections)
+    .set({ status: 'paused', updatedAt: new Date() })
+    .where(and(
+      eq(detections.orgId, orgId),
+      eq(detections.moduleId, 'registry'),
+      eq(detections.status, 'active'),
+      sql`${detections.config}->>'artifactName' = ${updated.name}`,
+    ))
+    .returning({ id: detections.id });
+
+  if (paused.length > 0) {
+    log.warn({ orgId, artifactName: updated.name, pausedCount: paused.length }, 'npm package disabled — paused referencing detections');
+  }
+
   return c.json({ status: 'ok', id: updated.id });
 });
 
@@ -830,6 +1100,17 @@ registryRouter.post('/npm-orgs/import', async (c) => {
     } catch (err) {
       log.debug({ err, packageName: pkg.name }, 'Failed to import npm package');
       skipped++;
+    }
+  }
+
+  // Enqueue poll jobs for all newly imported packages
+  if (importedNames.length > 0) {
+    const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
+    const inserted = await db.select({ id: rcArtifacts.id })
+      .from(rcArtifacts)
+      .where(and(eq(rcArtifacts.orgId, orgId), inArray(rcArtifacts.name, importedNames)));
+    for (const row of inserted) {
+      await queue.add('registry.poll', { artifactId: row.id, orgId }, { jobId: `poll-import-${row.id}-${Date.now()}` });
     }
   }
 
@@ -893,6 +1174,11 @@ registryRouter.post('/images/:id/credentials', async (c) => {
     .returning({ id: rcArtifacts.id });
 
   if (!updated) return c.json({ error: 'Image not found' }, 404);
+
+  // Re-poll immediately with new credentials
+  const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
+  await queue.add('registry.poll', { artifactId: updated.id, orgId }, { jobId: `poll-creds-${updated.id}-${Date.now()}` });
+
   return c.json({ ok: true });
 });
 
@@ -959,6 +1245,10 @@ registryRouter.post('/packages/:id/credentials', async (c) => {
     .returning({ id: rcArtifacts.id });
 
   if (!updated) return c.json({ error: 'Package not found' }, 404);
+
+  const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
+  await queue.add('registry.poll', { artifactId: updated.id, orgId }, { jobId: `poll-creds-${updated.id}-${Date.now()}` });
+
   return c.json({ ok: true });
 });
 

@@ -139,8 +139,14 @@ export function hmacSign(payload: string, secret: string): string {
 
 /**
  * Timing-safe comparison of two strings.
+ *
+ * Both inputs are hashed with SHA-256 before comparison so that
+ * (1) the buffers are always equal length (32 bytes) and
+ * (2) we never leak the secret's length via an early return.
+ * This is the same approach used by Django, Rails, and other frameworks.
  */
 export function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  const ha = crypto.createHash('sha256').update(a).digest();
+  const hb = crypto.createHash('sha256').update(b).digest();
+  return crypto.timingSafeEqual(ha, hb);
 }

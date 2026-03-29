@@ -224,17 +224,25 @@ export default function PackageDetailPage() {
   async function pollNow() {
     setPollLoading(true);
     try {
-      await apiFetch(`/modules/registry/packages/${id}`, {
-        method: "PUT",
+      await apiFetch(`/modules/registry/packages/${id}/poll`, {
+        method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
       });
-      toast("Poll queued. Results will appear shortly.");
-      setTimeout(() => fetchDetail(), 2000);
+      toast("Poll queued.");
+      const pollInterval = setInterval(async () => {
+        try {
+          await fetchDetail();
+        } catch { /* ignore */ }
+      }, 3000);
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        setPollLoading(false);
+      }, 60_000);
+      setTimeout(async () => {
+        await fetchDetail();
+      }, 2000);
     } catch (err) {
       toast(err instanceof Error ? `Failed: ${err.message}` : "Poll failed");
-    } finally {
       setPollLoading(false);
     }
   }

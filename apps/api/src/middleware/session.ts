@@ -131,7 +131,12 @@ export async function destroySession(c: AuthContext) {
   const sid = getCookie(c, SESSION_COOKIE);
   if (sid) {
     await db.delete(sessions).where(eq(sessions.sid, sid));
-    deleteCookie(c, SESSION_COOKIE);
+    deleteCookie(c, SESSION_COOKIE, {
+      path: '/',
+      httpOnly: true,
+      secure: process.env.NODE_ENV !== 'development',
+      sameSite: 'Lax',
+    });
   }
 }
 

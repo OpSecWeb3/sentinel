@@ -64,6 +64,15 @@ export const ABSENCE_PREFIX = 'sentinel:corr:absence';
  */
 export const ABSENCE_INDEX_KEY = 'sentinel:corr:absence:index';
 
+/**
+ * Redis key prefix for cross-process cache invalidation version counters.
+ * The API increments `sentinel:corr:version:<orgId>` on every CRUD operation;
+ * the worker checks this before using cached rules, so stale cache entries
+ * are detected and refreshed immediately rather than waiting for the full
+ * 30-second TTL.
+ */
+export const CORR_VERSION_PREFIX = 'sentinel:corr:version';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -204,6 +213,8 @@ export interface CorrelationEvaluationResult {
 interface CacheEntry {
   rules: CorrelationRuleRow[];
   fetchedAt: number;
+  /** Redis version counter at the time rules were fetched. */
+  version: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +304,31 @@ export class CorrelationEngine {
   async loadRules(orgId: string): Promise<CorrelationRuleRow[]> {
     const cached = moduleRuleCache.get(orgId);
     if (cached && Date.now() - cached.fetchedAt < RULE_CACHE_TTL_MS) {
-      return cached.rules;
+      // Check the cross-process version counter. If the API bumped it since
+      // we last fetched, our cached rules are stale and must be refreshed.
+      try {
+        const versionStr = await this.redis.get(`${CORR_VERSION_PREFIX}:${orgId}`);
+        const currentVersion = versionStr ? parseInt(versionStr, 10) : 0;
+        if (currentVersion === cached.version) {
+          return cached.rules;
+        }
+        this.log.debug({ orgId, cachedVersion: cached.version, currentVersion }, 'Correlation rule cache version mismatch — refreshing');
+      } catch {
+        // If Redis is unreachable, fall through to a DB refresh rather than
+        // serving potentially stale data.
+      }
+    }
+
+    // Read the current version counter BEFORE querying the DB so that a
+    // concurrent API write that lands between our GET and SELECT is not
+    // missed — the next loadRules call will see the bumped version.
+    let version = 0;
+    try {
+      const versionStr = await this.redis.get(`${CORR_VERSION_PREFIX}:${orgId}`);
+      version = versionStr ? parseInt(versionStr, 10) : 0;
+    } catch {
+      // If Redis is down the version stays 0; the cache will always be
+      // treated as stale (safe default).
     }
 
     const rows = await this.db
@@ -307,7 +342,7 @@ export class CorrelationEngine {
       )
       .orderBy(asc(correlationRules.name));
 
-    moduleRuleCache.set(orgId, { rules: rows as CorrelationRuleRow[], fetchedAt: Date.now() });
+    moduleRuleCache.set(orgId, { rules: rows as CorrelationRuleRow[], fetchedAt: Date.now(), version });
     return rows as CorrelationRuleRow[];
   }
 

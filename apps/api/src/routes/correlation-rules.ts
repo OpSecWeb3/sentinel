@@ -95,6 +95,16 @@ router.post('/', requireRole('admin', 'editor'), requireScope('api:write'), vali
     details: { name: rule.name, type: body.config.type },
   });
 
+  // Bump the cross-process cache invalidation version so workers pick up
+  // the new rule without waiting for the 30-second rule cache TTL to expire.
+  try {
+    const redis = getSharedRedis();
+    await redis.incr(`sentinel:corr:version:${orgId}`);
+  } catch (err) {
+    const reqLogger = c.get('logger');
+    reqLogger.error({ err }, 'Failed to bump correlation rule cache version');
+  }
+
   return c.json({ data: rule }, 201);
 });
 
@@ -223,6 +233,38 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
     .where(and(eq(correlationRules.id, id), eq(correlationRules.orgId, orgId)))
     .returning();
 
+  // Clean up stale Redis instances when config-affecting fields change.
+  // Old in-flight instances have state from the previous config (step order,
+  // window, thresholds) and cannot be meaningfully continued.
+  const configAffectingFields = ['config', 'status'];
+  const needsRedisCleanup = configAffectingFields.some((f) => f in updateSet);
+  if (needsRedisCleanup) {
+    try {
+      const redis = getSharedRedis();
+      let cursor = '0';
+      do {
+        const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `sentinel:corr:*:${id}:*`, 'COUNT', 100);
+        cursor = nextCursor;
+        if (keys.length > 0) {
+          await redis.del(...keys);
+        }
+      } while (cursor !== '0');
+    } catch (err) {
+      const reqLogger = c.get('logger');
+      reqLogger.error({ err, correlationRuleId: id }, 'Failed to clean up Redis instances on update');
+    }
+  }
+
+  // Bump the cross-process cache invalidation version so workers pick up
+  // the change without waiting for the 30-second rule cache TTL to expire.
+  try {
+    const redis = getSharedRedis();
+    await redis.incr(`sentinel:corr:version:${orgId}`);
+  } catch (err) {
+    const reqLogger = c.get('logger');
+    reqLogger.error({ err }, 'Failed to bump correlation rule cache version');
+  }
+
   // Audit log
   await db.insert(auditLog).values({
     orgId,
@@ -285,6 +327,16 @@ router.delete('/:id', requireRole('admin'), requireScope('api:write'), validate(
   } catch (err) {
     const reqLogger = c.get('logger');
     reqLogger.error({ err, correlationRuleId: id }, 'Failed to clean up Redis instances');
+  }
+
+  // Bump the cross-process cache invalidation version so workers pick up
+  // the deletion without waiting for the 30-second rule cache TTL to expire.
+  try {
+    const redis = getSharedRedis();
+    await redis.incr(`sentinel:corr:version:${orgId}`);
+  } catch (err) {
+    const reqLogger = c.get('logger');
+    reqLogger.error({ err }, 'Failed to bump correlation rule cache version');
   }
 
   return c.json({ data: { id: result.id, name: result.name, status: 'deleted' } });

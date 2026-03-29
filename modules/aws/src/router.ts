@@ -7,10 +7,14 @@ import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
 import { getDb, eq, and, desc, count, sql } from '@sentinel/db';
 import { awsIntegrations, awsRawEvents } from '@sentinel/db/schema/aws';
+import { detections } from '@sentinel/db/schema/core';
 import { encrypt } from '@sentinel/shared/crypto';
 import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
+import { logger as rootLogger } from '@sentinel/shared/logger';
 import type { AppEnv } from '@sentinel/shared/hono-types';
 import { templates } from './templates/index.js';
+
+const log = rootLogger.child({ component: 'aws-router' });
 
 export const awsRouter = new Hono<AppEnv>();
 
@@ -137,6 +141,12 @@ awsRouter.post('/integrations', async (c) => {
     createdAt: awsIntegrations.createdAt,
   });
 
+  // Trigger initial SQS poll
+  if (row.id) {
+    const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
+    await queue.add('aws.sqs.poll', { integrationId: row.id, orgId }, { jobId: `aws-poll-init-${row.id}-${Date.now()}` });
+  }
+
   return c.json({ data: row }, 201);
 });
 
@@ -237,7 +247,13 @@ awsRouter.patch('/integrations/:id', async (c) => {
     }));
   }
 
-  await db.update(awsIntegrations).set(updates).where(eq(awsIntegrations.id, id));
+  await db.update(awsIntegrations).set(updates).where(and(eq(awsIntegrations.id, id), eq(awsIntegrations.orgId, orgId)));
+
+  // Trigger a poll so config changes take effect immediately
+  if (updates.enabled !== false) {
+    const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
+    await queue.add('aws.sqs.poll', { integrationId: id, orgId }, { jobId: `aws-poll-update-${id}-${Date.now()}` });
+  }
 
   return c.json({ ok: true });
 });
@@ -253,11 +269,38 @@ awsRouter.delete('/integrations/:id', async (c) => {
   const { id } = c.req.param();
   const db = getDb();
 
+  // Clean up any pending poll jobs before deleting
+  const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
+  const repeatableJobs = await queue.getRepeatableJobs();
+  for (const rj of repeatableJobs) {
+    if (rj.id?.includes(id)) {
+      await queue.removeRepeatableByKey(rj.key);
+    }
+  }
+
   const result = await db.delete(awsIntegrations)
     .where(and(eq(awsIntegrations.id, id), eq(awsIntegrations.orgId, orgId)));
 
   if ((result as unknown as { rowCount: number }).rowCount === 0) {
     throw new HTTPException(404, { message: 'Integration not found' });
+  }
+
+  // If this was the last active integration, pause all AWS detections for the org
+  const [remaining] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(awsIntegrations)
+    .where(and(eq(awsIntegrations.orgId, orgId), eq(awsIntegrations.enabled, true)));
+
+  if ((remaining?.total ?? 0) === 0) {
+    const paused = await db
+      .update(detections)
+      .set({ status: 'paused', updatedAt: new Date() })
+      .where(and(eq(detections.orgId, orgId), eq(detections.moduleId, 'aws'), eq(detections.status, 'active')))
+      .returning({ id: detections.id });
+
+    if (paused.length > 0) {
+      log.warn({ orgId, pausedCount: paused.length }, 'Last active AWS integration deleted — paused all AWS detections');
+    }
   }
 
   return c.json({ ok: true });

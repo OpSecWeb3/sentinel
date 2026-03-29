@@ -460,20 +460,16 @@ export default function PackagesPage() {
   /* -- poll now ------------------------------------------------------ */
 
   async function pollNow(pkg: MonitoredPackage) {
+    if (!pkg.id) return;
     const key = `poll-${pkg.name}`;
     setActionLoading((prev) => ({ ...prev, [key]: true }));
     try {
-      await apiFetch("/modules/registry/packages", {
+      await apiFetch(`/modules/registry/packages/${pkg.id}/poll`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: pkg.name,
-          tagPatterns: pkg.tagPatterns,
-          pollIntervalSeconds: pkg.pollIntervalSeconds,
-        }),
       });
       toast(`Poll queued for ${pkg.name}.`);
+      setTimeout(fetchPackages, 4000);
     } catch (err) {
       toast(
         err instanceof Error ? `Failed: ${err.message}` : "Poll failed",

@@ -373,6 +373,75 @@ export const blockProcessHandler: JobHandler = {
     }
 
     // -----------------------------------------------------------------------
+    // Process transactions for contract creation (to === null)
+    // -----------------------------------------------------------------------
+    if (transactions && transactions.length > 0) {
+      // Contract-creation rules have matchContractCreation:true but no eventSignature,
+      // so they were filtered out by loadActiveEventRules (which requires topic0).
+      // Query them directly.
+      const creationRuleRows = await db
+        .select({
+          id: rules.id,
+          detectionId: rules.detectionId,
+          orgId: rules.orgId,
+          config: rules.config,
+          channelIds: detections.channelIds,
+        })
+        .from(rules)
+        .innerJoin(detections, eq(detections.id, rules.detectionId))
+        .where(
+          and(
+            eq(rules.moduleId, 'chain'),
+            eq(rules.status, 'active'),
+            eq(detections.status, 'active'),
+            eq(rules.ruleType, RULE_TYPE.EVENT_MATCH),
+            sql`(${rules.config}->>'matchContractCreation')::boolean = true`,
+          ),
+        );
+
+      // Filter to this network
+      const networkCreationRules = creationRuleRows.filter((r) => {
+        const cfg = r.config as Record<string, unknown>;
+        const cfgNetworkId = cfg.networkId !== undefined ? Number(cfg.networkId) : undefined;
+        return cfgNetworkId === undefined || cfgNetworkId === chainId;
+      });
+
+      if (networkCreationRules.length > 0) {
+        for (const tx of transactions) {
+          if (tx.to !== null && tx.to !== undefined) continue; // only contract creation
+
+          for (const rule of networkCreationRules) {
+            const cfg = rule.config as Record<string, unknown>;
+            const fromAddress = (cfg.fromAddress as string)?.toLowerCase();
+
+            // Optional address filter: only alert on deployments from a specific address
+            if (fromAddress && tx.from.toLowerCase() !== fromAddress) continue;
+
+            const matchedInput: MatchedEventInput = {
+              ruleId: rule.id,
+              detectionId: rule.detectionId,
+              orgId: rule.orgId,
+              networkSlug,
+              chainId,
+              blockNumber,
+              blockTimestamp: null,
+              transactionHash: tx.hash,
+              logIndex: null,
+              contractAddress: '',
+              eventName: 'ContractCreation',
+              eventArgs: { from: tx.from, input: tx.input?.slice(0, 20) ?? '', value: tx.value },
+              matchType: RULE_TYPE.EVENT_MATCH,
+              channelIds: rule.channelIds as string[],
+            };
+
+            const normalized = normalizeMatchedEvent(matchedInput);
+            allNormalizedValues.push({ normalized, rule: rule as any, matchedInput });
+          }
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
     // Process transactions for function-call-match rules
     // -----------------------------------------------------------------------
     if (fnCallRules.length > 0 && transactions && transactions.length > 0) {

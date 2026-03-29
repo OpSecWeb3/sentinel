@@ -224,18 +224,29 @@ export default function ImageDetailPage() {
   async function pollNow() {
     setPollLoading(true);
     try {
-      await apiFetch(`/modules/registry/images/${id}`, {
-        method: "PUT",
+      await apiFetch(`/modules/registry/images/${id}/poll`, {
+        method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
       });
-      toast("Poll queued. Results will appear shortly.");
-      // Refresh after short delay to pick up any fast results
-      setTimeout(() => fetchDetail(), 2000);
+      toast("Poll queued.");
+      // Poll until lastPolledAt changes
+      const before = artifact?.lastPolledAt;
+      const pollInterval = setInterval(async () => {
+        try {
+          await fetchDetail();
+        } catch { /* ignore */ }
+      }, 3000);
+      // Stop after 60s
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        setPollLoading(false);
+      }, 60_000);
+      // Also check immediately to catch fast polls
+      setTimeout(async () => {
+        await fetchDetail();
+      }, 2000);
     } catch (err) {
       toast(err instanceof Error ? `Failed: ${err.message}` : "Poll failed");
-    } finally {
       setPollLoading(false);
     }
   }

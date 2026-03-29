@@ -21,6 +21,7 @@ const ALLOWED_TABLES: ReadonlySet<string> = new Set([
   'alerts',
   'notification_deliveries',
   'sessions',
+  'aws_raw_events',
 ]);
 
 /**

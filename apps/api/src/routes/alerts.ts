@@ -156,7 +156,7 @@ router.get('/stats', requireScope('api:read'), async (c) => {
       title: alerts.title,
       createdAt: alerts.createdAt,
       detectionName: sql<string | null>`(
-        SELECT name FROM detections WHERE detections.id = ${alerts.detectionId}
+        SELECT name FROM detections WHERE detections.id = ${alerts.detectionId} AND detections.org_id = ${alerts.orgId}
       )`.as('detection_name'),
     }).from(alerts)
       .where(eq(alerts.orgId, orgId))
@@ -183,7 +183,7 @@ router.get('/:id', requireScope('api:read'), validate('param', idParamSchema), a
   const [alert] = await db.select({
     alert: alerts,
     detectionName: sql<string | null>`(
-      SELECT name FROM detections WHERE detections.id = ${alerts.detectionId}
+      SELECT name FROM detections WHERE detections.id = ${alerts.detectionId} AND detections.org_id = ${alerts.orgId}
     )`.as('detection_name'),
   })
     .from(alerts)

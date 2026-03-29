@@ -5,8 +5,9 @@
  * polling (lastPolledAt IS NULL OR lastPolledAt + pollIntervalSeconds has
  * elapsed), then enqueues a registry.poll job for each one.
  *
- * Using jobId: `poll-${artifact.id}` prevents duplicate concurrent polls for
- * the same artifact — BullMQ will deduplicate by jobId within a queue.
+ * Uses a timestamped jobId `poll-${artifact.id}-${Date.now()}` to ensure each
+ * sweep cycle can enqueue a fresh job — static jobIds were silently deduped
+ * against completed jobs retained in Redis, causing missed poll cycles.
  */
 import type { Job } from 'bullmq';
 import { getDb, sql } from '@sentinel/db';
@@ -101,7 +102,7 @@ export const pollSweepHandler: JobHandler = {
         await moduleJobsQueue.add(
           'registry.poll',
           { artifact: monitoredArtifact },
-          { jobId: `poll-${artifact.id}` },
+          { jobId: `poll-${artifact.id}-${Date.now()}` },
         );
         log.debug({ artifactId: artifact.id, name: artifact.name }, 'Enqueued poll job');
       } catch (err) {

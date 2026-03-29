@@ -267,12 +267,13 @@ export default function InfraHostsPage() {
   async function discoverHost(host: Host) {
     setActionLoading((prev) => ({ ...prev, [`discover-${host.id}`]: true }));
     try {
-      const res = await apiFetch<{ data: { discovered: number; newHosts: number } }>(
+      const res = await apiFetch<{ data: { discovered: number; newHosts: number; truncated?: boolean; totalFound?: number } }>(
         `/modules/infra/hosts/${host.id}/discover`,
         { method: "POST", credentials: "include" },
       );
+      const truncMsg = res.data.truncated ? ` (capped — ${res.data.totalFound} total found)` : '';
       toast(
-        `Discovered ${res.data.discovered} subdomains (${res.data.newHosts} new)`,
+        `Discovered ${res.data.discovered} subdomains (${res.data.newHosts} new)${truncMsg}`,
       );
       if (res.data.newHosts > 0) fetchHosts();
     } catch (err) {

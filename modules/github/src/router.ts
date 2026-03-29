@@ -7,8 +7,9 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import crypto, { createHmac, timingSafeEqual } from 'node:crypto';
-import { getDb } from '@sentinel/db';
+import { getDb, sql } from '@sentinel/db';
 import { githubInstallations, githubRepositories } from '@sentinel/db/schema/github';
+import { detections } from '@sentinel/db/schema/core';
 import { eq, and } from '@sentinel/db';
 import { decrypt, encrypt, generateApiKey } from '@sentinel/shared/crypto';
 import { env } from '@sentinel/shared/env';
@@ -502,6 +503,26 @@ githubRouter.delete('/installations/:id', async (c) => {
     .returning({ id: githubInstallations.id });
 
   if (!result) return c.json({ error: 'Installation not found' }, 404);
+
+  // If this was the last active installation, pause all GitHub detections for the org
+  const [remaining] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(githubInstallations)
+    .where(and(eq(githubInstallations.orgId, orgId), eq(githubInstallations.status, 'active')));
+
+  if ((remaining?.total ?? 0) === 0) {
+    const paused = await db
+      .update(detections)
+      .set({ status: 'paused', updatedAt: new Date() })
+      .where(and(eq(detections.orgId, orgId), eq(detections.moduleId, 'github'), eq(detections.status, 'active')))
+      .returning({ id: detections.id });
+
+    if (paused.length > 0) {
+      const reqLog = c.get('logger');
+      reqLog.warn({ orgId, pausedCount: paused.length }, 'Last active GitHub installation removed — paused all GitHub detections');
+    }
+  }
+
   return c.json({ data: { id: result.id, status: 'removed' } });
 });
 
@@ -525,7 +546,14 @@ githubRouter.get('/repositories', async (c) => {
     .limit(query.limit)
     .offset(query.offset);
 
-  return c.json({ data: repos, limit: query.limit, offset: query.offset });
+  return c.json({
+    data: repos.map(({ lastSyncedAt, ...rest }) => ({
+      ...rest,
+      syncedAt: lastSyncedAt?.toISOString() ?? null,
+    })),
+    limit: query.limit,
+    offset: query.offset,
+  });
 });
 
 // POST /modules/github/installations/:id/sync — trigger a filtered repo sync
@@ -547,7 +575,12 @@ githubRouter.post('/installations/:id/sync', bodyLimit({ maxSize: 1 * 1024 * 102
 
   if (!installation) return c.json({ error: 'Installation not found' }, 404);
 
-  // Fix #8: Use installationId-based jobId to deduplicate concurrent sync requests
+  // Fix #8: Use installationId-based jobId to deduplicate concurrent sync requests.
+  // The jobId is deterministic per installation so BullMQ silently drops a second
+  // add while a sync for the same installation is already waiting or active.
+  // removeOnComplete: true ensures the jobId is freed once the job finishes,
+  // allowing future syncs to be enqueued (the queue-level removeOnComplete
+  // retains a count of 200 which would block reuse of the same jobId).
   const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
   const job = await queue.add('github.repo.sync', {
     installationId: installation.id,
@@ -555,6 +588,7 @@ githubRouter.post('/installations/:id/sync', bodyLimit({ maxSize: 1 * 1024 * 102
     options: body,
   }, {
     jobId: `gh-repo-sync-${installation.id}`,
+    removeOnComplete: true,
   });
 
   return c.json({ data: { jobId: job.id, status: 'queued' } }, 202);

@@ -20,21 +20,19 @@ export async function notifyKeyMiddleware(c: AuthContext, next: Next) {
   if (!auth?.startsWith(`Bearer ${NOTIFY_KEY_PREFIX}`)) return next();
 
   const rawKey = auth.slice(7); // Remove "Bearer "
-  const prefix = rawKey.slice(0, NOTIFY_KEY_PREFIX.length + 8);
+  const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
 
   try {
     const db = getDb();
 
-    // Prefix lookup for fast filtering
+    // Look up by hash directly — avoids prefix-collision issues where two
+    // orgs sharing the same 8-char prefix caused LIMIT 1 to return the wrong row.
     const [org] = await db.select({ id: organizations.id, notifyKeyHash: organizations.notifyKeyHash })
       .from(organizations)
-      .where(eq(organizations.notifyKeyPrefix, prefix))
+      .where(eq(organizations.notifyKeyHash, keyHash))
       .limit(1);
 
     if (!org?.notifyKeyHash) throw new HTTPException(401, { message: 'Invalid notify key' });
-
-    // Full hash verify (timing-safe comparison)
-    const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
     const hashBuffer = Buffer.from(keyHash, 'hex');
     const storedBuffer = Buffer.from(org.notifyKeyHash, 'hex');
     if (hashBuffer.length !== storedBuffer.length || !crypto.timingSafeEqual(hashBuffer, storedBuffer)) {

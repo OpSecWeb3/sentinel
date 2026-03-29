@@ -6,7 +6,7 @@
 import { UnrecoverableError } from 'bullmq';
 import type { Job } from 'bullmq';
 import { z } from 'zod';
-import { getDb, count, eq } from '@sentinel/db';
+import { getDb, count, eq, and } from '@sentinel/db';
 import { events, alerts, detections } from '@sentinel/db/schema/core';
 import { correlationRules } from '@sentinel/db/schema/correlation';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
@@ -70,7 +70,7 @@ export function createEventProcessingHandler(
       const [{ activeRuleCount }] = await db
         .select({ activeRuleCount: count() })
         .from(correlationRules)
-        .where(eq(correlationRules.orgId, event.orgId));
+        .where(and(eq(correlationRules.orgId, event.orgId), eq(correlationRules.status, 'active')));
       if (activeRuleCount > 0) {
         await correlationQueue.add('correlation.evaluate', { eventId: event.id });
       }
@@ -124,6 +124,7 @@ export function createEventProcessingHandler(
           });
         } catch (err) {
           _log.error({ err, eventId: event.id, candidateCount: result.candidates.length }, 'Alert batch insert failed — transaction rolled back');
+          throw err; // Re-throw so BullMQ retries the job (transaction is atomic, so retry is safe)
         }
 
         // Enqueue dispatch outside the transaction so queue writes are not
