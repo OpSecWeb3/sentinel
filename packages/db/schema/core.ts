@@ -69,7 +69,7 @@ export const apiKeys = pgTable('api_keys', {
   name: text('name').notNull(),
   keyHash: text('key_hash').notNull(),
   keyPrefix: text('key_prefix').notNull(),
-  scopes: jsonb('scopes').notNull().default(['read']),
+  scopes: jsonb('scopes').notNull().default(['api:read']),
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
   revoked: boolean('revoked').notNull().default(false),
@@ -206,7 +206,7 @@ export const slackInstallations = pgTable('slack_installations', {
   teamName: text('team_name').notNull(),
   botToken: text('bot_token').notNull(),
   botUserId: text('bot_user_id').notNull(),
-  installedBy: uuid('installed_by').notNull().references(() => users.id),
+  installedBy: uuid('installed_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt,
   updatedAt,
 }, (t) => [

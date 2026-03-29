@@ -26,6 +26,8 @@ const mainNav: NavItem[] = [
   { title: "dashboard", href: "/dashboard", icon: "~" },
   { title: "detections", href: "/detections", icon: "!" },
   { title: "correlations", href: "/correlations", icon: "#" },
+  { title: "alerts", href: "/alerts", icon: "*" },
+  { title: "channels", href: "/channels", icon: ">" },
 ];
 
 const moduleNav: ModuleNavItem[] = [

@@ -20,10 +20,15 @@ async function handleResponse<T>(res: Response): Promise<T> {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     const message = body.error ?? body.message ?? res.statusText;
 
-    if (res.status === 401) {
-      // Only redirect to login on session expiry (i.e. not on auth pages themselves)
-      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login") && !window.location.pathname.startsWith("/register")) {
-        const next = encodeURIComponent(window.location.pathname + window.location.search);
+    if (res.status === 401 && typeof window !== "undefined") {
+      // Browser only: redirect on session expiry. Server Components have no window — skip redirect and throw below.
+      if (
+        !window.location.pathname.startsWith("/login") &&
+        !window.location.pathname.startsWith("/register")
+      ) {
+        const next = encodeURIComponent(
+          window.location.pathname + window.location.search,
+        );
         window.location.href = `/login?next=${next}`;
       }
     }

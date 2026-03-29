@@ -242,6 +242,14 @@ awsRouter.patch('/integrations/:id', async (c) => {
   if (d.roleArn !== undefined) updates.roleArn = d.roleArn;
   if (d.externalId !== undefined) updates.externalId = d.externalId;
 
+  const hasAccessKeyId = d.accessKeyId !== undefined;
+  const hasSecretAccessKey = d.secretAccessKey !== undefined;
+  if (hasAccessKeyId !== hasSecretAccessKey) {
+    throw new HTTPException(400, {
+      message: 'accessKeyId and secretAccessKey must both be provided when updating credentials',
+    });
+  }
+
   if (d.accessKeyId && d.secretAccessKey) {
     updates.credentialsEncrypted = encrypt(JSON.stringify({
       accessKeyId: d.accessKeyId,

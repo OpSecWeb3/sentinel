@@ -17,3 +17,6 @@ apps/web/out/
 # Claude Code
 .claude/
 memory/
+
+# Generated reports
+docs/BUG-REPORT.md

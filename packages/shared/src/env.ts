@@ -65,7 +65,10 @@ const envSchema = z.object({
   // Required when running off-AWS with IAM user creds. The bootstrap IAM user
   // assumes this role first; the role then assumes customer cross-account roles.
   // When running on AWS with an instance profile, leave unset.
-  AWS_SENTINEL_ROLE_ARN: z.string().startsWith('arn:aws:iam::').optional(),
+  AWS_SENTINEL_ROLE_ARN: z
+    .string()
+    .regex(/^arn:aws(-us-gov|-cn)?:iam::\d{12}:role\/.+$/, 'Must be a valid IAM role ARN')
+    .optional(),
 
   // Observability (optional)
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),

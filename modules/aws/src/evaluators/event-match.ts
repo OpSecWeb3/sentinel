@@ -30,6 +30,8 @@ const configSchema = z.object({
   errorCodes: z.array(z.string()).default([]),
   // AWS regions to watch (empty = all)
   regions: z.array(z.string()).default([]),
+  // Severity to use for the alert
+  severity: z.enum(['low', 'medium', 'high', 'critical']).default('high'),
   // Alert title template (supports {{eventName}}, {{principalId}}, {{awsRegion}})
   alertTitle: z.string().default('AWS CloudTrail: {{eventName}} by {{principalId}}'),
 });
@@ -101,6 +103,20 @@ export const eventMatchEvaluator: RuleEvaluator = {
       help: 'Limit to specific AWS regions. Leave empty for all regions.',
     },
     {
+      key: 'severity',
+      label: 'Alert severity',
+      type: 'select',
+      required: false,
+      default: 'high',
+      options: [
+        { value: 'low', label: 'Low' },
+        { value: 'medium', label: 'Medium' },
+        { value: 'high', label: 'High' },
+        { value: 'critical', label: 'Critical' },
+      ],
+      help: 'Severity for alerts when this rule matches.',
+    },
+    {
       key: 'alertTitle',
       label: 'Alert title',
       type: 'text',
@@ -156,7 +172,7 @@ export const eventMatchEvaluator: RuleEvaluator = {
       detectionId: rule.detectionId,
       ruleId: rule.id,
       eventId: event.id,
-      severity: rule.config?.severity as 'low' | 'medium' | 'high' | 'critical' ?? 'medium',
+      severity: config.severity,
       title,
       description,
       triggerType: 'immediate',

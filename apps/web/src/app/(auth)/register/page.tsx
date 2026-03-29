@@ -109,10 +109,16 @@ export default function RegisterPage() {
       </div>
 
       {/* Mode toggle */}
-      <div className="flex items-center gap-3 text-xs">
+      <div
+        className="flex items-center gap-3 text-xs"
+        role="tablist"
+        aria-label="Registration mode"
+      >
         <span className="text-muted-foreground">mode</span>
         <button
           type="button"
+          role="tab"
+          aria-pressed={mode === "first-user"}
           onClick={() => setMode("first-user")}
           className={
             mode === "first-user"
@@ -124,6 +130,8 @@ export default function RegisterPage() {
         </button>
         <button
           type="button"
+          role="tab"
+          aria-pressed={mode === "invite"}
           onClick={() => setMode("invite")}
           className={
             mode === "invite"
@@ -141,10 +149,14 @@ export default function RegisterPage() {
 
       <div className="space-y-3">
         <div>
-          <label className="mb-1 block text-xs text-primary">
+          <label
+            htmlFor="register-username"
+            className="mb-1 block text-xs text-primary"
+          >
             username
           </label>
           <Input
+            id="register-username"
             type="text"
             placeholder="username"
             value={username}
@@ -156,10 +168,14 @@ export default function RegisterPage() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-primary">
+          <label
+            htmlFor="register-email"
+            className="mb-1 block text-xs text-primary"
+          >
             email
           </label>
           <Input
+            id="register-email"
             type="email"
             placeholder="you@example.com"
             value={email}
@@ -170,10 +186,14 @@ export default function RegisterPage() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-primary">
+          <label
+            htmlFor="register-password"
+            className="mb-1 block text-xs text-primary"
+          >
             password
           </label>
           <Input
+            id="register-password"
             type="password"
             placeholder="min 8 characters"
             value={password}
@@ -186,10 +206,14 @@ export default function RegisterPage() {
 
         {mode === "first-user" ? (
           <div>
-            <label className="mb-1 block text-xs text-primary">
+            <label
+              htmlFor="register-org-name"
+              className="mb-1 block text-xs text-primary"
+            >
               org name
             </label>
             <Input
+              id="register-org-name"
               type="text"
               placeholder="My Organisation"
               value={orgName}
@@ -202,10 +226,14 @@ export default function RegisterPage() {
           </div>
         ) : (
           <div>
-            <label className="mb-1 block text-xs text-primary">
+            <label
+              htmlFor="register-invite-secret"
+              className="mb-1 block text-xs text-primary"
+            >
               invite secret
             </label>
             <Input
+              id="register-invite-secret"
               type="text"
               placeholder="paste invite secret"
               value={inviteSecret}

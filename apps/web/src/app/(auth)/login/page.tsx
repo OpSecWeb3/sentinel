@@ -70,10 +70,14 @@ function LoginPageInner() {
 
       <div className="space-y-3">
         <div>
-          <label className="mb-1 block text-xs text-primary">
+          <label
+            htmlFor="username"
+            className="mb-1 block text-xs text-primary"
+          >
             username
           </label>
           <Input
+            id="username"
             type="text"
             placeholder="username or email"
             value={username}
@@ -85,10 +89,14 @@ function LoginPageInner() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-primary">
+          <label
+            htmlFor="password"
+            className="mb-1 block text-xs text-primary"
+          >
             password
           </label>
           <Input
+            id="password"
             type="password"
             placeholder="********"
             value={password}

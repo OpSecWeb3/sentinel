@@ -3,7 +3,7 @@ import argon2 from 'argon2';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { getDb } from '@sentinel/db';
-import { users, organizations, orgMemberships, apiKeys } from '@sentinel/db/schema/core';
+import { users, organizations, orgMemberships, apiKeys, auditLog } from '@sentinel/db/schema/core';
 import { eq, or, and, sql } from '@sentinel/db';
 import { getCookie } from 'hono/cookie';
 import { generateApiKey, generateInviteSecret, hashInviteSecret, decrypt } from '@sentinel/shared/crypto';
@@ -311,6 +311,11 @@ auth.post('/api-keys', requireAuth, requireOrg, requireScope('api:write'), async
     orgId, userId, name, keyHash: hash, keyPrefix: prefix, scopes, expiresAt,
   }).returning();
 
+  db.insert(auditLog).values({
+    orgId, userId, action: 'api_key.created', resourceType: 'api_key',
+    resourceId: key.id, details: { name, scopes },
+  }).catch(() => {});
+
   return c.json({
     id: key.id, name: key.name, prefix: key.keyPrefix, scopes: key.scopes,
     expiresAt: key.expiresAt, createdAt: key.createdAt,
@@ -335,15 +340,27 @@ auth.get('/api-keys', requireAuth, requireOrg, requireScope('api:read'), async (
 auth.delete('/api-keys/:id', requireAuth, requireOrg, requireScope('api:write'), async (c) => {
   const orgId = c.get('orgId')!;
   const userId = c.get('userId')!;
+  const role = c.get('role');
   const keyId = c.req.param('id')!;
   const db = getDb();
 
+  // Admins can revoke any key in the org; regular users can only revoke their own.
+  const whereClause = role === 'admin'
+    ? and(eq(apiKeys.id, keyId), eq(apiKeys.orgId, orgId))
+    : and(eq(apiKeys.id, keyId), eq(apiKeys.orgId, orgId), eq(apiKeys.userId, userId));
+
   const [revoked] = await db.update(apiKeys)
     .set({ revoked: true })
-    .where(and(eq(apiKeys.id, keyId), eq(apiKeys.orgId, orgId), eq(apiKeys.userId, userId)))
+    .where(whereClause)
     .returning({ name: apiKeys.name });
 
   if (!revoked) return c.json({ error: 'API key not found' }, 404);
+
+  db.insert(auditLog).values({
+    orgId, userId, action: 'api_key.revoked', resourceType: 'api_key',
+    resourceId: keyId, details: { name: revoked.name },
+  }).catch(() => {});
+
   return c.json({ status: 'revoked', name: revoked.name });
 });
 
@@ -351,7 +368,7 @@ auth.delete('/api-keys/:id', requireAuth, requireOrg, requireScope('api:write'),
 // Org invite secret management (admin only)
 // ---------------------------------------------------------------------------
 
-auth.get('/org/invite-secret', requireScope('api:read'), requireRole('admin'), requireOrg, async (c) => {
+auth.get('/org/invite-secret', requireRole('admin'), requireOrg, requireScope('api:read'), async (c) => {
   const orgId = c.get('orgId');
   const db = getDb();
   const [org] = await db
@@ -365,7 +382,7 @@ auth.get('/org/invite-secret', requireScope('api:read'), requireRole('admin'), r
   return c.json({ inviteSecret: decrypt(org.inviteSecretEncrypted) });
 });
 
-auth.post('/org/invite-secret/regenerate', requireRole('admin'), requireOrg, async (c) => {
+auth.post('/org/invite-secret/regenerate', requireRole('admin'), requireOrg, requireScope('api:write'), async (c) => {
   const orgId = c.get('orgId');
   const db = getDb();
   const { raw, hash, encrypted } = generateInviteSecret();
@@ -376,6 +393,13 @@ auth.post('/org/invite-secret/regenerate', requireRole('admin'), requireOrg, asy
     .returning({ id: organizations.id });
 
   if (!result) return c.json({ error: 'Organisation not found' }, 404);
+
+  const userId = c.get('userId');
+  db.insert(auditLog).values({
+    orgId, userId, action: 'invite_secret.regenerated', resourceType: 'organization',
+    resourceId: orgId,
+  }).catch(() => {});
+
   return c.json({ inviteSecret: raw });
 });
 
@@ -383,7 +407,7 @@ auth.post('/org/invite-secret/regenerate', requireRole('admin'), requireOrg, asy
 // Org notify key management (admin only)
 // ---------------------------------------------------------------------------
 
-auth.get('/org/notify-key/status', requireRole('admin'), requireOrg, async (c) => {
+auth.get('/org/notify-key/status', requireRole('admin'), requireOrg, requireScope('api:read'), async (c) => {
   const orgId = c.get('orgId');
   const db = getDb();
 
@@ -397,7 +421,7 @@ auth.get('/org/notify-key/status', requireRole('admin'), requireOrg, async (c) =
   return c.json({ exists: true, prefix: org.prefix, lastUsedAt: org.lastUsedAt });
 });
 
-auth.post('/org/notify-key/generate', requireRole('admin'), requireOrg, async (c) => {
+auth.post('/org/notify-key/generate', requireRole('admin'), requireOrg, requireScope('api:write'), async (c) => {
   const orgId = c.get('orgId');
   const db = getDb();
 
@@ -413,13 +437,19 @@ auth.post('/org/notify-key/generate', requireRole('admin'), requireOrg, async (c
     .set({ notifyKeyHash: hash, notifyKeyPrefix: prefix, notifyKeyLastUsedAt: null })
     .where(eq(organizations.id, orgId));
 
+  const userId = c.get('userId');
+  db.insert(auditLog).values({
+    orgId, userId, action: 'notify_key.generated', resourceType: 'organization',
+    resourceId: orgId,
+  }).catch(() => {});
+
   return c.json({
     key: raw, prefix,
     warning: 'Save this key now. It cannot be retrieved again.',
   }, 201);
 });
 
-auth.post('/org/notify-key/rotate', requireRole('admin'), requireOrg, async (c) => {
+auth.post('/org/notify-key/rotate', requireRole('admin'), requireOrg, requireScope('api:write'), async (c) => {
   const orgId = c.get('orgId');
   const db = getDb();
 
@@ -430,19 +460,32 @@ auth.post('/org/notify-key/rotate', requireRole('admin'), requireOrg, async (c) 
     .returning({ id: organizations.id });
 
   if (!result) return c.json({ error: 'Organisation not found' }, 404);
+
+  const userId = c.get('userId');
+  db.insert(auditLog).values({
+    orgId, userId, action: 'notify_key.rotated', resourceType: 'organization',
+    resourceId: orgId,
+  }).catch(() => {});
+
   return c.json({
     key: raw, prefix,
     warning: 'Save this key now. It cannot be retrieved again. The previous key is now invalid.',
   }, 201);
 });
 
-auth.delete('/org/notify-key', requireRole('admin'), requireOrg, async (c) => {
+auth.delete('/org/notify-key', requireRole('admin'), requireOrg, requireScope('api:write'), async (c) => {
   const orgId = c.get('orgId');
   const db = getDb();
 
   await db.update(organizations)
     .set({ notifyKeyHash: null, notifyKeyPrefix: null, notifyKeyLastUsedAt: null })
     .where(eq(organizations.id, orgId));
+
+  const userId = c.get('userId');
+  db.insert(auditLog).values({
+    orgId, userId, action: 'notify_key.revoked', resourceType: 'organization',
+    resourceId: orgId,
+  }).catch(() => {});
 
   return c.json({ status: 'revoked' });
 });
@@ -522,7 +565,7 @@ auth.post('/org/leave', requireAuth, requireOrg, async (c) => {
   return c.json({ status: 'left' });
 });
 
-auth.delete('/org', requireRole('admin'), requireOrg, async (c) => {
+auth.delete('/org', requireRole('admin'), requireOrg, requireScope('api:write'), async (c) => {
   const orgId = c.get('orgId');
   const db = getDb();
 
@@ -536,6 +579,13 @@ auth.delete('/org', requireRole('admin'), requireOrg, async (c) => {
     .returning({ name: organizations.name, slug: organizations.slug });
 
   if (!result) return c.json({ error: 'Organisation not found' }, 404);
+
+  const userId = c.get('userId');
+  db.insert(auditLog).values({
+    orgId, userId, action: 'organization.deleted', resourceType: 'organization',
+    resourceId: orgId, details: { name: result.name, slug: result.slug },
+  }).catch(() => {});
+
   return c.json({ status: 'deleted', org: result });
 });
 
@@ -543,7 +593,7 @@ auth.delete('/org', requireRole('admin'), requireOrg, async (c) => {
 // Admin: user management
 // ---------------------------------------------------------------------------
 
-auth.get('/users', requireRole('admin'), requireOrg, async (c) => {
+auth.get('/users', requireRole('admin'), requireOrg, requireScope('api:read'), async (c) => {
   const orgId = c.get('orgId');
   const db = getDb();
 
@@ -558,7 +608,7 @@ auth.get('/users', requireRole('admin'), requireOrg, async (c) => {
   return c.json(members);
 });
 
-auth.patch('/users/:id/role', requireRole('admin'), requireOrg, async (c) => {
+auth.patch('/users/:id/role', requireRole('admin'), requireOrg, requireScope('api:write'), async (c) => {
   const orgId = c.get('orgId')!;
   const currentUserId = c.get('userId')!;
   const targetUserId = c.req.param('id')!;
@@ -598,6 +648,11 @@ auth.patch('/users/:id/role', requireRole('admin'), requireOrg, async (c) => {
   // Invalidate all sessions for the target user so stale role is not used.
   // Sessions are encrypted so JSONB extraction cannot be used; use helper instead.
   await deleteSessionsByUserId([targetUserId]);
+
+  db.insert(auditLog).values({
+    orgId, userId: currentUserId, action: 'member.role_changed', resourceType: 'org_membership',
+    resourceId: targetUserId, details: { newRole: role },
+  }).catch(() => {});
 
   return c.json(result);
 });
@@ -642,7 +697,7 @@ auth.post('/change-password', authLimiter, requireAuth, async (c) => {
 // DELETE /users/:id -- remove member from org (admin only)
 // ---------------------------------------------------------------------------
 
-auth.delete('/users/:id', requireRole('admin'), requireOrg, async (c) => {
+auth.delete('/users/:id', requireRole('admin'), requireOrg, requireScope('api:write'), async (c) => {
   const orgId = c.get('orgId')!;
   const targetUserId = c.req.param('id')!;
   const currentUserId = c.get('userId')!;
@@ -668,6 +723,11 @@ auth.delete('/users/:id', requireRole('admin'), requireOrg, async (c) => {
 
   // Sessions are encrypted so JSONB extraction cannot be used; use helper instead.
   await deleteSessionsByUserId([targetUserId]);
+
+  db.insert(auditLog).values({
+    orgId, userId: currentUserId, action: 'member.removed', resourceType: 'org_membership',
+    resourceId: targetUserId,
+  }).catch(() => {});
 
   return c.json({ status: 'ok', userId: targetUserId });
 });

@@ -168,7 +168,9 @@ chainRouter.get('/networks', async (c) => {
       pollingActive: n.isActive,
       currentBlock,
       cursorPosition: currentBlock,
-      rpcHealthy: true,
+      rpcHealthy: cursor?.updatedAt
+        ? Date.now() - cursor.updatedAt.getTime() < Math.max(n.blockTimeMs * 5, 60_000)
+        : false,
       lastPolledAt: cursor?.updatedAt?.toISOString() ?? null,
     };
   });
@@ -716,20 +718,49 @@ chainRouter.get('/rpc-configs', async (c) => {
   if (!orgId) return c.json({ error: 'Organisation required' }, 403);
 
   const db = getDb();
+  const usageSince = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-  const rows = await db
-    .select({
-      id: chainOrgRpcConfigs.id,
-      networkId: chainOrgRpcConfigs.networkId,
-      rpcUrl: chainOrgRpcConfigs.rpcUrl,
-      isActive: chainOrgRpcConfigs.isActive,
-      createdAt: chainOrgRpcConfigs.createdAt,
-      // Network details
-      networkName: chainNetworks.name,
-    })
-    .from(chainOrgRpcConfigs)
-    .innerJoin(chainNetworks, eq(chainNetworks.id, chainOrgRpcConfigs.networkId))
-    .where(eq(chainOrgRpcConfigs.orgId, orgId));
+  const [rows, usageTotals, usageErrors] = await Promise.all([
+    db
+      .select({
+        id: chainOrgRpcConfigs.id,
+        networkId: chainOrgRpcConfigs.networkId,
+        rpcUrl: chainOrgRpcConfigs.rpcUrl,
+        isActive: chainOrgRpcConfigs.isActive,
+        createdAt: chainOrgRpcConfigs.createdAt,
+        // Network details
+        networkName: chainNetworks.name,
+        networkSlug: chainNetworks.slug,
+      })
+      .from(chainOrgRpcConfigs)
+      .innerJoin(chainNetworks, eq(chainNetworks.id, chainOrgRpcConfigs.networkId))
+      .where(eq(chainOrgRpcConfigs.orgId, orgId)),
+    db
+      .select({
+        networkSlug: chainRpcUsageHourly.networkSlug,
+        callCount: sql<number>`coalesce(sum(${chainRpcUsageHourly.callCount}), 0)`.mapWith(Number),
+      })
+      .from(chainRpcUsageHourly)
+      .where(and(eq(chainRpcUsageHourly.orgId, orgId), gte(chainRpcUsageHourly.bucket, usageSince)))
+      .groupBy(chainRpcUsageHourly.networkSlug),
+    db
+      .select({
+        networkSlug: chainRpcUsageHourly.networkSlug,
+        errorCount: sql<number>`coalesce(sum(${chainRpcUsageHourly.callCount}), 0)`.mapWith(Number),
+      })
+      .from(chainRpcUsageHourly)
+      .where(
+        and(
+          eq(chainRpcUsageHourly.orgId, orgId),
+          gte(chainRpcUsageHourly.bucket, usageSince),
+          ne(chainRpcUsageHourly.status, 'ok'),
+        ),
+      )
+      .groupBy(chainRpcUsageHourly.networkSlug),
+  ]);
+
+  const callCountBySlug = new Map(usageTotals.map((u) => [u.networkSlug, u.callCount]));
+  const errorCountBySlug = new Map(usageErrors.map((u) => [u.networkSlug, u.errorCount]));
 
   const data = rows.map((r) => ({
     id: r.id,
@@ -737,8 +768,8 @@ chainRouter.get('/rpc-configs', async (c) => {
     networkName: r.networkName,
     customUrl: r.rpcUrl,
     status: r.isActive ? 'active' : 'inactive',
-    callCount: 0,
-    errorCount: 0,
+    callCount: callCountBySlug.get(r.networkSlug) ?? 0,
+    errorCount: errorCountBySlug.get(r.networkSlug) ?? 0,
     avgLatencyMs: null,
     lastCheckedAt: null,
     createdAt: r.createdAt?.toISOString() ?? null,
@@ -853,8 +884,10 @@ chainRouter.get('/state-changes', async (c) => {
   const query = stateChangesQuerySchema.parse(c.req.query());
   const db = getDb();
 
-  // Build conditions
-  const conditions = [];
+  // Build conditions — snapshots are keyed by ruleId; scope to org via rules (no org_id on chain_state_snapshots)
+  const conditions = [
+    sql`EXISTS (SELECT 1 FROM rules WHERE rules.id = ${chainStateSnapshots.ruleId} AND rules.org_id = ${orgId})`,
+  ];
 
   if (query.ruleId) {
     conditions.push(eq(chainStateSnapshots.ruleId, query.ruleId));
@@ -869,8 +902,7 @@ chainRouter.get('/state-changes', async (c) => {
     conditions.push(eq(chainStateSnapshots.triggered, true));
   }
 
-  const whereClause =
-    conditions.length > 0 ? and(...conditions) : undefined;
+  const whereClause = and(...conditions);
 
   const rows = await db
     .select({

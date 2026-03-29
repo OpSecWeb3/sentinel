@@ -109,6 +109,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      import-in-the-middle:
+        specifier: ^3.0.0
+        version: 3.0.0
       leaflet:
         specifier: ^1.9.4
         version: 1.9.4

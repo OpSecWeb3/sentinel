@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { apiGet, apiFetch } from "@/lib/api";
 
@@ -120,6 +121,27 @@ export default function DetectionDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState("");
+  const [confirmDesc, setConfirmDesc] = useState("");
+  const [confirmResolve, setConfirmResolve] = useState<
+    ((value: boolean) => void) | null
+  >(null);
+
+  function confirm(title: string, description: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      setConfirmTitle(title);
+      setConfirmDesc(description);
+      setConfirmResolve(() => resolve);
+      setConfirmOpen(true);
+    });
+  }
+
+  function handleConfirmClose(result: boolean) {
+    setConfirmOpen(false);
+    confirmResolve?.(result);
+  }
+
   const fetchDetection = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -171,10 +193,16 @@ export default function DetectionDetailPage() {
   }
 
   async function archiveDetection() {
-    if (!confirm(`Archive "${detection?.name}"?`)) return;
+    if (!detection) return;
+    const confirmed = await confirm(
+      "Archive Detection",
+      `Are you sure you want to archive "${detection.name}"? The detection will be paused and hidden from the default list.`,
+    );
+    if (!confirmed) return;
     setActionLoading(true);
     try {
       await apiFetch(`/api/detections/${id}`, { method: "DELETE" });
+      setActionLoading(false);
       router.push("/detections");
     } catch (err) {
       setError(
@@ -212,6 +240,13 @@ export default function DetectionDetailPage() {
 
   return (
     <div className="space-y-6 font-mono">
+      <ConfirmDialog
+        open={confirmOpen}
+        title={confirmTitle}
+        description={confirmDesc}
+        onClose={handleConfirmClose}
+      />
+
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>

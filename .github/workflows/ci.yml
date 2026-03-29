@@ -166,7 +166,10 @@ jobs:
 
       - name: Three-way migration sync check
         run: |
-          SQL_COUNT=$(ls packages/db/migrations/*.sql 2>/dev/null | wc -l | tr -d ' ')
+          # Count only Drizzle migration SQL files (digits_description.sql), not other .sql in this folder
+          shopt -s nullglob
+          migration_sql=(packages/db/migrations/[0-9]*_*.sql)
+          SQL_COUNT=${#migration_sql[@]}
           JOURNAL_COUNT=$(grep -c '"tag"' packages/db/migrations/meta/_journal.json || echo 0)
           DB_COUNT=$(psql "$DATABASE_URL" -t -A -c "SELECT count(*) FROM drizzle.__drizzle_migrations;")
 

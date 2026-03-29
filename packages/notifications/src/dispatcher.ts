@@ -25,6 +25,8 @@ export interface NotificationResult {
 
 const CIRCUIT_THRESHOLD = 5;
 const CIRCUIT_RESET_MS = 60_000; // 1 minute
+/** Cap in-process circuit entries so deleted channel IDs cannot grow memory without bound. */
+const CIRCUITS_MAX = 10_000;
 
 interface CircuitState {
   failures: number;
@@ -36,6 +38,10 @@ const circuits = new Map<string, CircuitState>();
 function getCircuit(channelId: string): CircuitState {
   let state = circuits.get(channelId);
   if (!state) {
+    if (circuits.size >= CIRCUITS_MAX) {
+      const oldest = circuits.keys().next().value;
+      if (oldest !== undefined) circuits.delete(oldest);
+    }
     state = { failures: 0, openedAt: null };
     circuits.set(channelId, state);
   }

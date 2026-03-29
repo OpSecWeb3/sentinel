@@ -14,7 +14,7 @@ import { ToastContainer } from "@/components/ui/toast";
 
 /* ── types ────────────────────────────────────────────────────────── */
 
-type ModuleId = "github" | "infra" | "chain" | "registry";
+type ModuleId = "github" | "infra" | "chain" | "registry" | "aws";
 type TemplateInputType =
   | "text"
   | "number"

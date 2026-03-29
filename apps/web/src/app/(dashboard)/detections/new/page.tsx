@@ -437,7 +437,7 @@ function ConfigureDetection({
       ? template.severity
       : "high") as (typeof SEVERITIES)[number],
   );
-  const [cooldownMinutes, setCooldownMinutes] = useState(5);
+  const [cooldownMinutes, setCooldownMinutes] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
   // Template inputs — raw string state for form fields
