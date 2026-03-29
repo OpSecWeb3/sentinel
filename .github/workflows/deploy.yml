@@ -18,8 +18,8 @@ permissions:
 
 jobs:
   ci:
-    # TEMP: skip full CI to unblock production deploy. Remove `if: false` and
-    # restore `needs: ci` on deploy once migrations and services are healthy.
+    # TEMP: skip full CI so deploy runs immediately. Remove `if: false` and
+    # restore `needs: ci` on deploy when you want the gate back.
     if: false
     uses: ./.github/workflows/ci.yml
 

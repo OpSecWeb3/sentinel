@@ -16,6 +16,19 @@ networks:
     external: true
 
 services:
+  # One-shot: `docker compose --profile migrate run --rm --no-deps migrate`
+  # (started by deploy.sh; not part of default `up -d`.)
+  migrate:
+    profiles:
+      - migrate
+    build:
+      context: .
+      dockerfile: apps/migrate/Dockerfile
+    env_file: .env
+    networks:
+      - shared-infra
+    restart: "no"
+
   api:
     build:
       context: .

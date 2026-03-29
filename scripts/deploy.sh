@@ -82,13 +82,11 @@ echo "==> Ensuring Docker networks exist..."
 docker network create gateway 2>/dev/null || true
 docker network create shared-infra 2>/dev/null || true
 
-echo "==> Installing dependencies (ensures host deps match lockfile)..."
-pnpm install --frozen-lockfile
-
 echo "==> Building containers..."
-docker compose -f "$COMPOSE_FILE" build
+# Include profile so the one-shot migrate image is built alongside api/worker/web.
+docker compose -f "$COMPOSE_FILE" --profile migrate build
 
-echo "==> Running database migrations..."
+echo "==> Running database migrations and seed (migrate container)..."
 set -a; source .env; set +a
 
 # Back up the database before applying migrations so we can restore on failure.
@@ -98,12 +96,7 @@ if [ "$HAS_MIGRATIONS" = true ]; then
   bash ./scripts/backup-db.sh || { echo "ERROR: Pre-migration backup failed — aborting deploy"; exit 1; }
 fi
 
-# Use workspace drizzle-kit (lockfile-pinned). Plain `npx drizzle-kit` can
-# fetch a newer global copy that mismatches drizzle-orm and aborts migrate.
-pnpm db:migrate
-
-echo "==> Seeding database..."
-pnpm db:seed
+docker compose -f "$COMPOSE_FILE" --profile migrate run --rm --no-deps migrate
 
 echo "==> Starting containers..."
 docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
