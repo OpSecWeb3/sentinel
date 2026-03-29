@@ -1743,7 +1743,7 @@ export default function SettingsPage() {
                           <div className="flex items-center gap-3 text-sm flex-wrap">
                             <span className="text-primary font-mono">[{provider.provider}]</span>
                             <span className="text-foreground">{provider.displayName}</span>
-                            {provider.hostPattern && (
+                            {provider.hostPattern && provider.hostPattern !== '*' && (
                               <span className="text-xs text-muted-foreground">pattern: {provider.hostPattern}</span>
                             )}
                             <span className={cn("text-xs font-mono", provider.isValid ? "text-primary" : "text-destructive")}>

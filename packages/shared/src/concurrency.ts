@@ -23,9 +23,7 @@ const DEFAULT_TTL_MS = 5 * 60 * 1000; // 5 min safety TTL
  */
 const ACQUIRE_LUA = `
   local current = redis.call('INCR', KEYS[1])
-  if current == 1 then
-    redis.call('PEXPIRE', KEYS[1], ARGV[2])
-  end
+  redis.call('PEXPIRE', KEYS[1], ARGV[2])
   if current > tonumber(ARGV[1]) then
     redis.call('DECR', KEYS[1])
     return 0

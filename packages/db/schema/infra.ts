@@ -419,7 +419,7 @@ export const infraCdnProviderConfigs = pgTable('infra_cdn_provider_configs', {
 
   provider: text('provider').notNull(),              // 'cloudflare' | 'cloudfront'
   displayName: text('display_name').notNull(),
-  hostPattern: text('host_pattern'),                 // comma-separated globs, NULL = catch-all
+  hostPattern: text('host_pattern').notNull().default('*'),  // comma-separated globs, '*' = catch-all
   encryptedCredentials: text('encrypted_credentials').notNull(),  // AES-GCM encrypted JSON
   isValid: boolean('is_valid').notNull().default(false),
   lastValidatedAt: timestamp('last_validated_at', { withTimezone: true }),

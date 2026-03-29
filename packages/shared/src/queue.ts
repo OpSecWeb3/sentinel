@@ -173,4 +173,8 @@ export async function closeAllQueues(): Promise<void> {
   await Promise.allSettled(closables);
   queues.clear();
   workers.clear();
+  if (_connection && typeof _connection.quit === 'function') {
+    await _connection.quit();
+    _connection = undefined;
+  }
 }

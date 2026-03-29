@@ -294,15 +294,40 @@ export const pollHandler: JobHandler = {
   queueName: QUEUE_NAMES.MODULE_JOBS,
 
   async process(job: Job) {
-    const { artifact } = job.data as { artifact: MonitoredArtifact };
+    const db = getDb();
+    let artifact: MonitoredArtifact | undefined = (job.data as { artifact?: MonitoredArtifact }).artifact;
+
+    // Support both shapes: full artifact object (from poll-sweep) and
+    // { artifactId, orgId } (from API-triggered polls)
+    if (!artifact && job.data.artifactId) {
+      const [row] = await db.select().from(rcArtifacts).where(eq(rcArtifacts.id, job.data.artifactId as string)).limit(1);
+      if (!row || !row.enabled) {
+        log.debug('Poll job skipped: artifact not found or disabled');
+        return;
+      }
+      artifact = {
+        id: row.id,
+        orgId: row.orgId,
+        name: row.name,
+        registry: row.artifactType === 'docker_image' ? 'docker_hub' : 'npmjs',
+        enabled: row.enabled,
+        tagPatterns: (row.tagWatchPatterns as string[]) ?? [],
+        ignorePatterns: (row.tagIgnorePatterns as string[]) ?? [],
+        pollIntervalSeconds: row.pollIntervalSeconds,
+        lastPolledAt: row.lastPolledAt,
+        storedVersions: new Map(),
+        metadata: (row.metadata as Record<string, unknown>) ?? {},
+        credentialsEncrypted: row.credentialsEncrypted,
+        watchMode: (row.watchMode as 'dist-tags' | 'versions') ?? 'versions',
+      };
+    }
 
     if (!artifact || !artifact.enabled) {
       log.debug('Poll job skipped: artifact not found or disabled');
       return;
     }
 
-    // Fix #2: Load stored versions from DB instead of relying on job payload
-    const db = getDb();
+    // Load stored versions from DB instead of relying on job payload
     const dbVersions = await db
       .select()
       .from(rcArtifactVersions)

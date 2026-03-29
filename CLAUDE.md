@@ -14,9 +14,9 @@ Security monitoring platform — monorepo with pnpm workspaces.
 
 - `pnpm dev` — start all services via Docker Compose
 - `pnpm build` — build all packages
-- `pnpm test` — run all tests (needs Postgres on :5434 and Redis on :6380)
+- `pnpm test` — run all tests (Postgres `sentinel_test` on :5434, Redis on :6380 — see `docs/TESTING.md` if the DB is missing)
 - `pnpm test:unit` — unit tests only (packages/ and modules/)
-- `pnpm test:integration` — integration tests (apps/ and test/)
+- `pnpm test:integration` — integration tests (apps/ and test/); Postgres needs database `sentinel_test` (create once on a fresh container — see `docs/TESTING.md`)
 - `pnpm db:generate` — generate migration from schema changes
 - `pnpm db:migrate` — apply pending migrations
 - `pnpm lint` / `pnpm typecheck` — lint and typecheck all packages

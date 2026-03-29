@@ -37,7 +37,7 @@ export async function searchNpmScope(
   // Filter to exact scope match (npm search can return partial matches)
   const scopePrefix = scope.endsWith('/') ? scope : `${scope}/`;
   return data.objects
-    .filter((obj) => obj.package.name.startsWith(scopePrefix) || obj.package.name === scope)
+    .filter((obj) => obj.package.name.startsWith(scopePrefix))
     .map((obj) => ({
       name: obj.package.name,
       version: obj.package.version,

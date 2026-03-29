@@ -233,9 +233,11 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
 
     if (existing.type === 'webhook') {
       stripBlockedHeaders(body.config);
-      // Encrypt webhook secret if provided
+      // Encrypt webhook secret if provided; preserve existing secret otherwise
       if (body.config.secret) {
         body.config.secret = encrypt(body.config.secret as string);
+      } else if (body.config.secret === undefined && existing.config && (existing.config as Record<string, unknown>).secret) {
+        body.config.secret = (existing.config as Record<string, unknown>).secret;
       }
     }
   }
