@@ -130,6 +130,7 @@ export function compare(actual: unknown, operator: Operator, expected: unknown):
     case '<':  return sa < sb;
     case '>=': return sa >= sb;
     case '<=': return sa <= sb;
+    default:   return false;
   }
 }
 

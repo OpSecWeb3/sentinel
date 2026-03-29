@@ -1311,7 +1311,7 @@ infraRouter.post('/cdn-providers', async (c) => {
   const encryptedCredentials = encrypt(JSON.stringify(body.credentials));
 
   const db = getDb();
-  const normalizedPattern = body.hostPattern?.trim().toLowerCase() || null;
+  const normalizedPattern = body.hostPattern?.trim().toLowerCase() || '*';
   const [config] = await db.insert(infraCdnProviderConfigs)
     .values({ orgId, provider: body.provider, displayName: body.displayName, hostPattern: normalizedPattern, encryptedCredentials, isValid: false })
     .onConflictDoUpdate({

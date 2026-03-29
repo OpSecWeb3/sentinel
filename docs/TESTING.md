@@ -250,6 +250,10 @@ const sessA = await createTestSession(userA.id, orgA.id, 'admin');
 
 ## Running tests
 
+Integration runs (`pnpm test:integration`, and `pnpm test`) use `DATABASE_URL` pointing at database **`sentinel_test`** (default host port **5434** per `test/helpers/setup.ts`). The suite applies migrations to that DB but does **not** `CREATE DATABASE`; on a new local Postgres container run once, e.g.  
+`psql "postgresql://sentinel:sentinel@localhost:5434/postgres" -c "CREATE DATABASE sentinel_test OWNER sentinel;"`  
+(adjust URL to your compose). Redis default for tests is **6380**.
+
 ```bash
 # All tests (chunks + scenarios)
 pnpm test

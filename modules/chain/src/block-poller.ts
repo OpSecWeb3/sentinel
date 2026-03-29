@@ -371,6 +371,7 @@ export async function pollOnce(
     const bnStr = blockNum.toString();
     const logs = logsByBlock.get(bnStr) ?? [];
     const transactions = txsByBlock.get(bnStr);
+    if (logs.length === 0 && !transactions) continue;
     blockDataJobs.push({
       networkSlug: config.slug,
       chainId: config.chainId,

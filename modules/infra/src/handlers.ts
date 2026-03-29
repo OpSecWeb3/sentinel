@@ -106,17 +106,19 @@ function createScanCallbacks(): ScanCallbacks {
         })
         .returning();
 
-      // Persist step results
-      for (const step of result.stepResults) {
-        await db.insert(infraScanStepResults).values({
-          scanEventId: scanEvent.id,
-          stepType: step.step,
-          status: step.status,
-          resultData: step.data ?? null,
-          errorMessage: step.error ?? null,
-          startedAt: step.startedAt,
-          completedAt: step.completedAt ?? new Date(),
-        });
+      // Persist step results (batch insert)
+      if (result.stepResults.length > 0) {
+        await db.insert(infraScanStepResults).values(
+          result.stepResults.map((step) => ({
+            scanEventId: scanEvent.id,
+            stepType: step.step,
+            status: step.status,
+            resultData: step.data ?? null,
+            errorMessage: step.error ?? null,
+            startedAt: step.startedAt,
+            completedAt: step.completedAt ?? new Date(),
+          })),
+        );
       }
 
       // Record score history

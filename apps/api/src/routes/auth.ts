@@ -44,16 +44,11 @@ async function getDummyHash(): Promise<string> {
 
 const auth = new Hono<AppEnv>();
 
-// Apply baseline rate limiting to all auth routes.
-// Write limiter (30/min) covers mutating operations by default; read endpoints
-// override this with the more permissive read limiter (100/min).
-auth.use('*', apiWriteLimiter);
-auth.use('/me', apiReadLimiter);
-auth.use('/api-keys', apiReadLimiter);
-auth.use('/org/invite-secret', apiReadLimiter);
-auth.use('/org/notify-key/status', apiReadLimiter);
-auth.use('/users', apiReadLimiter);
-auth.use('/setup-status', apiReadLimiter);
+// Apply rate limiting: read limiter for GET requests, write limiter for mutating methods.
+auth.use('*', async (c, next) => {
+  if (c.req.method === 'GET') return apiReadLimiter(c, next);
+  return apiWriteLimiter(c, next);
+});
 
 // ---------------------------------------------------------------------------
 // POST /register

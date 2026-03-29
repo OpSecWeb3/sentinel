@@ -28,7 +28,7 @@ const CDN_HEADER_SIGNALS: Record<string, string[]> = {
 };
 
 export function hostMatchesPattern(hostname: string, pattern: string | null): boolean {
-  if (!pattern) return true; // catch-all
+  if (!pattern || pattern === '*') return true; // catch-all
   const patterns = pattern.split(',').map((p) => p.trim().toLowerCase());
   const h = hostname.toLowerCase();
   return patterns.some((p) => {

@@ -41,8 +41,7 @@ export async function notifyKeyMiddleware(c: AuthContext, next: Next) {
 
     c.set('notifyKeyOrgId', org.id);
 
-    // Update last_used_at — awaited so errors propagate to the global handler
-    // instead of being silently swallowed by a detached promise.
+    // Update last_used_at — best-effort; failures are logged but do not block the request.
     await db.update(organizations)
       .set({ notifyKeyLastUsedAt: new Date() })
       .where(eq(organizations.id, org.id))

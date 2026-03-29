@@ -166,7 +166,7 @@ async function getRegistryToken(repository: string): Promise<string | null> {
   try {
     const scope = `repository:${repository}:pull`;
     const url = `${DOCKER_AUTH_URL}?service=registry.docker.io&scope=${encodeURIComponent(scope)}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) return null;
     const data = (await res.json()) as { token: string };
     return data.token;
@@ -191,6 +191,7 @@ async function fetchOciManifest(
       Authorization: `Bearer ${token}`,
       Accept: acceptTypes.join(', '),
     },
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) return null;
   return (await res.json()) as Record<string, unknown>;
@@ -207,6 +208,7 @@ async function fetchOciBlob(
   const url = `${DOCKER_REGISTRY}/v2/${repository}/blobs/${blobDigest}`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) return null;
   return Buffer.from(await res.arrayBuffer());

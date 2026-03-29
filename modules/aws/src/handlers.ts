@@ -12,6 +12,7 @@ import { awsIntegrations, awsRawEvents } from '@sentinel/db/schema/aws';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { decrypt } from '@sentinel/shared/crypto';
 import { logger as rootLogger } from '@sentinel/shared/logger';
+import { createHash } from 'node:crypto';
 import { normalizeCloudTrailEvent, extractPrincipal } from './normalizer.js';
 
 const log = rootLogger.child({ component: 'aws' });
@@ -374,7 +375,6 @@ async function storeRawEvent(
  * deliveries of the same event are de-duplicated by the DB unique constraint.
  */
 function deterministicEventId(record: Record<string, unknown>): string {
-  const { createHash } = require('node:crypto') as typeof import('node:crypto');
   // Use fields that uniquely identify an EventBridge event even when 'id' is missing
   const source = (record.source ?? record['detail-type'] ?? '') as string;
   const time = (record.time ?? record.eventTime ?? '') as string;

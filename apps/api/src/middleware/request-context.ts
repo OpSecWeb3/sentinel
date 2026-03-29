@@ -13,7 +13,8 @@ import type { Logger } from '@sentinel/shared/logger';
  */
 export function requestContext(rootLogger: Logger) {
   return async (c: AuthContext, next: Next) => {
-    const requestId = c.req.header('X-Request-Id') ?? crypto.randomUUID();
+    const raw = c.req.header('X-Request-Id');
+    const requestId = raw && /^[a-zA-Z0-9_-]{1,128}$/.test(raw) ? raw : crypto.randomUUID();
     const child = rootLogger.child({
       requestId,
       method: c.req.method,

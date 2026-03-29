@@ -223,16 +223,18 @@ authed.delete('/slack', requireRole('admin'), async (c) => {
   const orgId = c.get('orgId');
   const db = getDb();
 
-  await db.delete(slackInstallations).where(eq(slackInstallations.orgId, orgId));
+  await db.transaction(async (tx) => {
+    await tx.delete(slackInstallations).where(eq(slackInstallations.orgId, orgId));
 
-  // Clear slack channel references from detections and correlation rules
-  await db.update(detections)
-    .set({ slackChannelId: null, slackChannelName: null })
-    .where(eq(detections.orgId, orgId));
+    // Clear slack channel references from detections and correlation rules
+    await tx.update(detections)
+      .set({ slackChannelId: null, slackChannelName: null })
+      .where(eq(detections.orgId, orgId));
 
-  await db.update(correlationRules)
-    .set({ slackChannelId: null, slackChannelName: null })
-    .where(eq(correlationRules.orgId, orgId));
+    await tx.update(correlationRules)
+      .set({ slackChannelId: null, slackChannelName: null })
+      .where(eq(correlationRules.orgId, orgId));
+  });
 
   return c.json({ disconnected: true });
 });

@@ -13,6 +13,8 @@ import {
   createTestOrg,
   addMembership,
   createTestSession,
+  createTestArtifact,
+  getTestSql,
 } from '../helpers/setup.js';
 import { getApp, appRequest, setupAdmin } from '../../apps/api/src/__tests__/helpers.js';
 import type { Hono } from 'hono';
@@ -27,6 +29,31 @@ beforeEach(async () => {
   await cleanTables();
   resetCounters();
 });
+
+/** Module-specific rows required by POST /api/detections prerequisite checks. */
+async function seedDetectionPrerequisites(orgId: string, moduleId: string) {
+  const sql = getTestSql();
+  if (moduleId === 'registry') {
+    await createTestArtifact(orgId, { name: 'gap6/test-image', artifactType: 'docker_image' });
+  }
+  if (moduleId === 'infra') {
+    const [host] = await sql`
+      INSERT INTO infra_hosts (org_id, hostname, is_root, is_active, source)
+      VALUES (${orgId}, 'gap6.example.com', true, true, 'manual')
+      RETURNING id
+    `;
+    await sql`
+      INSERT INTO infra_scan_schedules (host_id, enabled)
+      VALUES (${host.id}, true)
+    `;
+  }
+  if (moduleId === 'aws') {
+    await sql`
+      INSERT INTO aws_integrations (org_id, name, account_id, enabled, status)
+      VALUES (${orgId}, 'gap6-integration', '123456789012', true, 'active')
+    `;
+  }
+}
 
 describe('Gap 6 — Module route branch coverage', () => {
   describe('Template resolution for all modules', () => {
@@ -71,6 +98,7 @@ describe('Gap 6 — Module route branch coverage', () => {
 
     it.each(moduleConfigs)('should create detection for $moduleId module', async ({ moduleId, rules }) => {
       const admin = await setupAdmin(app);
+      await seedDetectionPrerequisites(admin.orgId, moduleId);
 
       const res = await appRequest(app, 'POST', '/api/detections', {
         cookie: admin.cookie,

@@ -6,6 +6,7 @@
  */
 import type { Hono } from 'hono';
 import type { AppEnv } from '@sentinel/shared/hono-types';
+import { createTestGithubInstallation } from '../../../../test/helpers/setup.js';
 
 // We lazily import the app to allow setup.ts to configure env first.
 let _app: Hono<AppEnv> | undefined;
@@ -112,6 +113,10 @@ export async function registerAdmin(
   });
   const body = (await res.json()) as Record<string, unknown>;
   const cookie = extractCookie(res);
+  const org = body.org as Record<string, unknown> | undefined;
+  if (res.ok && org && typeof org.id === 'string') {
+    await createTestGithubInstallation(org.id);
+  }
   return { res, body, cookie };
 }
 
