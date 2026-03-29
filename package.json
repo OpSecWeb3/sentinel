@@ -23,6 +23,12 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck"
   },
+  "pnpm": {
+    "overrides": {
+      "tar": ">=7.5.11",
+      "nodemailer": ">=7.0.11"
+    }
+  },
   "devDependencies": {
     "@vitest/coverage-v8": "^3.0.0",
     "ioredis": "^5.4.2",

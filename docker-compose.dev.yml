@@ -28,6 +28,11 @@ x-app-base: &app-base
     - /app/packages/shared/node_modules
     - /app/packages/db/node_modules
     - /app/packages/notifications/node_modules
+    - /app/modules/github/node_modules
+    - /app/modules/chain/node_modules
+    - /app/modules/infra/node_modules
+    - /app/modules/registry/node_modules
+    - /app/modules/aws/node_modules
   depends_on:
     postgres:
       condition: service_healthy
@@ -64,6 +69,15 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Database migrations (runs once then exits) ──────────────────────
+  migrate:
+    <<: *app-base
+    container_name: sentinel-migrate
+    environment:
+      - DATABASE_URL=postgresql://sentinel:${POSTGRES_PASSWORD:-sentinel}@postgres:5432/sentinel
+    command: pnpm --filter @sentinel/db migrate
+    restart: "no"
+
   # ── Application (hot-reload) ────────────────────────────────────────
   api:
     <<: *app-base
@@ -74,6 +88,13 @@ services:
       - PORT=4000
     ports:
       - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: tsx watch apps/api/src/index.ts
 
   worker:
@@ -82,6 +103,13 @@ services:
     environment:
       - DATABASE_URL=postgresql://sentinel:${POSTGRES_PASSWORD:-sentinel}@postgres:5432/sentinel
       - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: tsx watch apps/worker/src/index.ts
 
   web:
@@ -93,6 +121,9 @@ services:
       - PORT=3000
     ports:
       - "3000:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     command: sh -c "cd apps/web && npx next dev --turbopack --hostname 0.0.0.0 --port 3000"
 
   # ── Test runner (on-demand) ─────────────────────────────────────────
