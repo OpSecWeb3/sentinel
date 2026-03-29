@@ -32,6 +32,16 @@ function getConnection(): Redis {
   return _connection;
 }
 
+/**
+ * Return the shared Redis connection, or `undefined` if it has not yet been
+ * initialised.  Callers that need Redis but can tolerate its absence (e.g. for
+ * graceful fallback in a test environment) should use this rather than
+ * `getConnection()`.
+ */
+export function getSharedRedis(): Redis | undefined {
+  return _connection;
+}
+
 // ---------------------------------------------------------------------------
 // Queue factory
 // ---------------------------------------------------------------------------

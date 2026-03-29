@@ -16,7 +16,7 @@ import {
   rcArtifactVersions,
 } from '@sentinel/db/schema/registry';
 import { eq, and } from '@sentinel/db';
-import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
+import { getQueue, QUEUE_NAMES, getSharedRedis } from '@sentinel/shared/queue';
 import { decrypt } from '@sentinel/shared/crypto';
 import { normalizePollChange, type PollChangeType } from './normalizer.js';
 import { minimatch } from 'minimatch';
@@ -95,6 +95,49 @@ const lastFullScanAt = new Map<string, number>();
 export function resetFullScanTracking(): void {
   pollCounts.clear();
   lastFullScanAt.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Distributed full-scan lock (Redis)
+// ---------------------------------------------------------------------------
+
+/**
+ * TTL for the per-artifact full-scan Redis lock.
+ *
+ * The lock prevents multiple workers from simultaneously performing a
+ * full scan for the same artifact in the same poll cycle.  The TTL only
+ * needs to cover the time window in which two workers could both read the
+ * same authoritative DB state before either one writes the updated counter
+ * back.  Five minutes is more than generous.
+ */
+const FULL_SCAN_LOCK_TTL_SECS = 300;
+
+/**
+ * Attempt to claim the distributed full-scan lock for `artifactId`.
+ *
+ * Uses `SET NX EX` so the claim is atomic: exactly one worker succeeds per
+ * TTL window even under concurrent execution.
+ *
+ * Returns `true` when the lock was acquired (caller should do a full scan)
+ * or when Redis is unavailable (graceful fallback — old behaviour).
+ * Returns `false` when another worker already holds the lock.
+ */
+export async function tryClaimFullScanLock(artifactId: string): Promise<boolean> {
+  const redis = getSharedRedis();
+  if (!redis) {
+    // Redis not initialised (e.g. unit-test environment) — allow full scan.
+    return true;
+  }
+  try {
+    // artifactId is a PostgreSQL UUID (hex digits + hyphens only) so it is
+    // safe to interpolate directly into the Redis key without encoding.
+    const key = `registry:fullscan:${artifactId}`;
+    const result = await redis.set(key, '1', 'EX', FULL_SCAN_LOCK_TTL_SECS, 'NX');
+    return result === 'OK';
+  } catch (err) {
+    log.warn({ err, artifactId }, 'Redis full-scan lock unavailable — proceeding as full scan');
+    return true;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -780,7 +823,16 @@ export async function pollArtifact(artifact: MonitoredArtifact): Promise<void> {
   }
 
   if (isFullScan) {
-    lastFullScanAt.set(artifactId, Date.now());
+    // Acquire a distributed lock so only one worker performs the full scan per
+    // cycle.  If another worker already holds the lock, downgrade this run to
+    // an incremental poll — the other worker covers the full scan work.
+    const claimed = await tryClaimFullScanLock(artifactId);
+    if (!claimed) {
+      isFullScan = false;
+      log.info({ artifact: name }, 'Full-scan lock held by another worker — downgrading to incremental');
+    } else {
+      lastFullScanAt.set(artifactId, Date.now());
+    }
   }
 
   log.info({ artifact: name, registry, mode: isFullScan ? 'full' : 'incremental' }, 'Polling artifact');
