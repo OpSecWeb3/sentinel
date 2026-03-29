@@ -1033,8 +1033,10 @@ const createDetectionSchema = z.object({
 chainRouter.post('/detections', async (c) => {
   const orgId = c.get('orgId');
   const userId = c.get('userId');
+  const role = c.get('role');
   if (!orgId) return c.json({ error: 'Organisation required' }, 403);
   if (!userId) return c.json({ error: 'User context required' }, 403);
+  if (role !== 'admin') return c.json({ error: 'Admin role required' }, 403);
 
   let body: unknown;
   try {
@@ -1241,7 +1243,9 @@ const patchDetectionSchema = z.object({
 
 chainRouter.patch('/detections/:id', async (c) => {
   const orgId = c.get('orgId');
+  const role = c.get('role');
   if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+  if (role !== 'admin' && role !== 'editor') return c.json({ error: 'Admin or editor role required' }, 403);
 
   const detectionId = c.req.param('id');
 
@@ -1306,7 +1310,9 @@ chainRouter.patch('/detections/:id', async (c) => {
 
 chainRouter.delete('/detections/:id', async (c) => {
   const orgId = c.get('orgId');
+  const role = c.get('role');
   if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+  if (role !== 'admin') return c.json({ error: 'Admin role required' }, 403);
 
   const detectionId = c.req.param('id');
   const db = getDb();

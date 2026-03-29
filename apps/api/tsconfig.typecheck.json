@@ -8,7 +8,9 @@
     "baseUrl": "../..",
     "paths": {
       "@sentinel/db": ["packages/db/index.ts"],
-      "@sentinel/db/*": ["packages/db/*"]
+      "@sentinel/db/*": ["packages/db/*"],
+      "@sentinel/shared": ["packages/shared/src/index.ts"],
+      "@sentinel/shared/*": ["packages/shared/src/*"]
     }
   },
   "include": ["src", "../../test/helpers/setup.ts"],

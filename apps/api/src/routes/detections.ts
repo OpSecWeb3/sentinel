@@ -506,7 +506,7 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
 
     let newRuleRows: Array<{ id: string; ruleType: string; config: unknown }> = [];
     const [updated] = await db.transaction(async (tx) => {
-      await tx.delete(rules).where(eq(rules.detectionId, id));
+      await tx.delete(rules).where(and(eq(rules.detectionId, id), eq(rules.orgId, orgId)));
       newRuleRows = await tx.insert(rules).values(
         body.rules!.map((r) => ({
           detectionId: id,
@@ -564,7 +564,7 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
 
     let newRuleRows: Array<{ id: string; ruleType: string; config: unknown }> = [];
     const [updated] = await db.transaction(async (tx) => {
-      await tx.delete(rules).where(eq(rules.detectionId, id));
+      await tx.delete(rules).where(and(eq(rules.detectionId, id), eq(rules.orgId, orgId)));
       newRuleRows = await tx.insert(rules).values(
         template.rules.map((r, i) => ({
           detectionId: id,
