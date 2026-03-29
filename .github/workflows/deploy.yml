@@ -59,10 +59,11 @@ jobs:
           REDIS_PASSWORD=$(fetch_param /shared/production/REDIS_PASSWORD)
           TRUSTED_PROXY_COUNT=$(fetch_param /sentinel/production/TRUSTED_PROXY_COUNT)
 
-          # AWS cross-account role assumption
-          AWS_ACCESS_KEY_ID=$(fetch_param /sentinel/production/AWS_ACCESS_KEY_ID)
-          AWS_SECRET_ACCESS_KEY=$(fetch_param /sentinel/production/AWS_SECRET_ACCESS_KEY)
-          AWS_SENTINEL_ROLE_ARN=$(fetch_param /sentinel/production/AWS_SENTINEL_ROLE_ARN)
+          # AWS cross-account role assumption — use prefixed names to avoid
+          # clobbering the runner's OIDC credentials mid-script.
+          SENTINEL_AWS_ACCESS_KEY_ID=$(fetch_param /sentinel/production/AWS_ACCESS_KEY_ID)
+          SENTINEL_AWS_SECRET_ACCESS_KEY=$(fetch_param /sentinel/production/AWS_SECRET_ACCESS_KEY)
+          SENTINEL_AWS_ROLE_ARN=$(fetch_param /sentinel/production/AWS_SENTINEL_ROLE_ARN)
 
           # Optional secrets
           SLACK_CLIENT_ID=$(fetch_param /sentinel/production/SLACK_CLIENT_ID)
@@ -98,9 +99,9 @@ jobs:
             printf 'ALLOWED_ORIGINS=%s\n' "$ALLOWED_ORIGINS"
             printf 'NEXT_PUBLIC_API_URL=%s\n' "$NEXT_PUBLIC_API_URL"
             printf 'API_BASE_URL=%s\n' "$NEXT_PUBLIC_API_URL"
-            [ -n "$AWS_ACCESS_KEY_ID" ] && printf 'AWS_ACCESS_KEY_ID=%s\n' "$AWS_ACCESS_KEY_ID"
-            [ -n "$AWS_SECRET_ACCESS_KEY" ] && printf 'AWS_SECRET_ACCESS_KEY=%s\n' "$AWS_SECRET_ACCESS_KEY"
-            [ -n "$AWS_SENTINEL_ROLE_ARN" ] && printf 'AWS_SENTINEL_ROLE_ARN=%s\n' "$AWS_SENTINEL_ROLE_ARN"
+            [ -n "$SENTINEL_AWS_ACCESS_KEY_ID" ] && printf 'AWS_ACCESS_KEY_ID=%s\n' "$SENTINEL_AWS_ACCESS_KEY_ID"
+            [ -n "$SENTINEL_AWS_SECRET_ACCESS_KEY" ] && printf 'AWS_SECRET_ACCESS_KEY=%s\n' "$SENTINEL_AWS_SECRET_ACCESS_KEY"
+            [ -n "$SENTINEL_AWS_ROLE_ARN" ] && printf 'AWS_SENTINEL_ROLE_ARN=%s\n' "$SENTINEL_AWS_ROLE_ARN"
             printf 'SLACK_CLIENT_ID=%s\n' "$SLACK_CLIENT_ID"
             printf 'SLACK_CLIENT_SECRET=%s\n' "$SLACK_CLIENT_SECRET"
             printf 'GITHUB_APP_ID=%s\n' "$GITHUB_APP_ID"
