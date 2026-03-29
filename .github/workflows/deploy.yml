@@ -49,6 +49,7 @@ jobs:
           ALLOWED_ORIGINS=$(fetch_param /sentinel/production/ALLOWED_ORIGINS)
           NEXT_PUBLIC_API_URL=$(fetch_param /sentinel/production/NEXT_PUBLIC_API_URL)
           REDIS_PASSWORD=$(fetch_param /shared/production/REDIS_PASSWORD)
+          TRUSTED_PROXY_COUNT=$(fetch_param /sentinel/production/TRUSTED_PROXY_COUNT)
 
           # AWS cross-account role assumption
           AWS_ACCESS_KEY_ID=$(fetch_param /sentinel/production/AWS_ACCESS_KEY_ID)
@@ -82,6 +83,7 @@ jobs:
           {
             printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
             printf 'REDIS_URL=redis://:%s@redis:6379\n' "$REDIS_PASSWORD"
+            printf 'TRUSTED_PROXY_COUNT=%s\n' "$TRUSTED_PROXY_COUNT"
             printf 'SESSION_SECRET=%s\n' "$SESSION_SECRET"
             printf 'ENCRYPTION_KEY=%s\n' "$ENCRYPTION_KEY"
             [ -n "$ENCRYPTION_KEY_PREV" ] && printf 'ENCRYPTION_KEY_PREV=%s\n' "$ENCRYPTION_KEY_PREV"
@@ -94,7 +96,7 @@ jobs:
             printf 'SLACK_CLIENT_ID=%s\n' "$SLACK_CLIENT_ID"
             printf 'SLACK_CLIENT_SECRET=%s\n' "$SLACK_CLIENT_SECRET"
             printf 'GITHUB_APP_ID=%s\n' "$GITHUB_APP_ID"
-            printf 'GITHUB_APP_PRIVATE_KEY=%s\n' "$GITHUB_APP_PRIVATE_KEY"
+            printf 'GITHUB_APP_PRIVATE_KEY=%s\n' "${GITHUB_APP_PRIVATE_KEY//$'\n'/\\n}"
             printf 'GITHUB_APP_WEBHOOK_SECRET=%s\n' "$GITHUB_APP_WEBHOOK_SECRET"
             printf 'GITHUB_APP_CLIENT_ID=%s\n' "$GITHUB_APP_CLIENT_ID"
             printf 'GITHUB_APP_CLIENT_SECRET=%s\n' "$GITHUB_APP_CLIENT_SECRET"
@@ -116,7 +118,7 @@ jobs:
           } >> /tmp/sentinel.env
 
           # Validate required SSM parameters before SCP
-          REQUIRED_VARS="DATABASE_URL SESSION_SECRET ENCRYPTION_KEY ALLOWED_ORIGINS NEXT_PUBLIC_API_URL REDIS_PASSWORD"
+          REQUIRED_VARS="DATABASE_URL SESSION_SECRET ENCRYPTION_KEY ALLOWED_ORIGINS NEXT_PUBLIC_API_URL REDIS_PASSWORD TRUSTED_PROXY_COUNT"
           MISSING=""
           for var in $REQUIRED_VARS; do
             eval "val=\$$var"
@@ -169,24 +171,23 @@ jobs:
           ssh -i ~/.ssh/deploy_key ${USER}@${HOST} "
             cd /opt/sentinel
             git remote set-url origin 'https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git'
+            trap 'git remote set-url origin https://github.com/${REPO}.git' EXIT
             bash scripts/deploy.sh
-            git remote set-url origin 'https://github.com/${REPO}.git'
           "
 
       - name: External smoke check
-        env:
-          HOST: ${{ secrets.HETZNER_HOST }}
         run: |
           set -euo pipefail
+          API_URL=$(aws ssm get-parameter --name /sentinel/production/NEXT_PUBLIC_API_URL --query 'Parameter.Value' --output text)
           for i in {1..10}; do
-            if curl -fsS --max-time 8 "http://${HOST}:4100/health" >/tmp/api-health.json; then
+            if curl -fsS --max-time 8 "${API_URL}/health" >/tmp/api-health.json; then
               echo "API reachable from runner"
               cat /tmp/api-health.json
               exit 0
             fi
             sleep 3
           done
-          echo "::error::External smoke check failed for http://${HOST}:4100/health"
+          echo "::error::External smoke check failed for ${API_URL}/health"
           exit 1
 
       - name: Collect logs on failure

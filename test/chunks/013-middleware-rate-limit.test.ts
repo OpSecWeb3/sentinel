@@ -19,6 +19,8 @@ import type { Hono } from 'hono';
 
 let app: Hono<any>;
 let origDisableRateLimit: string | undefined;
+let origNodeEnv: string | undefined;
+let origRedisUrl: string | undefined;
 
 beforeAll(async () => {
   app = await getApp();
@@ -30,7 +32,10 @@ beforeEach(async () => {
   // Enable rate limiting for these tests — must also reset the env cache
   // since env() caches DISABLE_RATE_LIMIT from first parse.
   origDisableRateLimit = process.env.DISABLE_RATE_LIMIT;
+  origNodeEnv = process.env.NODE_ENV;
+  origRedisUrl = process.env.REDIS_URL;
   process.env.DISABLE_RATE_LIMIT = 'false';
+  process.env.NODE_ENV = 'test';
   resetEnvCache();
 });
 
@@ -40,6 +45,16 @@ afterEach(() => {
     process.env.DISABLE_RATE_LIMIT = origDisableRateLimit;
   } else {
     delete process.env.DISABLE_RATE_LIMIT;
+  }
+  if (origNodeEnv !== undefined) {
+    process.env.NODE_ENV = origNodeEnv;
+  } else {
+    delete process.env.NODE_ENV;
+  }
+  if (origRedisUrl !== undefined) {
+    process.env.REDIS_URL = origRedisUrl;
+  } else {
+    delete process.env.REDIS_URL;
   }
   resetEnvCache();
 });
@@ -107,5 +122,17 @@ describe('Chunk 013 — Rate limiting', () => {
 
     expect(lastRes!.status).toBe(429);
     expect(lastRes!.headers.get('X-RateLimit-Remaining')).toBe('0');
+  });
+
+  it('should enforce rate limiting in production even when DISABLE_RATE_LIMIT=true', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.DISABLE_RATE_LIMIT = 'true';
+    process.env.REDIS_URL = 'redis://:test-password@localhost:6380/1';
+    resetEnvCache();
+
+    const res = await appRequest(app, 'GET', '/auth/setup-status', {});
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-RateLimit-Limit')).toBeDefined();
+    expect(res.headers.get('X-RateLimit-Remaining')).toBeDefined();
   });
 });

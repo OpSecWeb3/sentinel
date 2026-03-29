@@ -57,7 +57,8 @@ const SLIDING_WINDOW_LUA = `
 
 function createLimiter(opts: RateLimitOptions) {
   return async (c: AuthContext, next: Next) => {
-    if (env().DISABLE_RATE_LIMIT === 'true') return next();
+    const config = env();
+    if (config.DISABLE_RATE_LIMIT === 'true' && config.NODE_ENV !== 'production') return next();
 
     const redis = getSharedRedis();
     const key = `sentinel:rl:${opts.prefix}:${getKey(c)}`;

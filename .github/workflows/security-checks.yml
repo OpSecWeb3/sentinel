@@ -1,0 +1,54 @@
+name: Security
+
+on:
+  schedule:
+    - cron: "21 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          VERSION="8.24.3"
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+            | tar -xz
+          sudo mv gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Run full git history scan (nightly)
+        run: |
+          gitleaks git . \
+            --config .gitleaks.toml \
+            --redact
+
+  osv-scanner:
+    name: OSV Scanner (nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install OSV-Scanner
+        run: |
+          set -euo pipefail
+          VERSION="v2.1.0"
+          curl -sSL "https://github.com/google/osv-scanner/releases/download/${VERSION}/osv-scanner_linux_amd64" -o osv-scanner
+          chmod +x osv-scanner
+          sudo mv osv-scanner /usr/local/bin/osv-scanner
+          osv-scanner --version
+
+      - name: Run lockfile vulnerability scan
+        run: |
+          osv-scanner scan --lockfile=pnpm-lock.yaml
