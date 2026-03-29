@@ -104,13 +104,13 @@ export function resetFullScanTracking(): void {
 /**
  * TTL for the per-artifact full-scan Redis lock.
  *
- * The lock prevents multiple workers from simultaneously performing a
- * full scan for the same artifact in the same poll cycle.  The TTL only
- * needs to cover the time window in which two workers could both read the
- * same authoritative DB state before either one writes the updated counter
- * back.  Five minutes is more than generous.
+ * The lock only needs to outlive the winning worker's full scan — once it
+ * writes `lastFullScanAt` back to the DB, any subsequent worker will read
+ * the updated value and compute `isFullScan = false` regardless of whether
+ * the lock still exists.  60 seconds covers even slow registry fetches with
+ * headroom, while keeping crash-recovery fast.
  */
-const FULL_SCAN_LOCK_TTL_SECS = 300;
+const FULL_SCAN_LOCK_TTL_SECS = 60;
 
 /**
  * Attempt to claim the distributed full-scan lock for `artifactId`.
