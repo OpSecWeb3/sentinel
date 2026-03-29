@@ -665,8 +665,9 @@ describe('Crypto - hmacSign and timingSafeEqual', () => {
     expect(timingSafeEqual('short', 'muchlongerstring')).toBe(false);
   });
 
-  it('timingSafeEqual resistant to length attacks (fast reject on length mismatch)', () => {
-    // Should not throw even with vastly different lengths
+  it('timingSafeEqual handles vastly different lengths without leaking length', () => {
+    // Both inputs are hashed to fixed-length before comparison, so no
+    // timing side-channel on secret length and no throw from Node.js.
     expect(timingSafeEqual('a', 'a'.repeat(10000))).toBe(false);
     expect(timingSafeEqual('a'.repeat(10000), 'a')).toBe(false);
   });

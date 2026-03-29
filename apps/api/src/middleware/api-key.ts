@@ -14,15 +14,17 @@ export async function apiKeyMiddleware(c: AuthContext, next: Next) {
   if (!auth?.startsWith(`Bearer ${KEY_PREFIX}`)) return next();
 
   const rawKey = auth.slice(7); // Remove "Bearer "
-  const prefix = rawKey.slice(0, KEY_PREFIX.length + 8);
   const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
 
   const db = getDb();
+  // Look up by the unique keyHash index — avoids prefix-collision issues
+  // where two non-revoked keys sharing the same 8-char prefix caused LIMIT 1
+  // to return the wrong row.
   const [key] = await db
     .select()
     .from(apiKeys)
     .where(and(
-      eq(apiKeys.keyPrefix, prefix),
+      eq(apiKeys.keyHash, keyHash),
       eq(apiKeys.revoked, false),
     ))
     .limit(1);

@@ -119,8 +119,11 @@ router.get('/state-history', requireScope('api:read'), validate('query', stateHi
 // ---------------------------------------------------------------------------
 
 router.get('/network-status', requireScope('api:read'), requireRole('admin'), async (c) => {
+  const orgId = c.get('orgId');
   const db = getDb();
 
+  // Scope to networks the org monitors — i.e. networks that have at least one
+  // contract registered by this org, or that appear in the org's RPC usage.
   const rows = await db
     .select({
       networkId: chainBlockCursors.networkId,
@@ -132,7 +135,13 @@ router.get('/network-status', requireScope('api:read'), requireRole('admin'), as
       isActive: chainNetworks.isActive,
     })
     .from(chainBlockCursors)
-    .innerJoin(chainNetworks, eq(chainNetworks.id, chainBlockCursors.networkId));
+    .innerJoin(chainNetworks, eq(chainNetworks.id, chainBlockCursors.networkId))
+    .where(sql`EXISTS (
+      SELECT 1 FROM chain_org_contracts oc
+      JOIN chain_contracts cc ON cc.id = oc.contract_id
+      WHERE cc.network_id = ${chainBlockCursors.networkId}
+        AND oc.org_id = ${orgId}
+    )`);
 
   return c.json({ data: rows });
 });

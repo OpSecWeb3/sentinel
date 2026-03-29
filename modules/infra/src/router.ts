@@ -24,10 +24,13 @@ import {
   infraCdnProviderConfigs,
   infraCdnOriginRecords,
 } from '@sentinel/db/schema/infra';
-import { eq, and, desc, asc, lte, gte, sql, inArray } from '@sentinel/db';
+import { eq, and, desc, asc, lte, gte, sql, inArray, ilike, count } from '@sentinel/db';
 import { alerts, detections } from '@sentinel/db/schema/core';
 import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
+import { logger as rootLogger } from '@sentinel/shared/logger';
 import type { AppEnv } from '@sentinel/shared/hono-types';
+
+const log = rootLogger.child({ component: 'infra-router' });
 
 export const infraRouter = new Hono<AppEnv>();
 
@@ -73,38 +76,7 @@ infraRouter.get('/hosts', async (c) => {
 
   const db = getDb();
 
-  const allHosts = await db
-    .select({
-      id: infraHosts.id,
-      hostname: infraHosts.hostname,
-      currentScore: infraHosts.currentScore,
-      lastScannedAt: infraHosts.lastScannedAt,
-      isActive: infraHosts.isActive,
-      isRoot: infraHosts.isRoot,
-      parentId: infraHosts.parentId,
-      createdAt: infraHosts.createdAt,
-    })
-    .from(infraHosts)
-    .where(
-      showAll
-        ? and(eq(infraHosts.orgId, orgId), eq(infraHosts.isActive, true))
-        : and(eq(infraHosts.orgId, orgId), eq(infraHosts.isRoot, true), eq(infraHosts.isActive, true))
-    );
-
-  // Get latest cert per host
-  const certRows = await db
-    .select({ hostId: infraCertificates.hostId, notAfter: infraCertificates.notAfter })
-    .from(infraCertificates)
-    .innerJoin(infraHosts, eq(infraHosts.id, infraCertificates.hostId))
-    .where(eq(infraHosts.orgId, orgId));
-
-  const certMap = new Map<string, Date>();
-  for (const row of certRows) {
-    const existing = certMap.get(row.hostId);
-    if (!existing || (row.notAfter && row.notAfter > existing)) {
-      if (row.notAfter) certMap.set(row.hostId, row.notAfter);
-    }
-  }
+  // --- Shared helpers ---------------------------------------------------
 
   function computeStatus(h: { isActive: boolean; lastScannedAt: Date | null }): string {
     if (!h.isActive) return 'removed';
@@ -120,20 +92,123 @@ infraRouter.get('/hosts', async (c) => {
     certExpiry: string | null; status: string; createdAt: string;
   };
 
-  let mapped: HostRow[] = allHosts.map((h) => ({
-    id: h.id,
-    hostname: h.hostname,
-    isRoot: h.isRoot,
-    parentId: h.parentId ?? null,
-    score: h.currentScore ?? null,
-    grade: scoreToGrade(h.currentScore),
-    lastScanAt: h.lastScannedAt?.toISOString() ?? null,
-    certExpiry: certMap.get(h.id)?.toISOString() ?? null,
-    status: computeStatus(h),
-    createdAt: h.createdAt.toISOString(),
-  }));
+  /** Build base WHERE conditions common to both paths. */
+  const baseConditions = [
+    eq(infraHosts.orgId, orgId),
+    eq(infraHosts.isActive, true),
+    ...(showAll ? [] : [eq(infraHosts.isRoot, true)]),
+    ...(q ? [ilike(infraHosts.hostname, `%${q}%`)] : []),
+  ];
 
-  if (q) mapped = mapped.filter((h) => h.hostname.toLowerCase().includes(q));
+  /** Fetch cert expiry (latest notAfter) for a set of host IDs. */
+  async function fetchCertMap(hostIds: string[]): Promise<Map<string, Date>> {
+    if (hostIds.length === 0) return new Map();
+    const certRows = await db
+      .select({ hostId: infraCertificates.hostId, notAfter: infraCertificates.notAfter })
+      .from(infraCertificates)
+      .where(inArray(infraCertificates.hostId, hostIds));
+    const m = new Map<string, Date>();
+    for (const row of certRows) {
+      const existing = m.get(row.hostId);
+      if (!existing || (row.notAfter && row.notAfter > existing)) {
+        if (row.notAfter) m.set(row.hostId, row.notAfter);
+      }
+    }
+    return m;
+  }
+
+  /** Map a raw DB row + certMap entry to the API response shape. */
+  function toHostRow(h: typeof hostSelect, certMap: Map<string, Date>): HostRow {
+    return {
+      id: h.id,
+      hostname: h.hostname,
+      isRoot: h.isRoot,
+      parentId: h.parentId ?? null,
+      score: h.currentScore ?? null,
+      grade: scoreToGrade(h.currentScore),
+      lastScanAt: h.lastScannedAt?.toISOString() ?? null,
+      certExpiry: certMap.get(h.id)?.toISOString() ?? null,
+      status: computeStatus(h),
+      createdAt: h.createdAt.toISOString(),
+    };
+  }
+
+  // Dummy type for the select shape
+  type HostSelect = {
+    id: string; hostname: string; currentScore: number | null;
+    lastScannedAt: Date | null; isActive: boolean; isRoot: boolean;
+    parentId: string | null; createdAt: Date;
+  };
+  const hostSelect = {} as HostSelect; // used only for typeof
+
+  // --- Non-tree path: SQL pagination (the common case) -----------------
+
+  if (!showAll) {
+    // Determine SQL ORDER BY based on sortField
+    const orderCol =
+      sortField === 'score' ? infraHosts.currentScore :
+      sortField === 'lastScanAt' ? infraHosts.lastScannedAt :
+      sortField === 'certExpiry' ? infraHosts.lastScannedAt : // certExpiry sort falls back to lastScannedAt at SQL level
+      infraHosts.hostname;
+
+    // Nulls-last ordering: use SQL NULLS LAST for consistent behavior
+    const orderExpr = sortDir === 'desc'
+      ? sql`${orderCol} DESC NULLS LAST`
+      : sql`${orderCol} ASC NULLS LAST`;
+
+    // Fetch count and page in parallel
+    const [countResult, pageHosts] = await Promise.all([
+      db.select({ total: count() })
+        .from(infraHosts)
+        .where(and(...baseConditions)),
+      db.select({
+          id: infraHosts.id,
+          hostname: infraHosts.hostname,
+          currentScore: infraHosts.currentScore,
+          lastScannedAt: infraHosts.lastScannedAt,
+          isActive: infraHosts.isActive,
+          isRoot: infraHosts.isRoot,
+          parentId: infraHosts.parentId,
+          createdAt: infraHosts.createdAt,
+        })
+        .from(infraHosts)
+        .where(and(...baseConditions))
+        .orderBy(orderExpr)
+        .limit(limit)
+        .offset(offset),
+    ]);
+
+    const total = Number(countResult[0]?.total ?? 0);
+    const certMap = await fetchCertMap(pageHosts.map((h) => h.id));
+    const data = pageHosts.map((h) => toHostRow(h, certMap));
+
+    return c.json({
+      data,
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  }
+
+  // --- Tree path (showAll=true): parent-child interleaving -------------
+  // Tree interleaving requires knowing the full ordered set to group
+  // children under parents, so we keep in-memory ordering here. The search
+  // filter is still pushed to SQL to reduce the result set.
+
+  const allHosts = await db
+    .select({
+      id: infraHosts.id,
+      hostname: infraHosts.hostname,
+      currentScore: infraHosts.currentScore,
+      lastScannedAt: infraHosts.lastScannedAt,
+      isActive: infraHosts.isActive,
+      isRoot: infraHosts.isRoot,
+      parentId: infraHosts.parentId,
+      createdAt: infraHosts.createdAt,
+    })
+    .from(infraHosts)
+    .where(and(...baseConditions));
+
+  const certMap = await fetchCertMap(allHosts.map((h) => h.id));
+  const mapped = allHosts.map((h) => toHostRow(h, certMap));
 
   function sortCmp(a: HostRow, b: HostRow): number {
     let av: string | number | null, bv: string | number | null;
@@ -147,35 +222,28 @@ infraRouter.get('/hosts', async (c) => {
     return sortDir === 'desc' ? -cmp : cmp;
   }
 
-  let hosts: HostRow[];
-
-  if (showAll) {
-    // Group: sort roots, then interleave children after their parent
-    const roots = mapped.filter((h) => h.isRoot).sort(sortCmp);
-    const childrenByParent = new Map<string, HostRow[]>();
-    for (const h of mapped) {
-      if (!h.isRoot && h.parentId) {
-        const arr = childrenByParent.get(h.parentId) ?? [];
-        arr.push(h);
-        childrenByParent.set(h.parentId, arr);
-      }
+  // Group: sort roots, then interleave children after their parent
+  const roots = mapped.filter((h) => h.isRoot).sort(sortCmp);
+  const childrenByParent = new Map<string, HostRow[]>();
+  for (const h of mapped) {
+    if (!h.isRoot && h.parentId) {
+      const arr = childrenByParent.get(h.parentId) ?? [];
+      arr.push(h);
+      childrenByParent.set(h.parentId, arr);
     }
-    // Sort children by hostname within each parent
-    for (const arr of childrenByParent.values()) arr.sort((a, b) => a.hostname.localeCompare(b.hostname));
-    hosts = [];
-    for (const root of roots) {
-      hosts.push(root);
-      const children = childrenByParent.get(root.id) ?? [];
-      hosts.push(...children);
+  }
+  for (const arr of childrenByParent.values()) arr.sort((a, b) => a.hostname.localeCompare(b.hostname));
+  const hosts: HostRow[] = [];
+  for (const root of roots) {
+    hosts.push(root);
+    const children = childrenByParent.get(root.id) ?? [];
+    hosts.push(...children);
+  }
+  // Orphaned children (parent not in result set due to search filter) appended at end
+  for (const h of mapped) {
+    if (!h.isRoot && (!h.parentId || !mapped.find((r) => r.id === h.parentId))) {
+      hosts.push(h);
     }
-    // Orphaned children (parent not in result set due to search filter) appended at end
-    for (const h of mapped) {
-      if (!h.isRoot && (!h.parentId || !mapped.find((r) => r.id === h.parentId))) {
-        hosts.push(h);
-      }
-    }
-  } else {
-    hosts = mapped.sort(sortCmp);
   }
 
   const total = hosts.length;
@@ -246,6 +314,8 @@ infraRouter.post('/hosts', async (c) => {
         intervalMinutes: body.scanIntervalMinutes,
         probeEnabled: body.probeEnabled,
         probeIntervalMinutes: body.probeIntervalMinutes,
+        nextRunAt: new Date(),
+        probeNextRunAt: body.probeEnabled ? new Date() : null,
       },
     });
 
@@ -389,7 +459,7 @@ infraRouter.get('/hosts/:id', async (c) => {
       } : null,
       scoreHistory: scoreHistory.map((s) => ({ date: s.recordedAt.toISOString(), score: s.score, grade: s.grade ?? scoreToGrade(s.score) })),
       recentScans: recentScans.map((s) => ({ id: s.id, status: s.status, startedAt: s.startedAt.toISOString(), completedAt: s.completedAt?.toISOString() ?? null, steps: [] })),
-      schedule: schedule ? { enabled: schedule.enabled, scanIntervalHours: Math.round(schedule.intervalMinutes / 60), probeEnabled: schedule.probeEnabled, probeIntervalMinutes: schedule.probeIntervalMinutes } : null,
+      schedule: schedule ? { enabled: schedule.enabled, scanIntervalHours: Math.round(schedule.intervalMinutes / 60), probeEnabled: schedule.probeEnabled, probeIntervalMinutes: schedule.probeIntervalMinutes, nextRunAt: schedule.nextRunAt?.toISOString() ?? null, probeNextRunAt: schedule.probeNextRunAt?.toISOString() ?? null } : null,
     },
   });
 });
@@ -455,6 +525,24 @@ infraRouter.delete('/hosts/:id', async (c) => {
     .update(infraScanSchedules)
     .set({ enabled: false, probeEnabled: false })
     .where(eq(infraScanSchedules.hostId, hostId));
+
+  // If this was the last active host, pause all infra detections for the org
+  const [remaining] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(infraHosts)
+    .where(and(eq(infraHosts.orgId, orgId), eq(infraHosts.isActive, true)));
+
+  if ((remaining?.total ?? 0) === 0) {
+    const paused = await db
+      .update(detections)
+      .set({ status: 'paused', updatedAt: new Date() })
+      .where(and(eq(detections.orgId, orgId), eq(detections.moduleId, 'infra'), eq(detections.status, 'active')))
+      .returning({ id: detections.id });
+
+    if (paused.length > 0) {
+      log.warn({ orgId, pausedCount: paused.length }, 'Last active infra host removed — paused all infra detections');
+    }
+  }
 
   return c.json({ data: { id: result.id, status: 'removed' } });
 });
@@ -626,6 +714,7 @@ infraRouter.put('/hosts/:id/schedule', async (c) => {
     .where(and(eq(infraHosts.id, hostId), eq(infraHosts.orgId, orgId))).limit(1);
   if (!host) return c.json({ error: 'Host not found' }, 404);
 
+  const now = new Date();
   await db.insert(infraScanSchedules)
     .values({
       hostId,
@@ -633,7 +722,8 @@ infraRouter.put('/hosts/:id/schedule', async (c) => {
       intervalMinutes: body.scanIntervalHours * 60,
       probeEnabled: body.probeEnabled,
       probeIntervalMinutes: body.probeIntervalMinutes,
-      nextRunAt: new Date(),
+      nextRunAt: now,
+      probeNextRunAt: body.probeEnabled ? now : null,
     })
     .onConflictDoUpdate({
       target: infraScanSchedules.hostId,
@@ -642,6 +732,8 @@ infraRouter.put('/hosts/:id/schedule', async (c) => {
         intervalMinutes: body.scanIntervalHours * 60,
         probeEnabled: body.probeEnabled,
         probeIntervalMinutes: body.probeIntervalMinutes,
+        nextRunAt: now,
+        probeNextRunAt: body.probeEnabled ? now : null,
       },
     });
 
@@ -651,6 +743,9 @@ infraRouter.put('/hosts/:id/schedule', async (c) => {
 // ---------------------------------------------------------------------------
 // POST /modules/infra/hosts/:id/discover — subdomain discovery via crt.sh
 // ---------------------------------------------------------------------------
+
+/** Maximum subdomains to process from a single crt.sh discovery request. */
+const MAX_DISCOVERY_RESULTS = 100;
 
 infraRouter.post('/hosts/:id/discover', async (c) => {
   const orgId = c.get('orgId');
@@ -665,6 +760,7 @@ infraRouter.post('/hosts/:id/discover', async (c) => {
   if (!host) return c.json({ error: 'Host not found' }, 404);
 
   let discovered: string[] = [];
+  let totalUnique = 0;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15_000);
@@ -681,9 +777,12 @@ infraRouter.post('/hosts/:id/discover', async (c) => {
           if (trimmed.endsWith(`.${host.hostname}`) && isValidHostname(trimmed)) names.add(trimmed);
         }
       }
-      discovered = Array.from(names);
+      totalUnique = names.size;
+      discovered = Array.from(names).slice(0, MAX_DISCOVERY_RESULTS);
     }
   } catch { /* crt.sh is best-effort */ }
+
+  const truncated = totalUnique > MAX_DISCOVERY_RESULTS;
 
   const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
   let newCount = 0;
@@ -702,7 +801,15 @@ infraRouter.post('/hosts/:id/discover', async (c) => {
       newCount++;
     }
   }
-  return c.json({ data: { discovered: discovered.length, newHosts: newCount } });
+  return c.json({
+    data: {
+      discovered: discovered.length,
+      newHosts: newCount,
+      totalFound: totalUnique,
+      truncated,
+      ...(truncated ? { message: `Results capped at ${MAX_DISCOVERY_RESULTS} of ${totalUnique} unique subdomains` } : {}),
+    },
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1256,7 +1363,7 @@ infraRouter.post('/cdn-providers/:id/validate', async (c) => {
 
   await db.update(infraCdnProviderConfigs)
     .set({ isValid: valid, lastValidatedAt: new Date() })
-    .where(eq(infraCdnProviderConfigs.id, configId));
+    .where(and(eq(infraCdnProviderConfigs.id, configId), eq(infraCdnProviderConfigs.orgId, orgId)));
 
   return c.json({ data: { valid, message } });
 });

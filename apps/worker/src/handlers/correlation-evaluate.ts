@@ -57,6 +57,7 @@ export function createCorrelationHandler(redis: Redis, log?: Logger): JobHandler
 
       // Create alerts and enqueue dispatch
       const alertsQueue = getQueue(QUEUE_NAMES.ALERTS);
+      const errors: Array<{ correlationRuleId: string; err: unknown }> = [];
 
       for (const candidate of result.candidates) {
         try {
@@ -115,11 +116,19 @@ export function createCorrelationHandler(redis: Redis, log?: Logger): JobHandler
           await alertsQueue.add('alert.dispatch', { alertId });
         } catch (err) {
           _log.error({ err, correlationRuleId: candidate.correlationRuleId }, 'Failed to create correlated alert');
+          errors.push({ correlationRuleId: candidate.correlationRuleId, err });
         }
       }
 
       if (result.candidates.length > 0) {
         _log.info({ eventId, alertCount: result.candidates.length, advanced: result.advancedRuleIds.size, started: result.startedRuleIds.size }, 'Correlation evaluation complete');
+      }
+
+      // Re-throw after processing all candidates so successfully created alerts
+      // are not lost, but the job still retries for the failed ones.
+      // On retry, onConflictDoNothing ensures already-created alerts are skipped.
+      if (errors.length > 0) {
+        throw new Error(`Failed to create ${errors.length}/${result.candidates.length} correlated alerts: ${errors.map((e) => e.correlationRuleId).join(', ')}`);
       }
     },
   };

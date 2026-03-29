@@ -166,6 +166,14 @@ handle_param "NEXT_PUBLIC_API_URL" \
   "Public API URL for Next.js frontend (build-time)" \
   "https://api.sentinel.example.com"
 
+# TRUSTED_PROXY_COUNT: behind nginx, set to 1 so the rate limiter and IP
+# extraction read the real client IP from X-Forwarded-For instead of seeing
+# every request as coming from the nginx container IP.
+handle_param "TRUSTED_PROXY_COUNT" \
+  "Number of trusted reverse proxies (1 for nginx)" \
+  "Trusted proxy count for X-Forwarded-For IP extraction" \
+  "1"
+
 # ── Optional parameters ───────────────────────────────────────────────
 
 echo ""

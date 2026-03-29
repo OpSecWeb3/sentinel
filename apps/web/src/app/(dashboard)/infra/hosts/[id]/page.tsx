@@ -123,6 +123,8 @@ interface ScanSchedule {
   scanIntervalHours: number;
   probeEnabled: boolean;
   probeIntervalMinutes: number;
+  nextRunAt: string | null;
+  probeNextRunAt: string | null;
 }
 
 interface ChildHost {
@@ -161,6 +163,19 @@ interface HostDetail {
 }
 
 /* -- helpers -------------------------------------------------------- */
+
+function formatCountdown(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const diff = new Date(iso).getTime() - Date.now();
+  if (diff <= 0) return "due now";
+  const totalSec = Math.floor(diff / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
 
 const categoryLabel: Record<string, string> = {
   Infrastructure: "Infra",
@@ -321,12 +336,37 @@ export default function HostDetailPage() {
         method: "POST",
         credentials: "include",
       });
-      toast("Scan queued. Results will appear shortly.", "success");
-      // Refresh after a delay
-      setTimeout(fetchHost, 3000);
+      toast("Scan queued.", "success");
+      // Poll until the scan completes or fails
+      const pollInterval = setInterval(async () => {
+        try {
+          const res = await apiFetch<{ data: HostDetail }>(
+            `/modules/infra/hosts/${hostId}`,
+            { credentials: "include" },
+          );
+          setHost(res.data);
+          const latest = res.data.recentScans?.[0];
+          if (!latest || latest.status === "completed" || latest.status === "failed") {
+            clearInterval(pollInterval);
+            setScanLoading(false);
+            if (latest?.status === "completed") {
+              toast("Scan complete.", "success");
+            } else if (latest?.status === "failed") {
+              toast("Scan failed.", "error");
+            }
+          }
+        } catch {
+          clearInterval(pollInterval);
+          setScanLoading(false);
+        }
+      }, 3000);
+      // Safety timeout: stop polling after 5 minutes
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        setScanLoading(false);
+      }, 300_000);
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to trigger scan", "error");
-    } finally {
       setScanLoading(false);
     }
   }
@@ -394,6 +434,7 @@ export default function HostDetailPage() {
       });
       toast("Schedule updated.", "success");
       setScheduleModalOpen(false);
+      fetchHost();
     } catch {
       toast("Failed to update schedule.");
     } finally {
@@ -422,12 +463,13 @@ export default function HostDetailPage() {
   async function discoverSubdomains() {
     setDiscoverLoading(true);
     try {
-      const res = await apiFetch<{ data: { discovered: number; newHosts: number } }>(
+      const res = await apiFetch<{ data: { discovered: number; newHosts: number; truncated?: boolean; totalFound?: number } }>(
         `/modules/infra/hosts/${hostId}/discover`,
         { method: "POST", credentials: "include" },
       );
+      const truncMsg = res.data.truncated ? ` (capped — ${res.data.totalFound} total found)` : '';
       toast(
-        `Discovered ${res.data.discovered} subdomains (${res.data.newHosts} new)`,
+        `Discovered ${res.data.discovered} subdomains (${res.data.newHosts} new)${truncMsg}`,
       );
       if (res.data.newHosts > 0) {
         setSubdomainsLoaded(false);
@@ -603,60 +645,82 @@ export default function HostDetailPage() {
             className="absolute inset-0 bg-background/80 backdrop-blur-sm"
             onClick={() => setScheduleModalOpen(false)}
           />
-          <div className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-lg shadow-black/20 font-mono">
-            <h2 className="text-sm font-bold text-primary mb-4">$ scan schedule</h2>
+          <div className="relative z-10 w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-lg shadow-black/20 font-mono">
+            <h2 className="text-sm font-bold text-primary mb-5">$ configure schedule</h2>
 
-            <div className="space-y-4">
-              {/* Master scan toggle */}
-              <div className="flex items-center justify-between border border-border px-3 py-2">
-                <span className="text-xs text-muted-foreground">--scanning</span>
-                <button
-                  onClick={() => setScanEnabled((v) => !v)}
-                  className={cn("text-xs font-mono transition-colors", scanEnabled ? "text-primary" : "text-muted-foreground")}
-                >
-                  [{scanEnabled ? "enabled" : "disabled"}]
-                </button>
-              </div>
-
-              <div className={cn("grid grid-cols-2 gap-3", !scanEnabled && "opacity-40 pointer-events-none")}>
-                <div>
-                  <label className="block text-xs text-muted-foreground mb-1">--scan-interval (hours)</label>
-                  <div className="flex items-center gap-2 border border-border bg-background px-3 py-2 text-sm focus-within:border-primary transition-colors">
-                    <span className="text-muted-foreground shrink-0">{">"}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={168}
-                      value={scanInterval}
-                      onChange={(e) => setScanInterval(parseInt(e.target.value) || 1)}
-                      className="w-full bg-transparent outline-none font-mono"
-                    />
-                  </div>
+            <div className="space-y-5">
+              {/* Full Scan section */}
+              <div className="border border-border rounded">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/30">
+                  <span className="text-xs font-bold text-foreground">FULL SCAN</span>
+                  <button
+                    onClick={() => setScanEnabled((v) => !v)}
+                    className={cn("text-xs font-mono transition-colors", scanEnabled ? "text-primary" : "text-muted-foreground")}
+                  >
+                    [{scanEnabled ? "on" : "off"}]
+                  </button>
                 </div>
-                <div>
-                  <label className="block text-xs text-muted-foreground mb-1">--probe-interval (min)</label>
-                  <div className="flex items-center gap-2 border border-border bg-background px-3 py-2 text-sm focus-within:border-primary transition-colors">
-                    <span className="text-muted-foreground shrink-0">{">"}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={60}
-                      value={probeInterval}
-                      onChange={(e) => setProbeInterval(parseInt(e.target.value) || 1)}
-                      className="w-full bg-transparent outline-none font-mono"
-                    />
+                <div className={cn("px-3 py-3 space-y-2", !scanEnabled && "opacity-40 pointer-events-none")}>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-muted-foreground">interval</label>
+                    <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1 border border-border bg-background px-2 py-1 text-xs focus-within:border-primary transition-colors">
+                        <input
+                          type="number"
+                          min={1}
+                          max={168}
+                          value={scanInterval}
+                          onChange={(e) => setScanInterval(parseInt(e.target.value) || 1)}
+                          className="w-12 bg-transparent outline-none font-mono text-right"
+                        />
+                      </div>
+                      <span className="text-xs text-muted-foreground">hours</span>
+                    </div>
                   </div>
+                  {host?.schedule?.nextRunAt && scanEnabled && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">next scan</span>
+                      <span className="text-xs text-primary">{formatCountdown(host.schedule.nextRunAt)}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className={cn("flex items-center justify-between border border-border px-3 py-2", !scanEnabled && "opacity-40 pointer-events-none")}>
-                <span className="text-xs text-muted-foreground">--uptime-probe</span>
-                <button
-                  onClick={() => setProbeEnabled((v) => !v)}
-                  className={cn("text-xs font-mono transition-colors", probeEnabled ? "text-primary" : "text-muted-foreground")}
-                >
-                  [{probeEnabled ? "enabled" : "disabled"}]
-                </button>
+              {/* Uptime Probe section */}
+              <div className={cn("border border-border rounded", !scanEnabled && "opacity-40 pointer-events-none")}>
+                <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/30">
+                  <span className="text-xs font-bold text-foreground">UPTIME PROBE</span>
+                  <button
+                    onClick={() => setProbeEnabled((v) => !v)}
+                    className={cn("text-xs font-mono transition-colors", probeEnabled ? "text-primary" : "text-muted-foreground")}
+                  >
+                    [{probeEnabled ? "on" : "off"}]
+                  </button>
+                </div>
+                <div className={cn("px-3 py-3 space-y-2", !probeEnabled && "opacity-40 pointer-events-none")}>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-muted-foreground">interval</label>
+                    <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1 border border-border bg-background px-2 py-1 text-xs focus-within:border-primary transition-colors">
+                        <input
+                          type="number"
+                          min={1}
+                          max={60}
+                          value={probeInterval}
+                          onChange={(e) => setProbeInterval(parseInt(e.target.value) || 1)}
+                          className="w-12 bg-transparent outline-none font-mono text-right"
+                        />
+                      </div>
+                      <span className="text-xs text-muted-foreground">min</span>
+                    </div>
+                  </div>
+                  {host?.schedule?.probeNextRunAt && probeEnabled && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">next probe</span>
+                      <span className="text-xs text-primary">{formatCountdown(host.schedule.probeNextRunAt)}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -733,6 +797,18 @@ export default function HostDetailPage() {
         </div>
       </div>
 
+      {/* Scan-in-progress banner */}
+      {scanLoading && (
+        <div className="flex items-center gap-3 rounded border border-primary/30 bg-primary/5 px-4 py-3 font-mono text-xs">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+          </span>
+          <span className="text-primary">scanning {host.hostname}</span>
+          <span className="text-muted-foreground">— running 8 checks (dns, cert, tls, headers, ct, infra, whois, health)</span>
+        </div>
+      )}
+
       {/* Score card + quick stats */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {/* Grade card */}
@@ -803,19 +879,35 @@ export default function HostDetailPage() {
                 [edit]
               </button>
             </div>
-            <div className="mt-1 space-y-1 text-xs font-mono">
-              <p>
-                <span className="text-muted-foreground">scan: </span>
-                <span className={host.schedule?.enabled === false ? "text-muted-foreground" : "text-primary"}>
-                  {host.schedule?.enabled === false ? "off" : `every ${host.schedule?.scanIntervalHours ?? 24}h`}
-                </span>
-              </p>
-              <p>
-                <span className="text-muted-foreground">probe: </span>
-                <span className={host.schedule?.probeEnabled === false ? "text-muted-foreground" : "text-foreground"}>
-                  {host.schedule?.probeEnabled === false ? "off" : `every ${host.schedule?.probeIntervalMinutes ?? 5}m`}
-                </span>
-              </p>
+            <div className="mt-2 space-y-2 text-xs font-mono">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">scan</span>
+                  <span className={host.schedule?.enabled === false ? "text-muted-foreground" : "text-primary"}>
+                    {host.schedule?.enabled === false ? "off" : `every ${host.schedule?.scanIntervalHours ?? 24}h`}
+                  </span>
+                </div>
+                {host.schedule?.enabled !== false && host.schedule?.nextRunAt && (
+                  <div className="flex items-center justify-between mt-0.5">
+                    <span className="text-muted-foreground">next</span>
+                    <span className="text-foreground">{formatCountdown(host.schedule.nextRunAt)}</span>
+                  </div>
+                )}
+              </div>
+              <div className="border-t border-border pt-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">probe</span>
+                  <span className={host.schedule?.probeEnabled === false ? "text-muted-foreground" : "text-foreground"}>
+                    {host.schedule?.probeEnabled === false ? "off" : `every ${host.schedule?.probeIntervalMinutes ?? 5}m`}
+                  </span>
+                </div>
+                {host.schedule?.probeEnabled !== false && host.schedule?.probeNextRunAt && (
+                  <div className="flex items-center justify-between mt-0.5">
+                    <span className="text-muted-foreground">next</span>
+                    <span className="text-foreground">{formatCountdown(host.schedule.probeNextRunAt)}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>

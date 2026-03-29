@@ -20,6 +20,17 @@ const SALT_ROUNDS = 12;
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
 
+/**
+ * Detect Postgres unique-constraint violation (error code 23505).
+ * Drizzle surfaces the underlying pg error object with a `code` property.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  if (err && typeof err === 'object' && 'code' in err) {
+    return (err as { code: string }).code === '23505';
+  }
+  return false;
+}
+
 // Lazily computed dummy hash for constant-time login responses when user is not found.
 // This prevents timing-based user enumeration (bcrypt compare takes ~200ms).
 // Using lazy init avoids blocking the event loop during module import.
@@ -88,22 +99,33 @@ auth.post('/register', authLimiter, async (c) => {
 
     const { raw: invSecretRaw, hash: invSecretHash, encrypted: invSecretEncrypted } = generateInviteSecret();
 
-    // Transaction: create user + org + membership atomically
-    const result = await db.transaction(async (tx) => {
-      const [user] = await tx.insert(users).values({
-        username: body.username, email: body.email, passwordHash,
-      }).returning();
+    // Transaction: create user + org + membership atomically.
+    // The try/catch handles the race where two concurrent requests both pass the
+    // optimistic SELECT check above but one loses the INSERT due to the DB-level
+    // UNIQUE constraint on users.username / users.email / organizations.slug.
+    let result: { user: { id: string; username: string }; org: { id: string; name: string; slug: string } };
+    try {
+      result = await db.transaction(async (tx) => {
+        const [user] = await tx.insert(users).values({
+          username: body.username, email: body.email, passwordHash,
+        }).returning();
 
-      const [org] = await tx.insert(organizations).values({
-        name: body.orgName!, slug, inviteSecretHash: invSecretHash, inviteSecretEncrypted: invSecretEncrypted,
-      }).returning();
+        const [org] = await tx.insert(organizations).values({
+          name: body.orgName!, slug, inviteSecretHash: invSecretHash, inviteSecretEncrypted: invSecretEncrypted,
+        }).returning();
 
-      await tx.insert(orgMemberships).values({
-        orgId: org.id, userId: user.id, role: 'admin',
+        await tx.insert(orgMemberships).values({
+          orgId: org.id, userId: user.id, role: 'admin',
+        });
+
+        return { user, org };
       });
-
-      return { user, org };
-    });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        return c.json({ error: 'Registration failed' }, 409);
+      }
+      throw err;
+    }
 
     await createSession(c, { id: result.user.id, orgId: result.org.id, role: 'admin' });
 
@@ -128,17 +150,27 @@ auth.post('/register', authLimiter, async (c) => {
 
   if (!org) return c.json({ error: 'Invalid invite secret' }, 403);
 
-  const result = await db.transaction(async (tx) => {
-    const [user] = await tx.insert(users).values({
-      username: body.username, email: body.email, passwordHash,
-    }).returning();
+  // Catch unique-violation from the race where two concurrent requests both pass
+  // the optimistic existence check but collide on the DB UNIQUE constraint.
+  let result: { user: { id: string; username: string } };
+  try {
+    result = await db.transaction(async (tx) => {
+      const [user] = await tx.insert(users).values({
+        username: body.username, email: body.email, passwordHash,
+      }).returning();
 
-    await tx.insert(orgMemberships).values({
-      orgId: org.id, userId: user.id, role: 'viewer',
+      await tx.insert(orgMemberships).values({
+        orgId: org.id, userId: user.id, role: 'viewer',
+      });
+
+      return { user };
     });
-
-    return { user };
-  });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      return c.json({ error: 'Registration failed' }, 409);
+    }
+    throw err;
+  }
 
   await createSession(c, { id: result.user.id, orgId: org.id, role: 'viewer' });
 
@@ -432,7 +464,14 @@ auth.post('/org/join', requireAuth, async (c) => {
     .where(eq(organizations.inviteSecretHash, submittedHash)).limit(1);
   if (!org) return c.json({ error: 'Invalid invite secret' }, 400);
 
-  await db.insert(orgMemberships).values({ orgId: org.id, userId, role: 'viewer' });
+  try {
+    await db.insert(orgMemberships).values({ orgId: org.id, userId, role: 'viewer' });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      return c.json({ error: 'You already belong to this organisation.' }, 409);
+    }
+    throw err;
+  }
 
   // Refresh the session so the new orgId and role are immediately reflected.
   // Destroy the current session first to prevent session fixation.

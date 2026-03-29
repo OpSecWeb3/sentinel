@@ -333,20 +333,17 @@ export default function ImagesPage() {
   /* -- poll now ------------------------------------------------------ */
 
   async function pollNow(image: MonitoredImage) {
+    if (!image.id) return;
     const key = `poll-${image.name}`;
     setActionLoading((prev) => ({ ...prev, [key]: true }));
     try {
-      await apiFetch("/modules/registry/images", {
+      await apiFetch(`/modules/registry/images/${image.id}/poll`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: image.name,
-          tagPatterns: image.tagPatterns,
-          pollIntervalSeconds: image.pollIntervalSeconds,
-        }),
       });
       toast(`Poll queued for ${image.name}.`);
+      // Refresh list after a short delay to show updated lastPolledAt
+      setTimeout(fetchImages, 4000);
     } catch (err) {
       toast(
         err instanceof Error ? `Failed: ${err.message}` : "Poll failed",
@@ -580,7 +577,7 @@ export default function ImagesPage() {
                     </Link>
 
                     <span className="text-xs text-muted-foreground">
-                      {image.tagCount ?? image.tagPatterns.length}
+                      {image.tagCount ?? image.tagPatterns?.length ?? 0}
                     </span>
 
                     <span className="text-xs text-muted-foreground">

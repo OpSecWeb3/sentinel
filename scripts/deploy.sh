@@ -78,6 +78,9 @@ echo "==> Ensuring Docker networks exist..."
 docker network create gateway 2>/dev/null || true
 docker network create shared-infra 2>/dev/null || true
 
+echo "==> Installing dependencies (ensures host deps match lockfile)..."
+pnpm install --frozen-lockfile
+
 echo "==> Building containers..."
 docker compose -f "$COMPOSE_FILE" build
 

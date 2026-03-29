@@ -145,6 +145,7 @@ export async function getNetworkSlugsWithBlockRules(): Promise<string[]> {
 interface FnCallInfo {
   has: boolean;
   addresses: Set<string>;
+  hasContractCreation: boolean;
 }
 
 const fnCallInfoCache = new Map<number, { info: FnCallInfo; expiresAt: number }>();
@@ -166,16 +167,29 @@ async function getCachedFnCallInfo(networkId: number): Promise<FnCallInfo> {
     ))
     .where(
       and(
-        // Use canonical rule type string; legacy 'function-call-match' is never stored
-        // in the DB — all rules are written with the dot-separated canonical form.
         eq(rules.ruleType, 'chain.function_call_match'),
         eq(rules.status, 'active'),
         eq(rules.moduleId, 'chain'),
       ),
     );
 
+  // Check for contract-creation rules (event_match with matchContractCreation: true)
+  const creationRows = await db
+    .select({ id: rules.id })
+    .from(rules)
+    .where(
+      and(
+        eq(rules.ruleType, 'chain.event_match'),
+        eq(rules.status, 'active'),
+        eq(rules.moduleId, 'chain'),
+        sql`(${rules.config}->>'matchContractCreation')::boolean = true`,
+      ),
+    )
+    .limit(1);
+
   const addresses = new Set(rows.map((r) => r.address.toLowerCase()));
-  const info: FnCallInfo = { has: addresses.size > 0, addresses };
+  const hasContractCreation = creationRows.length > 0;
+  const info: FnCallInfo = { has: addresses.size > 0 || hasContractCreation, addresses, hasContractCreation };
   fnCallInfoCache.set(networkId, { info, expiresAt: Date.now() + FN_CALL_CACHE_TTL });
   return info;
 }
@@ -317,8 +331,8 @@ export async function pollOnce(
     arr.push(l);
   }
 
-  // When function-call-match rules exist, fetch blocks with transactions in
-  // parallel instead of serially.
+  // When function-call-match or contract-creation rules exist, fetch blocks
+  // with full transactions.
   const txsByBlock = new Map<string, RpcTransaction[]>();
   if (fnCallInfo.has) {
     const blockNums: bigint[] = [];
@@ -332,7 +346,11 @@ export async function pollOnce(
       const fullTxs = b.transactions as RpcTransaction[];
       const filtered = fullTxs
         .filter(
-          (tx) => tx.to && fnCallInfo.addresses.has(tx.to.toLowerCase()),
+          (tx) =>
+            // Function-call-match: tx to a monitored contract address
+            (tx.to && fnCallInfo.addresses.has(tx.to.toLowerCase())) ||
+            // Contract creation: tx with null `to` (deployment)
+            (fnCallInfo.hasContractCreation && !tx.to),
         )
         .map((tx) => ({
           hash: tx.hash,

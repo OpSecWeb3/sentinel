@@ -192,7 +192,7 @@ async function main() {
 
   // ── Periodic queue depth reporting & heartbeat ──────────────────────
   const { writeFileSync } = await import('node:fs');
-  setInterval(async () => {
+  const heartbeatInterval = setInterval(async () => {
     // Touch heartbeat file for Docker healthcheck (checks mtime < 60s)
     try { writeFileSync('/tmp/.worker-heartbeat', ''); } catch { /* best effort */ }
     for (const [queueName] of handlersByQueue) {
@@ -269,9 +269,21 @@ async function main() {
     { name: 'infra.schedule.load', data: {} },
   );
 
+  // ── Reconcile chain poll schedules on startup ──────────────────────
+  // Repeatable BullMQ jobs survive worker restarts (stored in Redis) but
+  // are lost on Redis data loss. This ensures all active chain rules have
+  // their poll schedules and block pollers recreated.
+  await moduleJobsQueue.add(
+    'chain.rule.sync',
+    { action: 'reconcile' },
+    { jobId: `chain-reconcile-startup-${Date.now()}` },
+  );
+  log.info('Enqueued chain.rule.sync reconcile for startup');
+
   // ── Graceful shutdown ───────────────────────────────────────────────
   async function shutdown(signal: string) {
     log.info({ signal }, 'Shutting down');
+    clearInterval(heartbeatInterval);
     // closeAllQueues() closes all tracked Workers AND Queues in one pass.
     // Previously workers were closed here AND inside closeAllQueues(), causing
     // a double-close that could reject or leave connections dangling.

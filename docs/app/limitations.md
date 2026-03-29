@@ -14,9 +14,10 @@ support read replicas, connection routing to a follower, or sharding.
 
 **Impact**: Under high alert volumes, all queries -- including read-heavy dashboard queries and
 write-heavy event ingestion -- compete for the same database connection pool. The worker
-initializes a pool of 20 connections (`maxConnections: 20`); the API server uses the default
-pool size. Long-running analytical queries (such as exporting large alert histories) can cause
-contention with the write path.
+process sizes its pool to match total BullMQ concurrency across queues (`maxConnections: 50` in
+`apps/worker/src/index.ts`); the API server uses the `postgres` client default (`max: 10` in
+`packages/db/index.ts` unless overridden). Long-running analytical queries (such as exporting
+large alert histories) can cause contention with the write path.
 
 **Mitigation**: Use PostgreSQL connection pooling (PgBouncer or the equivalent managed service
 offering from your cloud provider). Schedule bulk exports and reporting queries during
@@ -33,39 +34,37 @@ subsystems store state exclusively in Redis and cannot operate without it:
 
 | Subsystem | Redis key namespace | Impact of Redis loss |
 |-----------|--------------------|-----------------------|
-| BullMQ job queues | `bull:events:*`, `bull:alerts:*`, `bull:module-jobs:*`, `bull:deferred:*` | All async processing stops: no events evaluated, no alerts dispatched, no maintenance jobs run |
+| BullMQ job queues | Queues named `events`, `alerts`, `module-jobs`, `deferred` (`packages/shared/src/queue.ts`); BullMQ stores jobs/metadata under its Redis key prefix (default `bull:`) | All async processing stops while Redis is unavailable: no events evaluated, no alerts dispatched, no maintenance jobs run |
 | Windowed evaluators (chain module) | Module-specific keys | Sliding-window counters reset; threshold-based rules miss alerts for the duration of the window |
 | Correlation engine | `sentinel:corr:seq:*`, `sentinel:corr:idx:*`, `sentinel:corr:agg:*`, `sentinel:corr:absence:*`, `sentinel:corr:cooldown:*` | In-flight correlation instances lost; absence-condition alerts may fire incorrectly |
 | Rate limiter | `sentinel:rl:*` | Rate limiting non-functional (API requests succeed without throttling) |
 | crt.sh concurrency limiter | `slot:crtsh` | Concurrency control for CT log queries non-functional |
 
-### Correlation engine state loss on Redis restart
+### Correlation engine state and Redis durability
 
-When Redis restarts or is flushed, the correlation engine loses all in-flight state:
+Correlation state lives in Redis (`sentinel:corr:*` prefixes in `packages/shared/src/correlation-engine.ts`). What happens depends on **how** Redis loses data:
 
-- **Sequence instances**: Multi-step correlation rules in progress (e.g., "step 1 matched,
-  waiting for step 2") are discarded. The sequence must start over from step 1.
-- **Aggregation counters**: Counters tracking event counts or sums within a correlation window
-  reset to zero. Rules that require "5 events in 10 minutes" will not fire until the threshold
-  is reached again from zero.
-- **Absence timers**: Absence conditions ("alert if event B does NOT occur within 30 minutes
-  of event A") are tracked in Redis with a sorted-set index
-  (`sentinel:corr:absence:index`). If Redis is flushed, pending absence timers are lost,
-  meaning alerts that should fire (because event B never arrived) will not fire.
-- **Cooldown locks**: Cooldown state for correlation rules is stored in Redis with a DB
-  fallback. After a Redis flush, the engine falls back to `lastTriggeredAt` in PostgreSQL,
-  which may allow a duplicate alert if the DB value is stale.
+| Scenario | Typical outcome |
+|----------|-----------------|
+| **Process restart with AOF/RDB persistence** (common production setup) | Keys are replayed from disk after restart; in-flight correlation, BullMQ jobs, and rate-limit counters generally survive the same way as any other Redis data. This is an **operations** choice (e.g. shared ChainAlert/Redis with durable config), not something Sentinel re-implements. |
+| **`FLUSHALL`, failed deployment, or eviction under `allkeys-*`** | In-flight state is lost. Effects below apply. |
 
-**Mitigation**: Use Redis persistence (AOF with `appendfsync everysec` or RDB snapshots) to
-minimize state loss on restart. Monitor Redis memory usage. There is no mechanism to rebuild
-correlation state from PostgreSQL.
+When correlation state is **actually** wiped:
+
+- **Sequence instances**: Multi-step rules in progress are discarded; the sequence starts over.
+- **Aggregation counters**: Window counters reset; count thresholds must be reached again.
+- **Absence timers**: Pending timers keyed under `sentinel:corr:absence:*` and indexed in `sentinel:corr:absence:index` are lost, so absence alerts that should have fired may not.
+- **Cooldown locks**: Redis cooldown keys may be lost; the engine can fall back to PostgreSQL (`lastTriggeredAt`), which may allow a duplicate if the DB row is stale.
+
+**Mitigation**: Run Redis with persistence and `noeviction` (or equivalent) for production. Monitor memory. There is no application-level rebuild of correlation state from PostgreSQL alone.
 
 ### Event processing during Redis outage
 
-Sentinel does not queue events in an alternative store during a Redis outage. Events ingested
-via the API while Redis is unavailable are stored in PostgreSQL but their BullMQ jobs cannot
-be enqueued. These events will not be processed until Redis is restored and jobs are
-re-enqueued manually or via a recovery mechanism.
+Sentinel does not queue events in an alternative store during a Redis outage. Producers insert
+rows into PostgreSQL and then call `queue.add` (or `safeEnqueue` in the registry module, which
+logs and continues if enqueue fails). If Redis is down after the insert, the event row can exist
+without a corresponding `event.evaluate` job. There is **no** built-in sweep that finds those
+rows and re-enqueues them; recovery is operational (replay, manual fix, or future tooling).
 
 ---
 
@@ -149,10 +148,12 @@ call up to 3 times with exponential backoff (1 s, 2 s, 4 s) before failing over 
 URL. If all URLs and retries are exhausted, the BullMQ job fails and is retried up to 3 more
 times by the queue. After exhausting all retries, the job moves to the `failed` state.
 
-**Block gap detection**: Sentinel does not implement block-range gap recovery. If the worker
-is offline for a period (due to an outage or RPC failure), blocks that occurred during the
-outage are not retroactively scanned unless the worker is manually re-triggered for the
-missing block range.
+**Block gaps and catch-up**: The chain block poller (`modules/chain/src/block-poller.ts`) compares
+the stored cursor to the chain tip and fetches logs for the gap in batches (`MAX_BLOCKS_PER_TICK`,
+default 50 blocks per tick). If the gap exceeds `MAX_CATCH_UP_BLOCKS` (1000), it **fast-forwards**
+the cursor to near the chain tip (keeping a small lookback), intentionally **skipping** history
+— operator-visible "missed" blocks in extreme catch-up scenarios. Very fast chains can still be
+constrained by BullMQ repeatable-job timing; see the header comment in `block-poller.ts`.
 
 **Rate limits**: Public RPC providers (Infura, Alchemy, QuickNode) enforce per-second and
 daily request limits. High-frequency polling of multiple contracts or chains on the same
@@ -160,15 +161,9 @@ provider may exhaust these limits. Configure multiple RPC URLs per chain to dist
 
 ---
 
-## GitHub App: single installation per organization
+## GitHub App: multiple installations per organization (data model)
 
-Each Sentinel organization supports a single GitHub App installation. This means:
-
-- A Sentinel organization can monitor events from exactly one GitHub App installation (one
-  GitHub organization or user account).
-- Monitoring events across multiple GitHub organizations requires creating separate Sentinel
-  organizations for each, with independent GitHub App installations.
-- There is no multi-installation fanout within a single Sentinel organization.
+The schema (`github_installations.orgId`) and API (`GET/POST /modules/github/installations`) allow **more than one** GitHub App installation per Sentinel organization. Webhooks resolve the installation and store events against the correct installation record. Product UX may still assume a single install; the platform is not hard-limited to one row per org in code.
 
 ---
 
@@ -207,10 +202,11 @@ inaccessible to other organizations.
 **Within an organization, there is no user-level data isolation.** All members of an
 organization can view all events, alerts, and detections that belong to that organization.
 
-| Role | Capabilities |
-|------|-------------|
-| `admin` | Full read/write access to all organization resources, member management |
-| `member` | Read access to events and alerts; write access to detections and channels |
+| Role | Capabilities (typical routes) |
+|------|------------------------------|
+| `admin` | Full organization control, integrations, user roles, destructive operations |
+| `editor` | Create/update detections, correlation rules, channels |
+| `viewer` | Read-only access where enforced by `requireRole` |
 
 Operators who require user-level data isolation within a single deployment should provision
 separate Sentinel organizations for each team that requires isolation.
@@ -223,10 +219,10 @@ separate Sentinel organizations for each team that requires isolation.
 
 | Limitation | Detail |
 |-----------|--------|
-| No block gap recovery | Missed blocks during outages are not retroactively scanned |
+| Large block gaps fast-forward | Gaps over 1000 blocks skip to near chain tip (see `MAX_CATCH_UP_BLOCKS`); small/moderate gaps are caught up in batches |
 | SSRF protection is hostname-only | DNS rebinding attacks require infrastructure-level egress firewall rules for full mitigation |
 | Etherscan dependency for ABI | Unverified contracts cannot be monitored via ABI-decoded events; only raw log topic matching is available |
-| RPC URL rotation is deterministic | All worker replicas rotate to the same primary URL at the same time, which does not distribute load across replicas |
+| RPC URL rotation is optional | URL reordering runs only when `RPC_ROTATION_HOURS` is set; when unset, the configured URL list order is fixed. When rotation is enabled, it is time-synchronized across replicas (same order at the same wall time), so it does not spread load across providers within a single tick |
 | View call UDVT handling | User-defined value types in Solidity function signatures are replaced with `uint256`; complex struct-based UDVTs are not supported |
 
 ### Registry module
@@ -242,7 +238,7 @@ separate Sentinel organizations for each team that requires isolation.
 
 | Limitation | Detail |
 |-----------|--------|
-| WHOIS TLD coverage | Only 17 TLDs have hardcoded WHOIS server mappings; other TLDs fall back to IANA referral which may not provide full WHOIS data |
+| WHOIS TLD coverage | 18 common TLDs have hardcoded WHOIS server mappings in `whois.ts`; others fall back to `whois.iana.org` referral, which may not provide full WHOIS data |
 | crt.sh availability | crt.sh is a third-party public service with no SLA; CT log queries are best-effort |
 | crt.sh concurrency | Limited to 5 concurrent requests to avoid overloading the service |
 | No RDAP support | WHOIS uses legacy port-43 protocol; RDAP (the modern replacement) is not implemented |
@@ -251,8 +247,7 @@ separate Sentinel organizations for each team that requires isolation.
 
 | Limitation | Detail |
 |-----------|--------|
-| Single installation per org | Cannot monitor multiple GitHub organizations from one Sentinel organization |
-| Webhook delivery timeout | Sentinel must respond to GitHub webhooks within 10 seconds or the delivery is considered failed |
+| Webhook response time | GitHub expects a successful HTTP response within a short window (documented as 10 seconds on GitHub's side); exceed it and deliveries may be marked failed |
 
 ### AWS module
 
@@ -279,7 +274,7 @@ The worker process is the most memory-intensive component due to:
 
 - BullMQ job processing across 4 queues with varying concurrency levels
 - Multiple Redis connections (1 shared + 1 per Worker instance)
-- PostgreSQL connection pool of 20 connections
+- PostgreSQL connection pool of 50 connections per worker process
 - In-memory module evaluator registry
 - Sigstore TUF trust material cache
 
@@ -303,9 +298,9 @@ For a deployment with 5 active modules and moderate event volumes (~10,000 event
 | Metric | Estimate |
 |--------|----------|
 | Database size (6-month retention) | 2-5 GB |
-| Connection pool (API) | Default (~10) |
-| Connection pool (worker) | 20 per replica |
-| Total connections (2 worker replicas) | ~50 |
+| Connection pool (API) | Default 10 per API process (`packages/db/index.ts`) |
+| Connection pool (worker) | 50 per worker process |
+| Order-of-magnitude total (1 API + 2 workers) | ~110 DB connections from app tier before PgBouncer |
 
 ### Redis sizing
 
