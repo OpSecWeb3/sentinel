@@ -210,11 +210,17 @@ githubRouter.get('/app/callback', async (c) => {
 
   // Auto-trigger a repo sync job
   const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
-  await queue.add('github.repo.sync', {
-    installationId: installation.id,
-    orgId,
-    ghInstallationId: details.id,
-  });
+  try {
+    await queue.add('github.repo.sync', {
+      installationId: installation.id,
+      orgId,
+      ghInstallationId: details.id,
+    });
+  } catch (err) {
+    const reqLog = c.get('logger');
+    reqLog.error({ err, installationId: installation.id }, 'Failed to enqueue GitHub repo sync job');
+    return c.redirect(`${webUrl}/settings/github?status=error&reason=queue_unavailable`);
+  }
 
   return c.redirect(
     `${webUrl}/settings/github?status=success&installation_id=${installation.id}&action=${setupAction ?? 'install'}`,
@@ -309,11 +315,17 @@ githubRouter.post('/app/setup', bodyLimit({ maxSize: 1 * 1024 * 1024 }), async (
 
   // Auto-trigger a repo sync job
   const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
-  await queue.add('github.repo.sync', {
-    installationId: installation.id,
-    orgId,
-    ghInstallationId: details.id,
-  });
+  try {
+    await queue.add('github.repo.sync', {
+      installationId: installation.id,
+      orgId,
+      ghInstallationId: details.id,
+    });
+  } catch (err) {
+    const reqLog = c.get('logger');
+    reqLog.error({ err, installationId: installation.id }, 'Failed to enqueue GitHub repo sync job');
+    return c.json({ error: 'Service temporarily unavailable' }, 503);
+  }
 
   return c.json({
     data: {
@@ -391,15 +403,21 @@ githubRouter.post(
 
   // Fix #9: Use deliveryId as BullMQ jobId to deduplicate retried webhooks
   const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
-  await queue.add('github.webhook.process', {
-    deliveryId,
-    eventType,
-    payload: parsedPayload,
-    installationId: installation.id,
-    orgId: installation.orgId,
-  }, {
-    jobId: `gh-webhook-${deliveryId}`,
-  });
+  try {
+    await queue.add('github.webhook.process', {
+      deliveryId,
+      eventType,
+      payload: parsedPayload,
+      installationId: installation.id,
+      orgId: installation.orgId,
+    }, {
+      jobId: `gh-webhook-${deliveryId}`,
+    });
+  } catch (err) {
+    const reqLog = c.get('logger');
+    reqLog.error({ err, deliveryId, eventType }, 'Failed to enqueue GitHub webhook job');
+    return c.json({ error: 'Service temporarily unavailable' }, 503);
+  }
 
   return c.json({ received: true }, 202);
 });
@@ -478,11 +496,17 @@ githubRouter.post('/installations', bodyLimit({ maxSize: 1 * 1024 * 1024 }), asy
 
   // Fix #14: Auto-trigger repo sync after manual installation creation
   const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
-  await queue.add('github.repo.sync', {
-    installationId: installation.id,
-    orgId,
-    ghInstallationId: body.installationId,
-  });
+  try {
+    await queue.add('github.repo.sync', {
+      installationId: installation.id,
+      orgId,
+      ghInstallationId: body.installationId,
+    });
+  } catch (err) {
+    const reqLog = c.get('logger');
+    reqLog.error({ err, installationId: installation.id }, 'Failed to enqueue GitHub repo sync job');
+    return c.json({ error: 'Service temporarily unavailable' }, 503);
+  }
 
   return c.json({ data: { id: installation.id, installationId: installation.installationId } }, 201);
 });
@@ -582,14 +606,21 @@ githubRouter.post('/installations/:id/sync', bodyLimit({ maxSize: 1 * 1024 * 102
   // allowing future syncs to be enqueued (the queue-level removeOnComplete
   // retains a count of 200 which would block reuse of the same jobId).
   const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
-  const job = await queue.add('github.repo.sync', {
-    installationId: installation.id,
-    orgId,
-    options: body,
-  }, {
-    jobId: `gh-repo-sync-${installation.id}`,
-    removeOnComplete: true,
-  });
+  let job;
+  try {
+    job = await queue.add('github.repo.sync', {
+      installationId: installation.id,
+      orgId,
+      options: body,
+    }, {
+      jobId: `gh-repo-sync-${installation.id}`,
+      removeOnComplete: true,
+    });
+  } catch (err) {
+    const reqLog = c.get('logger');
+    reqLog.error({ err, installationId: installation.id }, 'Failed to enqueue GitHub repo sync job');
+    return c.json({ error: 'Service temporarily unavailable' }, 503);
+  }
 
   return c.json({ data: { jobId: job.id, status: 'queued' } }, 202);
 });
