@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
+const sentryDsn = process.env.NEXT_PUBLIC_SENTRY_DSN ?? "";
+// Extract the Sentry ingest host from the DSN so it can be added to CSP.
+const sentryHost = sentryDsn ? new URL(sentryDsn).origin : "";
 
 const isDev = process.env.NODE_ENV !== "production";
 
@@ -12,7 +16,7 @@ const csp = [
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
-  `connect-src 'self' ${apiUrl}`.trim(),
+  `connect-src 'self' ${apiUrl} ${sentryHost}`.trim(),
   "font-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'self'",
@@ -35,4 +39,10 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  // Suppress source map upload warnings when SENTRY_AUTH_TOKEN is not set (local dev).
+  silent: !process.env.SENTRY_AUTH_TOKEN,
+  disableLogger: true,
+});
