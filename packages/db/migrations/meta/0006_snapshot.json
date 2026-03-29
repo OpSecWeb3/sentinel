@@ -1,6 +1,6 @@
 {
-  "id": "88258675-6d92-4b35-9a5c-9d52287b35fd",
-  "prevId": "620b5a99-30ef-44cf-b955-5842b48833b7",
+  "id": "7f684112-2a1f-41b9-8a7c-a4205c09a33c",
+  "prevId": "88258675-6d92-4b35-9a5c-9d52287b35fd",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -118,10 +118,10 @@
         },
         "poll_interval_seconds": {
           "name": "poll_interval_seconds",
-          "type": "text",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": "'60'"
+          "default": 60
         },
         "created_at": {
           "name": "created_at",
@@ -420,6 +420,19 @@
         }
       },
       "foreignKeys": {
+        "aws_raw_events_org_id_organizations_id_fk": {
+          "name": "aws_raw_events_org_id_organizations_id_fk",
+          "tableFrom": "aws_raw_events",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "aws_raw_events_integration_id_aws_integrations_id_fk": {
           "name": "aws_raw_events_integration_id_aws_integrations_id_fk",
           "tableFrom": "aws_raw_events",
@@ -1576,6 +1589,21 @@
           "method": "btree",
           "with": {}
         },
+        "idx_alerts_created_at": {
+          "name": "idx_alerts_created_at",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "uq_alerts_event_detection_rule": {
           "name": "uq_alerts_event_detection_rule",
           "columns": [
@@ -1882,7 +1910,38 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "idx_audit_log_org": {
+          "name": "idx_audit_log_org",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_audit_log_user": {
+          "name": "idx_audit_log_user",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "audit_log_org_id_organizations_id_fk": {
           "name": "audit_log_org_id_organizations_id_fk",
@@ -2065,6 +2124,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_detections_created_by": {
+          "name": "idx_detections_created_by",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -2207,6 +2281,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_events_received_at": {
+          "name": "idx_events_received_at",
+          "columns": [
+            {
+              "expression": "received_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -2300,7 +2389,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "idx_notification_channels_org": {
+          "name": "idx_notification_channels_org",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "notification_channels_org_id_organizations_id_fk": {
           "name": "notification_channels_org_id_organizations_id_fk",
@@ -2727,6 +2832,21 @@
           "method": "btree",
           "with": {}
         },
+        "idx_rules_org": {
+          "name": "idx_rules_org",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "idx_rules_org_module": {
           "name": "idx_rules_org_module",
           "columns": [
@@ -2796,7 +2916,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -2827,6 +2947,18 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -2835,6 +2967,36 @@
           "columns": [
             {
               "expression": "expire",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_sessions_user_id": {
+          "name": "idx_sessions_user_id",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_sessions_org_id": {
+          "name": "idx_sessions_org_id",
+          "columns": [
+            {
+              "expression": "org_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2927,6 +3089,21 @@
             }
           ],
           "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_slack_installations_installed_by": {
+          "name": "idx_slack_installations_installed_by",
+          "columns": [
+            {
+              "expression": "installed_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}

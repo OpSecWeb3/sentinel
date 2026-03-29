@@ -111,7 +111,8 @@ async function getArtifactDetail(c: AuthContext, artifactType: string) {
     .select()
     .from(rcArtifactVersions)
     .where(eq(rcArtifactVersions.artifactId, artifact.id))
-    .orderBy(desc(rcArtifactVersions.createdAt));
+    .orderBy(desc(rcArtifactVersions.createdAt))
+    .limit(1000);
 
   const recentEvents = await db
     .select()

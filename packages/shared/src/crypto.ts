@@ -36,6 +36,16 @@ function decryptRaw(packed: Buffer, key: Buffer): string {
 }
 
 /**
+ * Returns true when the ENCRYPTION_KEY_PREV env var is set, meaning a key
+ * rotation is in progress and encrypted values may need re-encryption.
+ * Handlers can use this to short-circuit expensive full-table scans when
+ * no rotation is active.
+ */
+export function isKeyRotationActive(): boolean {
+  return getPrevKey() !== undefined;
+}
+
+/**
  * Check whether a ciphertext needs re-encryption.
  * Returns true if the value is legacy (no version byte) or cannot be
  * decrypted with the current primary key (i.e. only works with PREV key).

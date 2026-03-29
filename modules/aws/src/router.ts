@@ -47,7 +47,8 @@ awsRouter.get('/integrations', async (c) => {
     })
     .from(awsIntegrations)
     .where(eq(awsIntegrations.orgId, orgId))
-    .orderBy(desc(awsIntegrations.createdAt));
+    .orderBy(desc(awsIntegrations.createdAt))
+    .limit(1000);
 
   // Fetch distinct account IDs seen in raw events per integration
   const seenAccounts = await db
@@ -57,7 +58,8 @@ awsRouter.get('/integrations', async (c) => {
     })
     .from(awsRawEvents)
     .where(and(eq(awsRawEvents.orgId, orgId), sql`${awsRawEvents.accountId} IS NOT NULL`))
-    .groupBy(awsRawEvents.integrationId, awsRawEvents.accountId);
+    .groupBy(awsRawEvents.integrationId, awsRawEvents.accountId)
+    .limit(1000);
 
   const accountsByIntegration = seenAccounts.reduce<Record<string, string[]>>((acc, row) => {
     if (!acc[row.integrationId]) acc[row.integrationId] = [];

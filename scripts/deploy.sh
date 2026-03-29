@@ -86,6 +86,14 @@ docker compose -f "$COMPOSE_FILE" build
 
 echo "==> Running database migrations..."
 set -a; source .env; set +a
+
+# Back up the database before applying migrations so we can restore on failure.
+# Skipped when there are no pending migration files to avoid slowing every deploy.
+if [ "$HAS_MIGRATIONS" = true ]; then
+  echo "==> Taking pre-migration database backup..."
+  bash ./scripts/backup-db.sh || { echo "ERROR: Pre-migration backup failed — aborting deploy"; exit 1; }
+fi
+
 npx drizzle-kit migrate --config packages/db/drizzle.config.ts
 
 echo "==> Seeding database..."

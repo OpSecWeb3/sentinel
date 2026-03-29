@@ -145,6 +145,7 @@ export const events = pgTable('events', {
   index('idx_events_org_module').on(t.orgId, t.moduleId),
   index('idx_events_type').on(t.eventType),
   index('idx_events_external').on(t.externalId),
+  index('idx_events_received_at').on(t.receivedAt),
 ]);
 
 export const alerts = pgTable('alerts', {
@@ -164,17 +165,18 @@ export const alerts = pgTable('alerts', {
 }, (t) => [
   index('idx_alerts_org').on(t.orgId),
   index('idx_alerts_detection').on(t.detectionId),
+  index('idx_alerts_created_at').on(t.createdAt),
   // P2: Prevent duplicate alerts for the same event+detection+rule combination.
   uniqueIndex('uq_alerts_event_detection_rule')
     .on(t.eventId, t.detectionId, t.ruleId)
     .where(sql`event_id IS NOT NULL AND detection_id IS NOT NULL`),
   // P2: Prevent duplicate correlated alerts for the same event+correlation rule.
-  // Note: the expression index on trigger_data->>'correlationRuleId' must be
-  // added via raw SQL in the migration since Drizzle doesn't support expression
-  // indexes natively. This schema-level index covers the eventId column; the
-  // migration will replace it with the full expression index.
+  // The expression index includes trigger_data->>'correlationRuleId' to
+  // deduplicate correlated alerts per event per correlation rule.
+  // Drizzle 0.38+ supports SQL expressions in .on(); this matches the
+  // hand-edited migration in 0001_bumpy_blonde_phantom.sql exactly.
   uniqueIndex('uq_alerts_event_correlation')
-    .on(t.eventId)
+    .on(t.eventId, sql`(trigger_data->>'correlationRuleId')`)
     .where(sql`trigger_type = 'correlated' AND event_id IS NOT NULL`),
 ]);
 

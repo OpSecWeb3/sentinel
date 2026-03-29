@@ -43,6 +43,13 @@
       "when": 1775059200000,
       "tag": "0005_add_org_id_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774779781352,
+      "tag": "0006_chief_white_tiger",
+      "breakpoints": true
     }
   ]
 }

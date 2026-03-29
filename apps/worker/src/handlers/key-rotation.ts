@@ -7,7 +7,7 @@ import { githubInstallations } from '@sentinel/db/schema/github';
 import { rcArtifacts } from '@sentinel/db/schema/registry';
 import { infraCdnProviderConfigs } from '@sentinel/db/schema/infra';
 import { awsIntegrations } from '@sentinel/db/schema/aws';
-import { decrypt, encrypt, needsReEncrypt } from '@sentinel/shared/crypto';
+import { decrypt, encrypt, needsReEncrypt, isKeyRotationActive } from '@sentinel/shared/crypto';
 import { QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { logger as rootLogger } from '@sentinel/shared/logger';
 
@@ -206,6 +206,14 @@ export const keyRotationHandler: JobHandler = {
   jobName: 'platform.key.rotation',
   queueName: QUEUE_NAMES.DEFERRED,
   async process(_job: Job) {
+    // Short-circuit: if ENCRYPTION_KEY_PREV is not set, no key rotation is in
+    // progress and all versioned ciphertexts are already encrypted with the
+    // current key. This avoids full table scans across 7+ tables every 5 min
+    // when no rotation has occurred (Bug M28).
+    if (!isKeyRotationActive()) {
+      return;
+    }
+
     let totalRotated = 0;
 
     // Re-encrypt standard encrypted columns

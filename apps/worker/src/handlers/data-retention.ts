@@ -9,6 +9,8 @@ export interface RetentionPolicy {
   retentionDays: number;
   /** Optional SQL fragment appended as an extra AND condition (e.g. "module_id = 'aws'") */
   filter?: string;
+  /** Use ctid for batched deletes on tables without an `id` column (e.g. composite PKs). */
+  useCtid?: boolean;
 }
 
 /**
@@ -22,6 +24,15 @@ const ALLOWED_TABLES: ReadonlySet<string> = new Set([
   'notification_deliveries',
   'sessions',
   'aws_raw_events',
+  // Infra module tables
+  'infra_reachability_checks',
+  'infra_snapshots',
+  'infra_scan_step_results',
+  'infra_score_history',
+  // Chain module tables
+  'chain_state_snapshots',
+  'chain_container_metrics',
+  'chain_rpc_usage_hourly',
 ]);
 
 /**
@@ -32,6 +43,10 @@ const ALLOWED_TIMESTAMP_COLUMNS: ReadonlySet<string> = new Set([
   'created_at',
   'updated_at',
   'expire',
+  'checked_at',
+  'recorded_at',
+  'polled_at',
+  'bucket',
 ]);
 
 /**
@@ -104,14 +119,16 @@ export const dataRetentionHandler: JobHandler = {
       const cutoff = new Date(Date.now() - policy.retentionDays * 86_400_000);
       let totalDeleted = 0;
       let batchDeleted: number;
+      // Tables with composite primary keys (no `id` column) use ctid for batching.
+      const rowRef = policy.useCtid ? sql`ctid` : sql.identifier('id');
 
       do {
         const result = await db.execute(
           policy.filter
             ? sql`
               DELETE FROM ${sql.identifier(policy.table)}
-              WHERE id IN (
-                SELECT id FROM ${sql.identifier(policy.table)}
+              WHERE ${rowRef} IN (
+                SELECT ${rowRef} FROM ${sql.identifier(policy.table)}
                 WHERE ${sql.identifier(policy.timestampColumn)} < ${cutoff}
                 AND ${sql.raw(policy.filter)}
                 LIMIT 1000
@@ -119,8 +136,8 @@ export const dataRetentionHandler: JobHandler = {
             `
             : sql`
               DELETE FROM ${sql.identifier(policy.table)}
-              WHERE id IN (
-                SELECT id FROM ${sql.identifier(policy.table)}
+              WHERE ${rowRef} IN (
+                SELECT ${rowRef} FROM ${sql.identifier(policy.table)}
                 WHERE ${sql.identifier(policy.timestampColumn)} < ${cutoff}
                 LIMIT 1000
               )

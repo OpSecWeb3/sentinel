@@ -284,6 +284,15 @@ async function main() {
   async function shutdown(signal: string) {
     log.info({ signal }, 'Shutting down');
     clearInterval(heartbeatInterval);
+
+    // Force-exit if graceful shutdown stalls (e.g. a BullMQ worker or Redis
+    // connection hangs during close). 15 s gives BullMQ workers time to finish
+    // in-flight jobs while still exiting before Docker's default stop timeout.
+    setTimeout(() => {
+      log.fatal('Graceful shutdown timeout — forcing exit');
+      process.exit(1);
+    }, 15_000).unref();
+
     // closeAllQueues() closes all tracked Workers AND Queues in one pass.
     // Previously workers were closed here AND inside closeAllQueues(), causing
     // a double-close that could reject or leave connections dangling.

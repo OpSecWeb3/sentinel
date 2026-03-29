@@ -29,4 +29,13 @@ export const ChainModule: DetectionModule = {
   jobHandlers: [blockPollHandler, blockProcessHandler, statePollHandler, ruleSyncHandler, contractVerifyHandler, rpcUsageFlushHandler, blockAggregateHandler],
   eventTypes,
   templates,
+  retentionPolicies: [
+    // State snapshots: one row per rule per poll cycle — highest volume.
+    { table: 'chain_state_snapshots', timestampColumn: 'polled_at', retentionDays: 30 },
+    // Container metrics: periodic Docker stats samples.
+    { table: 'chain_container_metrics', timestampColumn: 'recorded_at', retentionDays: 30 },
+    // RPC usage hourly buckets: useful for billing/capacity analysis.
+    // Uses ctid for batched deletes because this table has a composite PK (no id column).
+    { table: 'chain_rpc_usage_hourly', timestampColumn: 'bucket', retentionDays: 90, useCtid: true },
+  ],
 };

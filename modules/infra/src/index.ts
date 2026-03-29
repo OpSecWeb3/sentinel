@@ -33,4 +33,14 @@ export const InfraModule: DetectionModule = {
   jobHandlers: [scanHandler, probeHandler, scheduleLoaderHandler, scanAggregateHandler],
   eventTypes,
   templates,
+  retentionPolicies: [
+    // Reachability probes fire every few minutes per host — highest volume.
+    { table: 'infra_reachability_checks', timestampColumn: 'checked_at', retentionDays: 30 },
+    // Infrastructure snapshots: one per scan per host (IP, geo, ports).
+    { table: 'infra_snapshots', timestampColumn: 'created_at', retentionDays: 90 },
+    // Per-step scan results: tied to scan events, moderate volume.
+    { table: 'infra_scan_step_results', timestampColumn: 'created_at', retentionDays: 90 },
+    // Score history: useful for long-term trend analysis.
+    { table: 'infra_score_history', timestampColumn: 'recorded_at', retentionDays: 180 },
+  ],
 };
