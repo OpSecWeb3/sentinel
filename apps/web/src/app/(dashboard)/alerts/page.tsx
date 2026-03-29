@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useRef } from "react";
+import { Suspense, useCallback, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
@@ -106,6 +106,14 @@ function timeAgo(dateStr: string): string {
 /* ── page ────────────────────────────────────────────────────── */
 
 export default function AlertsPage() {
+  return (
+    <Suspense>
+      <AlertsPageInner />
+    </Suspense>
+  );
+}
+
+function AlertsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 

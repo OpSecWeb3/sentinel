@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
@@ -96,6 +96,14 @@ const eventTypeColor: Record<string, string> = {
 /* -- page ----------------------------------------------------------- */
 
 export default function InfraEventsPage() {
+  return (
+    <Suspense>
+      <InfraEventsPageInner />
+    </Suspense>
+  );
+}
+
+function InfraEventsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 

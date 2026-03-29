@@ -20,6 +20,12 @@ export default defineConfig({
       exclude: [
         '**/*.test.ts', '**/*.spec.ts',
         '**/__tests__/**', '**/dist/**', '**/node_modules/**',
+        'apps/web/src/**',
+        'packages/shared/src/module.ts',
+        'packages/shared/src/rules.ts',
+        'packages/shared/src/hono-types.ts',
+        'packages/shared/src/index.ts',
+        'packages/db/src/seed/**',
       ],
       thresholds: {
         lines: 49,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useRef } from "react";
+import { Suspense, useCallback, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { apiFetch } from "@/lib/api";
@@ -86,6 +86,14 @@ function payloadSummary(event: Event): string {
 /* ── page ────────────────────────────────────────────────────── */
 
 export default function EventsPage() {
+  return (
+    <Suspense>
+      <EventsPageInner />
+    </Suspense>
+  );
+}
+
+function EventsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 

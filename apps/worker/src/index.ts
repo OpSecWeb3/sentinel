@@ -137,7 +137,7 @@ async function main() {
   }
 
   // ── Dead-letter queue for permanently failed jobs ────────────────────
-  const deadLetterQueue = getQueue('sentinel:dead-letter');
+  const deadLetterQueue = getQueue('sentinel-dead-letter');
 
   // ── Metrics ─────────────────────────────────────────────────────────
   const { jobsProcessedTotal, jobDuration, deadLetterTotal, queueDepth } = await import('@sentinel/shared/metrics');
