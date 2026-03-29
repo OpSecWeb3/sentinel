@@ -1,7 +1,7 @@
 import IORedis from 'ioredis';
 import { env } from '@sentinel/shared/env';
 import { createLogger } from '@sentinel/shared/logger';
-import { initSentry, setupGlobalHandlers } from '@sentinel/shared/sentry';
+import { initSentry, setupGlobalHandlers, captureException } from '@sentinel/shared/sentry';
 import { setSharedConnection, setConnectionFactory, createWorker, getQueue, QUEUE_NAMES, closeAllQueues, type JobHandler } from '@sentinel/shared/queue';
 import type { RuleEvaluator } from '@sentinel/shared/rules';
 import { getDb, closeDb } from '@sentinel/db';
@@ -166,23 +166,33 @@ async function main() {
 
       // Move to dead-letter queue after exhausting all retries
       if (attemptsMade >= maxAttempts) {
-        deadLetterQueue.add('dead-letter', {
-          originalQueue: queueName,
-          jobName,
-          jobId: job?.id,
-          data: job?.data,
-          error: err?.message,
-          failedAt: new Date().toISOString(),
-          attemptsMade,
-        }, {
-          removeOnComplete: false,  // Keep dead-letter jobs for inspection
-          removeOnFail: false,
-          attempts: 1,              // Don't retry dead-letter entries
-        }).catch((dlErr) => {
-          log.error({ dlErr, jobName, jobId: job?.id }, 'Failed to enqueue dead-letter job');
-        });
-        deadLetterTotal.inc({ queue: queueName, jobName });
-        log.warn({ queue: queueName, jobName, jobId: job?.id, attemptsMade }, 'Job moved to dead-letter queue after exhausting retries');
+        void (async () => {
+          try {
+            await deadLetterQueue.add('dead-letter', {
+              originalQueue: queueName,
+              jobName,
+              jobId: job?.id,
+              data: job?.data,
+              error: err?.message,
+              failedAt: new Date().toISOString(),
+              attemptsMade,
+            }, {
+              removeOnComplete: false,  // Keep dead-letter jobs for inspection
+              removeOnFail: false,
+              attempts: 1,              // Don't retry dead-letter entries
+            });
+            deadLetterTotal.inc({ queue: queueName, jobName });
+            log.warn({ queue: queueName, jobName, jobId: job?.id, attemptsMade }, 'Job moved to dead-letter queue after exhausting retries');
+          } catch (dlErr) {
+            log.error({ dlErr, jobName, jobId: job?.id }, 'Failed to enqueue dead-letter job');
+            captureException(dlErr, {
+              queue: queueName,
+              jobName,
+              jobId: String(job?.id ?? ''),
+              attemptsMade,
+            });
+          }
+        })();
       }
     });
 

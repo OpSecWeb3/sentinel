@@ -28,21 +28,85 @@ interface IntegrationAuth {
   sqsRegion: string;
 }
 
+/**
+ * Cached credentials from assuming the SentinelService intermediate role.
+ * Shared across all integrations — only the second hop (customer role) varies.
+ */
+let cachedSentinelCreds: {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken: string | undefined;
+  expiresAt: number;
+} | null = null;
+
+const AWS_STS_TIMEOUT_MS = 10_000;
+
+/**
+ * Assume the SentinelService intermediate role using the bootstrap IAM user
+ * credentials from the environment. Returns cached credentials when still valid.
+ *
+ * This is the first hop in the chain:
+ *   IAM User (env creds) → SentinelService role → customer role
+ */
+async function getSentinelRoleCredentials(region: string) {
+  const sentinelRoleArn = process.env.AWS_SENTINEL_ROLE_ARN;
+  if (!sentinelRoleArn) return undefined;
+
+  // Return cached credentials if still valid (refresh 5 min before expiry)
+  const now = Date.now();
+  if (cachedSentinelCreds && cachedSentinelCreds.expiresAt > now + 5 * 60_000) {
+    return cachedSentinelCreds;
+  }
+
+  const { STSClient, AssumeRoleCommand } = await import('@aws-sdk/client-sts');
+  const sts = new STSClient({ region });
+  const result = await sts.send(new AssumeRoleCommand({
+    RoleArn: sentinelRoleArn,
+    RoleSessionName: 'sentinel-service',
+    DurationSeconds: 3600,
+  }), { abortSignal: AbortSignal.timeout(AWS_STS_TIMEOUT_MS) });
+
+  const creds = result.Credentials;
+  if (!creds) throw new Error('Failed to assume SentinelService role — no credentials returned');
+
+  cachedSentinelCreds = {
+    accessKeyId: creds.AccessKeyId!,
+    secretAccessKey: creds.SecretAccessKey!,
+    sessionToken: creds.SessionToken,
+    expiresAt: creds.Expiration ? creds.Expiration.getTime() : now + 3600_000,
+  };
+
+  log.info('Assumed SentinelService role — credentials cached until refresh');
+  return cachedSentinelCreds;
+}
+
 async function buildSqsClient(integration: IntegrationAuth) {
   const { SQSClient } = await import('@aws-sdk/client-sqs');
 
   if (integration.roleArn) {
     const { STSClient, AssumeRoleCommand } = await import('@aws-sdk/client-sts');
-    const stsClient = new STSClient({ region: integration.sqsRegion });
+
+    // First hop: assume SentinelService role (if configured).
+    // Required when running off-AWS with IAM user env creds, because the
+    // customer's trust policy trusts the SentinelService role, not the user.
+    // When running on AWS with an instance profile that IS the SentinelService
+    // role, AWS_SENTINEL_ROLE_ARN is not set and this is a no-op.
+    const sentinelCreds = await getSentinelRoleCredentials(integration.sqsRegion);
+
+    // Second hop: assume the customer's cross-account role.
+    const stsClient = new STSClient({
+      region: integration.sqsRegion,
+      ...(sentinelCreds ? { credentials: sentinelCreds } : {}),
+    });
 
     const assumed = await stsClient.send(new AssumeRoleCommand({
       RoleArn: integration.roleArn,
       RoleSessionName: 'sentinel-aws-module',
       DurationSeconds: 3600,
       ...(integration.externalId ? { ExternalId: integration.externalId } : {}),
-    }));
+    }), { abortSignal: AbortSignal.timeout(AWS_STS_TIMEOUT_MS) });
     const creds = assumed.Credentials;
-    if (!creds) throw new Error('Failed to assume IAM role — no credentials returned');
+    if (!creds) throw new Error('Failed to assume customer IAM role — no credentials returned');
 
     return new SQSClient({
       region: integration.sqsRegion,
