@@ -86,7 +86,7 @@ export const apiKeys = pgTable('api_keys', {
 export const detections = pgTable('detections', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
-  createdBy: uuid('created_by').references(() => users.id),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   moduleId: text('module_id').notNull(),
   templateId: text('template_id'),
   name: text('name').notNull(),
@@ -134,7 +134,7 @@ export const rules = pgTable('rules', {
 
 export const events = pgTable('events', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  orgId: uuid('org_id').notNull().references(() => organizations.id),
+  orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   moduleId: text('module_id').notNull(),
   eventType: text('event_type').notNull(),
   externalId: text('external_id'),
@@ -150,7 +150,7 @@ export const events = pgTable('events', {
 
 export const alerts = pgTable('alerts', {
   id: bigserial('id', { mode: 'bigint' }).primaryKey(),
-  orgId: uuid('org_id').notNull().references(() => organizations.id),
+  orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   detectionId: uuid('detection_id').references(() => detections.id, { onDelete: 'set null' }),
   ruleId: uuid('rule_id').references(() => rules.id, { onDelete: 'set null' }),
   eventId: uuid('event_id').references(() => events.id, { onDelete: 'set null' }),
@@ -238,7 +238,7 @@ export const notificationDeliveries = pgTable('notification_deliveries', {
 
 export const auditLog = pgTable('audit_log', {
   id: bigserial('id', { mode: 'bigint' }).primaryKey(),
-  orgId: uuid('org_id').notNull().references(() => organizations.id),
+  orgId: uuid('org_id').references(() => organizations.id, { onDelete: 'set null' }),
   userId: uuid('user_id'),
   action: text('action').notNull(),
   resourceType: text('resource_type').notNull(),
