@@ -375,6 +375,52 @@ The transition to production-safe migrations should happen before the first
 real deployment — at that point, the current `0000` becomes the permanent
 baseline and all future changes are incremental-only.
 
+## Additive-Only Migration Policy
+
+Once Sentinel is deployed to production with real data, all migrations must be
+**additive-only**. This means migrations may only:
+
+- Add new tables
+- Add new nullable columns (or columns with a `DEFAULT`)
+- Add new indexes
+- Add new constraints
+
+Migrations must **never** do any of the following in the same deploy as the
+code that depends on the change:
+
+- Drop a column or table
+- Rename a column or table
+- Change a column type
+- Remove or tighten a constraint
+
+This policy exists because the deploy script auto-rolls back code-only deploys
+on health check failure. If the old code runs against the new schema, additive
+changes are invisible to it — it just ignores the new columns. But destructive
+changes (drops, renames) break the old code immediately.
+
+### Two-deploy pattern for destructive changes
+
+If you need to drop a column, rename a table, or change a type, split it across
+two deploys:
+
+1. **Deploy 1 — remove the dependency.** Update application code to stop
+   reading/writing the column. Deploy and verify.
+2. **Deploy 2 — remove the column.** Write a migration that drops the now-unused
+   column. Deploy.
+
+This ensures there is never a window where running code references a schema
+object that no longer exists.
+
+### Example: renaming a column
+
+```
+Deploy 1: Add new_name column (nullable), backfill from old_name, update code to read/write new_name
+Deploy 2: Drop old_name column
+```
+
+Never rename in place with `ALTER COLUMN ... RENAME TO` — the old code will
+break if the deploy rolls back.
+
 ## Rollback Strategy
 
 Drizzle Kit does not generate or apply rollback SQL automatically. There is no
