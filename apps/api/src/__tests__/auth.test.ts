@@ -669,6 +669,227 @@ describe('User management', () => {
 });
 
 // ===========================================================================
+// Brute-force lockout
+// ===========================================================================
+
+describe('Login brute-force lockout', () => {
+  it('locks account after 5 failed attempts', async () => {
+    await registerAdmin(app);
+
+    for (let i = 0; i < 5; i++) {
+      const res = await appRequest(app, 'POST', '/auth/login', {
+        body: { username: 'admin', password: 'wrongpassword!' },
+      });
+      expect(res.status).toBe(401);
+    }
+
+    const lockedRes = await appRequest(app, 'POST', '/auth/login', {
+      body: { username: 'admin', password: 'wrongpassword!' },
+    });
+    expect(lockedRes.status).toBe(423);
+    const body = await lockedRes.json();
+    expect(body.error).toContain('locked');
+  });
+
+  it('correct password is rejected while account is locked', async () => {
+    await registerAdmin(app);
+
+    for (let i = 0; i < 5; i++) {
+      await appRequest(app, 'POST', '/auth/login', {
+        body: { username: 'admin', password: 'wrongpassword!' },
+      });
+    }
+
+    const res = await appRequest(app, 'POST', '/auth/login', {
+      body: { username: 'admin', password: 'testpass123!' },
+    });
+    expect(res.status).toBe(423);
+  });
+
+  it('successful login resets failed attempt counter', async () => {
+    await registerAdmin(app);
+
+    for (let i = 0; i < 4; i++) {
+      await appRequest(app, 'POST', '/auth/login', {
+        body: { username: 'admin', password: 'wrongpassword!' },
+      });
+    }
+
+    const { res: okRes } = await login(app, 'admin', 'testpass123!');
+    expect(okRes.status).toBe(200);
+
+    // Counter reset — 5 more failures should lock again
+    for (let i = 0; i < 5; i++) {
+      await appRequest(app, 'POST', '/auth/login', {
+        body: { username: 'admin', password: 'wrongpassword!' },
+      });
+    }
+    const lockedRes = await appRequest(app, 'POST', '/auth/login', {
+      body: { username: 'admin', password: 'wrongpassword!' },
+    });
+    expect(lockedRes.status).toBe(423);
+  });
+});
+
+// ===========================================================================
+// API key expiration enforcement
+// ===========================================================================
+
+describe('API key expiration enforcement', () => {
+  it('expired API key is rejected with 401', async () => {
+    const admin = await setupAdmin(app);
+    const { key } = await createApiKey(app, admin.cookie, 'expiring-key', ['api:read', 'api:write']);
+
+    const sql = getTestSql();
+    await sql`UPDATE api_keys SET expires_at = NOW() - INTERVAL '1 day' WHERE name = 'expiring-key'`;
+
+    const res = await appRequest(app, 'GET', '/auth/me', {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect((body as Record<string, unknown>).error).toMatch(/expired/i);
+  });
+
+  it('key without expiry continues to work', async () => {
+    const admin = await setupAdmin(app);
+    const { key } = await createApiKey(app, admin.cookie, 'no-expiry-key', ['api:read']);
+
+    const res = await appRequest(app, 'GET', '/auth/me', {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('key with future expiry continues to work', async () => {
+    const admin = await setupAdmin(app);
+    const { key } = await createApiKey(app, admin.cookie, 'future-key', ['api:read']);
+
+    const sql = getTestSql();
+    await sql`UPDATE api_keys SET expires_at = NOW() + INTERVAL '30 days' WHERE name = 'future-key'`;
+
+    const res = await appRequest(app, 'GET', '/auth/me', {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
+// ===========================================================================
+// Session fixation prevention
+// ===========================================================================
+
+describe('Session fixation prevention', () => {
+  it('login issues a fresh session ID and invalidates the prior one', async () => {
+    const { cookie: initialCookie } = await registerAdmin(app);
+
+    // Login while carrying the existing session cookie
+    const loginRes = await appRequest(app, 'POST', '/auth/login', {
+      cookie: initialCookie,
+      body: { username: 'admin', password: 'testpass123!' },
+    });
+    expect(loginRes.status).toBe(200);
+    const newCookie = extractCookie(loginRes);
+
+    expect(newCookie).not.toBe('');
+    expect(newCookie).not.toBe(initialCookie);
+
+    // Old session must be dead
+    const meRes = await appRequest(app, 'GET', '/auth/me', { cookie: initialCookie });
+    expect(meRes.status).toBe(401);
+  });
+});
+
+// ===========================================================================
+// RBAC and scope enforcement across API routes
+// ===========================================================================
+
+describe('RBAC and scope enforcement', () => {
+  it('viewer session can read detections but cannot write', async () => {
+    const { viewer } = await setupAdminAndViewer(app);
+    const { cookie: viewerCookie } = await login(app, 'viewer', 'testpass123!');
+
+    const getRes = await appRequest(app, 'GET', '/api/detections', { cookie: viewerCookie });
+    expect(getRes.status).toBe(200);
+
+    const postRes = await appRequest(app, 'POST', '/api/detections', {
+      cookie: viewerCookie,
+      body: {},
+    });
+    expect(postRes.status).toBe(403);
+  });
+
+  it('viewer session cannot delete detections', async () => {
+    const { viewer } = await setupAdminAndViewer(app);
+    const { cookie: viewerCookie } = await login(app, 'viewer', 'testpass123!');
+
+    const res = await appRequest(app, 'DELETE', '/api/detections/00000000-0000-0000-0000-000000000000', {
+      cookie: viewerCookie,
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('editor session passes role check on detection writes', async () => {
+    const { admin, viewer } = await setupAdminAndViewer(app);
+
+    await appRequest(app, 'PATCH', `/auth/users/${viewer.userId}/role`, {
+      cookie: admin.cookie,
+      body: { role: 'editor' },
+    });
+    const { cookie: editorCookie } = await login(app, 'viewer', 'testpass123!');
+
+    // Editor clears requireRole — body validation (400) proves the scope gate was passed
+    const postRes = await appRequest(app, 'POST', '/api/detections', {
+      cookie: editorCookie,
+      body: {},
+    });
+    expect(postRes.status).not.toBe(403);
+  });
+
+  it('api:read key is blocked on write endpoints', async () => {
+    const admin = await setupAdmin(app);
+    const { key } = await createApiKey(app, admin.cookie, 'read-only-key', ['api:read']);
+
+    const getRes = await appRequest(app, 'GET', '/api/detections', {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    expect(getRes.status).toBe(200);
+
+    const postRes = await appRequest(app, 'POST', '/api/detections', {
+      headers: { Authorization: `Bearer ${key}` },
+      body: {},
+    });
+    expect(postRes.status).toBe(403);
+  });
+
+  it('api:write key passes scope check on write endpoints', async () => {
+    const admin = await setupAdmin(app);
+    const { key } = await createApiKey(app, admin.cookie, 'write-key', ['api:read', 'api:write']);
+
+    // Passes role + scope gate — body validation (400) proves it got through
+    const postRes = await appRequest(app, 'POST', '/api/detections', {
+      headers: { Authorization: `Bearer ${key}` },
+      body: {},
+    });
+    expect(postRes.status).not.toBe(403);
+  });
+
+  it('viewer session can read notification channels but cannot write', async () => {
+    const { viewer } = await setupAdminAndViewer(app);
+    const { cookie: viewerCookie } = await login(app, 'viewer', 'testpass123!');
+
+    const getRes = await appRequest(app, 'GET', '/api/channels', { cookie: viewerCookie });
+    expect(getRes.status).toBe(200);
+
+    const postRes = await appRequest(app, 'POST', '/api/channels', {
+      cookie: viewerCookie,
+      body: {},
+    });
+    expect(postRes.status).toBe(403);
+  });
+});
+
+// ===========================================================================
 // Viewer cannot access admin endpoints
 // ===========================================================================
 

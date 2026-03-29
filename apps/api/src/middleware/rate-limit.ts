@@ -2,7 +2,7 @@
  * Redis-backed rate limiting for Hono.
  * Ported from Verity's rate-limit.ts (express-rate-limit + RedisStore).
  *
- * Key generation priority: orgId > apiKey prefix > IP address
+ * Key generation priority: userId > apiKey prefix > IP address
  * IP derivation is delegated to @sentinel/shared/ip (getClientIp) which
  * applies TRUSTED_PROXY_COUNT rules to avoid header-injection spoofing.
  */
@@ -14,8 +14,8 @@ import { env } from '@sentinel/shared/env';
 import { getSharedRedis } from '../redis.js';
 
 function getKey(c: AuthContext): string {
-  const orgId = c.get('orgId');
-  if (orgId) return `org:${orgId}`;
+  const userId = c.get('userId');
+  if (userId) return `user:${userId}`;
 
   const auth = c.req.header('Authorization');
   if (auth?.startsWith('Bearer sk_')) return `key:${auth.slice(7, 27)}`;

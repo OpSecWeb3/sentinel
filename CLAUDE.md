@@ -35,3 +35,9 @@ Postgres and Redis run as shared infra in the `chainalert` project (parent
 directory), not in this repo's compose files. Sentinel's `docker-compose.prod.yml`
 connects to them via external `shared-infra` and `gateway` Docker networks.
 Do not add Postgres/Redis services to Sentinel's production compose.
+
+
+# Voice Feedback Protocol
+After completing any significant tasks instead of the typicall text summary dumps in the cli, do this:
+1. Condense a more brief (<=5 sentences) summary of your work.
+2. Execute the shell command: say "[Summary text here]"
