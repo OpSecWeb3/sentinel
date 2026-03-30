@@ -198,7 +198,13 @@ jobs:
       - name: External smoke check
         run: |
           set -euo pipefail
-          API_URL=$(aws ssm get-parameter --name /sentinel/production/NEXT_PUBLIC_API_URL --query 'Parameter.Value' --output text)
+          # SecureString params need --with-decryption; otherwise Value is ciphertext (garbled).
+          API_URL=$(aws ssm get-parameter --name /sentinel/production/NEXT_PUBLIC_API_URL --with-decryption --query 'Parameter.Value' --output text | tr -d '\r\n')
+          if [[ ! "${API_URL}" =~ ^https?:// ]]; then
+            echo "::error::NEXT_PUBLIC_API_URL from SSM is not an http(s) URL (check parameter type and --with-decryption)"
+            exit 1
+          fi
+          echo "Smoke check: ${API_URL}/health"
           for i in {1..10}; do
             if curl -fsS --max-time 8 "${API_URL}/health" >/tmp/api-health.json; then
               echo "API reachable from runner"
