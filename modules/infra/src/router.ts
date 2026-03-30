@@ -47,6 +47,45 @@ function isValidHostname(value: string): boolean {
   return HOSTNAME_RE.test(value) && value.length <= 253;
 }
 
+/**
+ * Returns true if the hostname is a bare TLD or public suffix that should
+ * never be added as a monitored host (e.g. "com", "co.uk", "com.au").
+ *
+ * Uses a conservative list of known multi-part public suffixes plus a
+ * catch-all for single-label TLDs.
+ */
+const KNOWN_PUBLIC_SUFFIXES = new Set([
+  'co.uk', 'org.uk', 'me.uk', 'ac.uk', 'gov.uk', 'net.uk',
+  'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au',
+  'co.nz', 'net.nz', 'org.nz', 'govt.nz',
+  'co.za', 'org.za', 'net.za', 'gov.za',
+  'co.in', 'net.in', 'org.in', 'gov.in',
+  'co.jp', 'or.jp', 'ne.jp', 'ac.jp', 'go.jp',
+  'co.kr', 'or.kr', 'ne.kr',
+  'com.br', 'net.br', 'org.br', 'gov.br',
+  'com.cn', 'net.cn', 'org.cn', 'gov.cn',
+  'com.mx', 'net.mx', 'org.mx', 'gob.mx',
+  'com.sg', 'net.sg', 'org.sg', 'gov.sg', 'edu.sg',
+  'com.hk', 'net.hk', 'org.hk', 'gov.hk', 'edu.hk',
+  'co.id', 'or.id', 'web.id', 'go.id',
+  'com.tw', 'net.tw', 'org.tw', 'gov.tw',
+  'co.th', 'or.th', 'go.th',
+  'com.ng', 'org.ng', 'gov.ng',
+  'com.gh', 'org.gh', 'gov.gh',
+  'co.ke', 'or.ke', 'go.ke',
+  'co.il', 'org.il', 'net.il', 'gov.il',
+  'com.tr', 'net.tr', 'org.tr', 'gov.tr',
+  'com.ar', 'net.ar', 'org.ar', 'gov.ar',
+  'com.ph', 'net.ph', 'org.ph', 'gov.ph',
+]);
+
+function isTldOrPublicSuffix(hostname: string): boolean {
+  // Single-label = bare TLD (e.g. "com", "dev", "io")
+  if (!hostname.includes('.')) return true;
+  // Known multi-part public suffixes
+  return KNOWN_PUBLIC_SUFFIXES.has(hostname);
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -279,16 +318,22 @@ infraRouter.post('/hosts', async (c) => {
     return c.json({ error: 'Invalid hostname. Must be a valid domain name.' }, 400);
   }
 
+  if (isTldOrPublicSuffix(body.hostname)) {
+    return c.json({ error: 'Cannot monitor a TLD or public suffix (e.g. com, co.uk). Add a full domain instead.' }, 400);
+  }
+
   const db = getDb();
 
   // Auto-discover parent: walk up domain labels to find an existing root host
   // e.g. api.staging.example.com → staging.example.com → example.com
+  // Stops before TLDs/public suffixes to prevent bad matches.
   let parentId: string | null = null;
   let isRoot = true;
   const labels = body.hostname.split('.');
   if (labels.length > 2) {
     for (let i = 1; i < labels.length - 1; i++) {
       const candidate = labels.slice(i).join('.');
+      if (isTldOrPublicSuffix(candidate)) break;
       const [existing] = await db
         .select({ id: infraHosts.id })
         .from(infraHosts)
