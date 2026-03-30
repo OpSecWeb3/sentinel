@@ -161,13 +161,20 @@ integrations.get('/slack/callback', async (c) => {
     },
   });
 
-  // Invalidate channel cache so the next search reflects the new installation
-  try {
-    const redis = getSharedRedis();
-    await redis.del(SLACK_CHANNELS_CACHE_KEY(orgId));
-  } catch {
-    // Non-fatal — cache will expire naturally
-  }
+  // Warm the channel cache in the background so it's ready before the user
+  // opens the detection form. Fire-and-forget — never block the OAuth redirect.
+  const token = decrypt(encryptedToken);
+  fetchAllSlackChannels(token)
+    .then(channels => {
+      const redis = getSharedRedis();
+      return redis.set(
+        SLACK_CHANNELS_CACHE_KEY(orgId),
+        JSON.stringify(channels),
+        'EX',
+        SLACK_CHANNELS_CACHE_TTL_S,
+      );
+    })
+    .catch(() => { /* non-fatal — cache will be populated on first search */ });
 
   return c.redirect(`${webUrl}/settings?slack=success`);
 });
@@ -268,7 +275,10 @@ authed.delete('/slack', requireRole('admin'), async (c) => {
 // subsequent searches within that window are served from Redis instantly.
 // ---------------------------------------------------------------------------
 
-const SLACK_CHANNELS_CACHE_TTL_S = 15 * 60; // 15 minutes
+// Long TTL — only used to clean up keys for orgs that have disconnected Slack
+// without us being notified (e.g. token revoked externally). In normal flow
+// the cache is warmed on install and deleted on disconnect.
+const SLACK_CHANNELS_CACHE_TTL_S = 7 * 24 * 60 * 60; // 7 days
 const SLACK_CHANNELS_CACHE_KEY = (orgId: string) => `sentinel:slack:channels:${orgId}`;
 
 type SlackChannel = { id: string; name: string; isPrivate: boolean };
@@ -301,9 +311,9 @@ async function fetchAllSlackChannels(token: string): Promise<SlackChannel[]> {
     }
 
     for (const ch of data.channels ?? []) {
-      // Only include channels the bot has been invited to — these are the only
-      // ones chat:write can post to. Public channels where the bot is not a
-      // member are visible via channels:read but posting will fail silently.
+      // Only include channels the bot has been invited to (public or private).
+      // chat:write requires bot membership to post — showing unjoined channels
+      // would cause silent delivery failures.
       if (ch.is_member) {
         all.push({ id: ch.id, name: ch.name, isPrivate: ch.is_private });
       }
@@ -330,15 +340,29 @@ authed.get('/slack/channels', async (c) => {
 
   if (!installation) return c.json({ error: 'Slack is not connected' }, 400);
 
-  // --- serve from cache if available ---
+  // refresh=true is sent when the user explicitly clicks "Refresh from Slack"
+  // after a zero-result search. In all other cases serve from cache.
   const forceRefresh = c.req.query('refresh') === 'true';
   let allChannels: SlackChannel[];
-  const cached = forceRefresh ? null : await redis.get(cacheKey);
 
-  if (cached) {
-    allChannels = JSON.parse(cached) as SlackChannel[];
+  if (!forceRefresh) {
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      allChannels = JSON.parse(cached) as SlackChannel[];
+    } else {
+      // Cache miss — shouldn't happen in normal flow (cache is warmed on install)
+      // but handle gracefully for orgs that installed before this change.
+      try {
+        const token = decrypt(installation.botToken);
+        allChannels = await fetchAllSlackChannels(token);
+        await redis.set(cacheKey, JSON.stringify(allChannels), 'EX', SLACK_CHANNELS_CACHE_TTL_S);
+      } catch (err) {
+        c.get('logger').error({ err }, '[slack] conversations.list failed');
+        return c.json({ error: 'Failed to fetch channels from Slack' }, 502);
+      }
+    }
   } else {
-    // Cache miss — fetch all pages from Slack and cache the result
+    // User-triggered refresh — re-fetch everything from Slack and update cache
     try {
       const token = decrypt(installation.botToken);
       allChannels = await fetchAllSlackChannels(token);

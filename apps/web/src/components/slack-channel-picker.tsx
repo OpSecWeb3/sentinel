@@ -64,6 +64,8 @@ export function SlackChannelPicker({
     }
   }
 
+  const noResults = searched && results.length === 0;
+
   return (
     <div ref={containerRef} className="relative space-y-2">
       {value && (
@@ -102,17 +104,6 @@ export function SlackChannelPicker({
           )}
           Find
         </button>
-        {searched && (
-          <button
-            type="button"
-            onClick={() => handleFind(true)}
-            disabled={searching || search.trim().length < 1}
-            title="Refresh channel list from Slack"
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm transition-colors hover:bg-accent/50 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </button>
-        )}
       </div>
 
       {open && searched && (
@@ -126,8 +117,19 @@ export function SlackChannelPicker({
               <span className="text-muted-foreground">None (no Slack notification)</span>
             </button>
 
-            {results.length === 0 ? (
-              <p className="py-4 text-center text-sm text-muted-foreground">No channels found.</p>
+            {noResults ? (
+              <div className="flex flex-col items-center gap-2 py-4 px-3">
+                <p className="text-sm text-muted-foreground">No channels found.</p>
+                <button
+                  type="button"
+                  onClick={() => handleFind(true)}
+                  disabled={searching}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs transition-colors hover:bg-accent/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  [refresh slack]
+                </button>
+              </div>
             ) : (
               results.map((ch) => (
                 <button
