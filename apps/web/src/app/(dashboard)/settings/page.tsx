@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
@@ -919,11 +920,9 @@ export default function SettingsPage() {
                   />
                 </div>
                 <label className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={newKeyAllowWrite}
-                    onChange={(e) => setNewKeyAllowWrite(e.target.checked)}
-                    className="h-3 w-3"
+                    onChange={setNewKeyAllowWrite}
                   />
                   --write
                 </label>
@@ -1821,11 +1820,9 @@ export default function SettingsPage() {
                       <div className="max-h-48 overflow-y-auto border border-border">
                         {cdnHosts.map((host) => (
                           <label key={host.id} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/30 cursor-pointer">
-                            <input
-                              type="checkbox"
+                            <Checkbox
                               checked={selectedCdnHostIds.has(host.id)}
                               onChange={() => setSelectedCdnHostIds((prev) => { const next = new Set(prev); if (next.has(host.id)) { next.delete(host.id); } else { next.add(host.id); } return next; })}
-                              className="accent-primary"
                             />
                             <span className="text-foreground font-mono">{host.hostname}</span>
                           </label>
