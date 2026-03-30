@@ -546,7 +546,17 @@ function isKnownAbiType(t: string): boolean {
  *   →  "function foo(uint256 ts) view returns (uint256)"
  */
 export function normaliseViewCallSignature(sig: string): string {
-  return sig.replace(/\(([^)]*)\)/g, (_, inner: string) => {
+  let s = sig.trim();
+
+  // Ensure the signature starts with "function" (abitype requires it)
+  if (!s.startsWith('function ')) {
+    s = `function ${s}`;
+  }
+
+  // Strip Solidity visibility/mutability modifiers not valid in human-readable ABI
+  s = s.replace(/\b(external|public|internal|private)\b/g, '').replace(/\s{2,}/g, ' ');
+
+  return s.replace(/\(([^)]*)\)/g, (_, inner: string) => {
     const params = inner.split(',').map((p: string) => {
       const parts = p.trim().split(/\s+/);
       if (parts.length === 0) return p;

@@ -167,6 +167,13 @@ async function main() {
       log.error({ queue: queueName, jobName, jobId: job?.id, attemptsMade, err }, 'Job failed');
       jobsProcessedTotal.inc({ queue: queueName, jobName, status: 'failed' });
 
+      captureException(err, {
+        queue: queueName,
+        jobName,
+        jobId: String(job?.id ?? ''),
+        attemptsMade,
+      });
+
       // Move to dead-letter queue after exhausting all retries
       if (attemptsMade >= maxAttempts) {
         void (async () => {
