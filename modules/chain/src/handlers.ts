@@ -1108,7 +1108,7 @@ async function loadPollRuleById(ruleId: string): Promise<PollRule | null> {
     networkSlug,
     chainId,
     rpcUrls,
-    address: config.address as string,
+    address: config.contractAddress as string,
     tokenAddress: (config.token_address ?? config.tokenAddress) as string | undefined,
     slot: config.slot as string | undefined,
     viewCall:

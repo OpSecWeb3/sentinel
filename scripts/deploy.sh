@@ -36,10 +36,21 @@ else
   fi
 fi
 
-# Check if this deploy includes migrations
+# Check if this deploy includes migrations.
+# Compare against the last *successful* deploy SHA (not the pre-pull SHA) so that
+# a failed deploy doesn't advance the baseline — the next deploy will still detect
+# pending migrations even if its own diff has none.
+LAST_SUCCESS_FILE="${APP_DIR}/.last-successful-deploy"
+LAST_SUCCESS_SHA=""
+if [ -f "$LAST_SUCCESS_FILE" ]; then
+  LAST_SUCCESS_SHA=$(cat "$LAST_SUCCESS_FILE")
+  echo "==> Last successful deploy: ${LAST_SUCCESS_SHA:0:12}"
+fi
+
 HAS_MIGRATIONS=false
-if [ "$PREV_SHA" != "$NEW_SHA" ]; then
-  if git diff --name-only "$PREV_SHA" "$NEW_SHA" | grep -q '^packages/db/migrations/'; then
+MIGRATION_BASE="${LAST_SUCCESS_SHA:-$PREV_SHA}"
+if [ "$MIGRATION_BASE" != "$NEW_SHA" ]; then
+  if git diff --name-only "$MIGRATION_BASE" "$NEW_SHA" | grep -q '^packages/db/migrations/'; then
     HAS_MIGRATIONS=true
     echo "==> WARNING: This deploy includes database migrations (auto-rollback disabled)"
   fi
@@ -140,6 +151,9 @@ done
 
 echo "==> Reloading Nginx gateway..."
 docker exec gateway nginx -s reload || echo "    WARNING: Gateway reload failed (may not be running)"
+
+# Record successful deploy so the next run diffs against this SHA.
+echo "$NEW_SHA" > "$LAST_SUCCESS_FILE"
 
 echo "==> Deploy complete!"
 docker compose -f "$COMPOSE_FILE" ps
