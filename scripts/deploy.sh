@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Production deploy: run after the repo is updated (git pull is done by CI, not here).
+# CI exports DEPLOY_PREV_SHA = commit before pull (for rollback / migration detection).
+# Manual: PREV=$(git rev-parse HEAD) && git pull origin main && DEPLOY_PREV_SHA=$PREV bash scripts/deploy.sh
 set -euo pipefail
 
 APP_DIR="/opt/sentinel"
@@ -17,15 +20,21 @@ if [ "$ENV_PERMS" != "600" ]; then
 fi
 
 # ── Capture current state for rollback ──────────────────────────────────────
-NEW_SHA=""       # set after git pull; pre-initialised so rollback can reference it safely
-PREV_SHA=$(git rev-parse HEAD)
-echo "==> Current commit: ${PREV_SHA:0:12}"
-
-echo "==> Pulling latest code..."
-git pull origin main
-
 NEW_SHA=$(git rev-parse HEAD)
-echo "==> New commit: ${NEW_SHA:0:12}"
+echo "==> Deploying commit: ${NEW_SHA:0:12}"
+
+if [ -n "${DEPLOY_PREV_SHA:-}" ]; then
+  PREV_SHA="$DEPLOY_PREV_SHA"
+  echo "==> Pre-update commit: ${PREV_SHA:0:12}"
+else
+  PREV_SHA=$(git rev-parse ORIG_HEAD 2>/dev/null || true)
+  if [ -z "$PREV_SHA" ] || [ "$PREV_SHA" = "$NEW_SHA" ]; then
+    PREV_SHA="$NEW_SHA"
+    echo "==> WARN: DEPLOY_PREV_SHA unset (set by CI after pull). Manual: PREV=\$(git rev-parse HEAD); git pull; DEPLOY_PREV_SHA=\$PREV bash scripts/deploy.sh"
+  else
+    echo "==> Pre-update commit (ORIG_HEAD): ${PREV_SHA:0:12}"
+  fi
+fi
 
 # Check if this deploy includes migrations
 HAS_MIGRATIONS=false
@@ -48,7 +57,7 @@ rollback() {
     echo "      1. Check migration state: psql \$DATABASE_URL -c 'SELECT * FROM drizzle.migrations ORDER BY created_at DESC LIMIT 5;'"
     echo "      2. If migration succeeded but app failed, fix the app code"
     echo "      3. If migration failed, restore from backup: ./scripts/restore-db.sh /backups/postgres/<latest>"
-    echo "      4. To revert code: git checkout ${PREV_SHA} && bash scripts/deploy.sh"
+    echo "      4. To revert code: git checkout ${PREV_SHA} && DEPLOY_PREV_SHA=\$(git rev-parse HEAD) bash scripts/deploy.sh"
     docker compose -f "$COMPOSE_FILE" logs --tail=50
     exit 1
   fi

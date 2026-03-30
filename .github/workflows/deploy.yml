@@ -189,6 +189,9 @@ jobs:
             cd /opt/sentinel
             git remote set-url origin 'https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git'
             trap 'git remote set-url origin https://github.com/${REPO}.git' EXIT
+            PREV_SHA=\$(git rev-parse HEAD)
+            git pull origin main
+            export DEPLOY_PREV_SHA=\"\$PREV_SHA\"
             bash scripts/deploy.sh
           "
 
