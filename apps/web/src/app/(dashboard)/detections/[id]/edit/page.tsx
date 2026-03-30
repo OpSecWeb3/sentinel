@@ -58,6 +58,8 @@ interface Detection {
   cooldownMinutes: number;
   status: string;
   config: Record<string, unknown>;
+  slackChannelId: string | null;
+  slackChannelName: string | null;
   rules: Array<{
     ruleType: string;
     config: Record<string, unknown>;
