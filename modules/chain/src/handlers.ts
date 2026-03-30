@@ -1658,6 +1658,10 @@ export const contractVerifyHandler: JobHandler = {
         .update(chainContracts)
         .set({ layoutStatus: `error: ${message.slice(0, 200)}` })
         .where(eq(chainContracts.id, contractId));
+
+      // Re-throw so BullMQ retries on transient failures (rate limits, network errors).
+      // The layoutStatus update above acts as a breadcrumb if all retries are exhausted.
+      throw err;
     }
   },
 };
