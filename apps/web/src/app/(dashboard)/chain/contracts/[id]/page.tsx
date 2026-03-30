@@ -112,6 +112,7 @@ export default function ContractDetailPage() {
   });
 
   const [fetchingAbi, setFetchingAbi] = useState(false);
+  const [analyzingStorage, setAnalyzingStorage] = useState(false);
 
   function toggle(section: keyof typeof openSections) {
     setOpenSections((s) => ({ ...s, [section]: !s[section] }));
@@ -148,6 +149,23 @@ export default function ContractDetailPage() {
       toast(err instanceof Error ? err.message : "Failed to fetch ABI");
     } finally {
       setFetchingAbi(false);
+    }
+  }
+
+  async function handleAnalyzeStorage() {
+    if (!contract) return;
+    setAnalyzingStorage(true);
+    try {
+      await apiFetch(`/modules/chain/contracts/${contract.contractId}/analyze-storage`, {
+        method: "POST",
+        credentials: "include",
+      });
+      toast("Storage analysis queued", "success");
+      setContract((c) => c ? { ...c, layoutStatus: "pending" } : c);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to trigger analysis");
+    } finally {
+      setAnalyzingStorage(false);
     }
   }
 
@@ -405,8 +423,8 @@ export default function ContractDetailPage() {
                 ) : (
                   <div className="space-y-0.5">
                     {contract.abiEvents.map((ev) => (
-                      <div key={ev.signature} className="flex gap-3 text-xs">
-                        <span className="text-primary font-medium w-40 shrink-0 truncate">
+                      <div key={ev.signature} className="grid grid-cols-[2fr_3fr] gap-x-3 text-xs">
+                        <span className="text-primary font-medium truncate">
                           {ev.name}
                         </span>
                         <span className="text-muted-foreground font-mono truncate">
@@ -439,13 +457,13 @@ export default function ContractDetailPage() {
                 ) : (
                   <div className="space-y-0.5">
                     {contract.abiFunctions.map((fn) => (
-                      <div key={fn.signature} className="flex gap-3 text-xs">
-                        <span className="text-foreground font-medium w-40 shrink-0 truncate">
+                      <div key={fn.signature} className="grid grid-cols-[2fr_1fr_3fr] gap-x-3 text-xs">
+                        <span className="text-foreground font-medium truncate">
                           {fn.name}
                         </span>
                         <span
                           className={cn(
-                            "font-mono w-16 shrink-0",
+                            "font-mono truncate",
                             mutabilityColor(fn.stateMutability),
                           )}
                         >
@@ -464,54 +482,67 @@ export default function ContractDetailPage() {
         </Card>
 
         {/* Storage layout */}
-        {(contract.layoutStatus || storageSlots.length > 0) && (
-          <Card>
-            <CardContent className="p-4 space-y-2">
+        <Card>
+          <CardContent className="p-4 space-y-2">
+            <div className="flex items-center justify-between">
               <SectionToggle
                 title="storage layout"
                 count={storageSlots.length || undefined}
                 open={openSections.storage}
                 onToggle={() => toggle("storage")}
               />
-              {openSections.storage && (
-                <div className="pt-1">
-                  {contract.layoutStatus && (
-                    <p className="text-xs text-muted-foreground mb-2">
-                      status: {contract.layoutStatus}
-                    </p>
-                  )}
-                  {storageSlots.length > 0 ? (
-                    <div className="space-y-0.5">
-                      <div className="grid grid-cols-[60px_1fr_80px] gap-x-3 text-xs font-medium uppercase tracking-wider text-muted-foreground border-b border-border pb-1 mb-1">
-                        <span>Slot</span>
-                        <span>Name</span>
-                        <span>Type</span>
-                      </div>
-                      {storageSlots.map((s, i) => (
-                        <div
-                          key={i}
-                          className="grid grid-cols-[60px_1fr_80px] gap-x-3 text-xs"
-                        >
-                          <span className="font-mono text-muted-foreground">
-                            {s.slot}
-                          </span>
-                          <span className="text-foreground truncate">{s.label}</span>
-                          <span className="text-muted-foreground font-mono truncate">
-                            {s.type}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      no storage slots
-                    </p>
-                  )}
-                </div>
+              {openSections.storage && contract.layoutStatus !== "pending" && (
+                <button
+                  onClick={handleAnalyzeStorage}
+                  disabled={analyzingStorage}
+                  className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                >
+                  {analyzingStorage
+                    ? "[analyzing...]"
+                    : storageSlots.length > 0 || contract.layoutStatus === "resolved"
+                      ? "[refresh]"
+                      : "[resolve]"}
+                </button>
               )}
-            </CardContent>
-          </Card>
-        )}
+            </div>
+            {openSections.storage && (
+              <div className="pt-1">
+                {contract.layoutStatus && (
+                  <p className="text-xs text-muted-foreground mb-2">
+                    status: {contract.layoutStatus}
+                  </p>
+                )}
+                {storageSlots.length > 0 ? (
+                  <div className="space-y-0.5">
+                    <div className="grid grid-cols-[1fr_2fr_1fr] gap-x-3 text-xs font-medium uppercase tracking-wider text-muted-foreground border-b border-border pb-1 mb-1">
+                      <span>Slot</span>
+                      <span>Name</span>
+                      <span>Type</span>
+                    </div>
+                    {storageSlots.map((s, i) => (
+                      <div
+                        key={i}
+                        className="grid grid-cols-[1fr_2fr_1fr] gap-x-3 text-xs"
+                      >
+                        <span className="font-mono text-muted-foreground truncate">
+                          {s.slot}
+                        </span>
+                        <span className="text-foreground truncate">{s.label}</span>
+                        <span className="text-muted-foreground font-mono truncate">
+                          {s.type}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    no storage slots
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
