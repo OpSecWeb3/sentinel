@@ -28,6 +28,7 @@ const mainNav: NavItem[] = [
   { title: "correlations", href: "/correlations", icon: "#" },
   { title: "alerts", href: "/alerts", icon: "*" },
   { title: "channels", href: "/channels", icon: ">" },
+  { title: "query", href: "/query", icon: "?" },
 ];
 
 const moduleNav: ModuleNavItem[] = [

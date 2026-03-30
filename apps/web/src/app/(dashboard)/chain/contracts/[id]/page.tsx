@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import { ContractCallPanel } from "@/components/contract-call-panel";
 
 /* -- types --------------------------------------------------------- */
 
@@ -43,7 +44,7 @@ interface ContractDetail {
   chainId: number;
   explorerUrl: string | null;
   abiEvents: { name: string; signature: string }[];
-  abiFunctions: { name: string; signature: string; stateMutability: string | null }[];
+  abiFunctions: { name: string; signature: string; stateMutability: string | null; inputs: { name: string; type: string }[]; outputs: { name: string; type: string }[] }[];
   linkedDetections: LinkedDetection[];
 }
 
@@ -56,9 +57,6 @@ const severityColor: Record<string, string> = {
   low: "text-primary",
   info: "text-muted-foreground",
 };
-
-const mutabilityColor = (m: string | null) =>
-  m === "view" || m === "pure" ? "text-muted-foreground" : "text-warning";
 
 function truncateAddress(addr: string): string {
   if (addr.length <= 14) return addr;
@@ -450,32 +448,10 @@ export default function ContractDetailPage() {
             />
             {openSections.functions && (
               <div className="pt-1">
-                {contract.abiFunctions.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    no functions in ABI
-                  </p>
-                ) : (
-                  <div className="space-y-0.5">
-                    {contract.abiFunctions.map((fn) => (
-                      <div key={fn.signature} className="grid grid-cols-[2fr_1fr_3fr] gap-x-3 text-xs">
-                        <span className="text-foreground font-medium truncate">
-                          {fn.name}
-                        </span>
-                        <span
-                          className={cn(
-                            "font-mono truncate",
-                            mutabilityColor(fn.stateMutability),
-                          )}
-                        >
-                          [{fn.stateMutability ?? "?"}]
-                        </span>
-                        <span className="text-muted-foreground font-mono truncate">
-                          {fn.signature}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <ContractCallPanel
+                  contractId={contract.contractId}
+                  functions={contract.abiFunctions}
+                />
               </div>
             )}
           </CardContent>

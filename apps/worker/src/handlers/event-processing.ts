@@ -13,6 +13,8 @@ import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { RuleEngine } from '@sentinel/shared/rule-engine';
 import type { RuleEvaluator, NormalizedEvent } from '@sentinel/shared/rules';
 import { logger as rootLogger, type Logger } from '@sentinel/shared/logger';
+import { catalogEventFields, catalogAlertFields, type CatalogDeps } from '@sentinel/shared/payload-catalog';
+import { sql } from '@sentinel/db';
 import type { Redis } from 'ioredis';
 
 const EventProcessingPayload = z.object({
@@ -27,6 +29,7 @@ export function createEventProcessingHandler(
   const db = getDb();
   const _log = log ?? rootLogger.child({ component: 'event-processing' });
   const engine = new RuleEngine({ evaluators, redis, db, logger: _log });
+  const catalogDeps: CatalogDeps = { redis, db, sql };
 
   return {
     jobName: 'event.evaluate',
@@ -54,6 +57,10 @@ export function createEventProcessingHandler(
         occurredAt: event.occurredAt,
         receivedAt: event.receivedAt,
       };
+
+      // Catalog payload field paths (skip if already seen for this module+eventType)
+      catalogEventFields(catalogDeps, event.moduleId, event.eventType, normalizedEvent.payload)
+        .catch((err) => _log.warn({ err, eventType: event.eventType }, 'Payload catalog upsert failed (non-fatal)'));
 
       // Evaluate rules
       const result = await engine.evaluate(normalizedEvent);
@@ -125,6 +132,12 @@ export function createEventProcessingHandler(
         } catch (err) {
           _log.error({ err, eventId: event.id, candidateCount: result.candidates.length }, 'Alert batch insert failed — transaction rolled back');
           throw err; // Re-throw so BullMQ retries the job (transaction is atomic, so retry is safe)
+        }
+
+        // Catalog alert triggerData field paths (fire-and-forget)
+        for (const candidate of result.candidates) {
+          catalogAlertFields(catalogDeps, candidate.triggerType, candidate.triggerData as Record<string, unknown>)
+            .catch((err) => _log.warn({ err, triggerType: candidate.triggerType }, 'Alert catalog upsert failed (non-fatal)'));
         }
 
         // Enqueue dispatch outside the transaction so queue writes are not
