@@ -175,7 +175,9 @@ export default function ContractDetailPage() {
     );
   }
 
-  const traits = Array.isArray(contract.traits) ? contract.traits as string[] : [];
+  const traits = Array.isArray(contract.traits)
+    ? (contract.traits as Array<{ id?: string; name?: string; confidence?: number } | string>)
+    : [];
   const storageLayout = contract.storageLayout as { storage?: { label: string; slot: string; type: string }[] } | null;
   const storageSlots = Array.isArray(storageLayout?.storage) ? storageLayout.storage as { label: string; slot: string; type: string }[] : [];
 
@@ -260,14 +262,17 @@ export default function ContractDetailPage() {
               />
               {openSections.traits && (
                 <div className="flex flex-wrap gap-2 pt-1">
-                  {traits.map((trait) => (
-                    <span
-                      key={String(trait)}
-                      className="text-xs font-mono px-2 py-0.5 border border-primary/40 text-primary rounded"
-                    >
-                      {String(trait)}
-                    </span>
-                  ))}
+                  {traits.map((trait) => {
+                    const label = typeof trait === 'string' ? trait : trait.name ?? trait.id ?? 'unknown';
+                    return (
+                      <span
+                        key={label}
+                        className="text-xs font-mono px-2 py-0.5 border border-primary/40 text-primary rounded"
+                      >
+                        {label}
+                      </span>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
