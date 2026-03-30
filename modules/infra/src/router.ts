@@ -350,6 +350,7 @@ infraRouter.get('/hosts/:id', async (c) => {
   const [
     latestCert, latestTls, latestHeaders, latestInfra, latestWhois, latestDnsHealth,
     dnsRecords, dnsChanges, latestScore, scoreHistory, recentScans, schedule, suppressions,
+    proxyStatus, cdnOriginRecords,
   ] = await Promise.all([
     db.select().from(infraCertificates).where(eq(infraCertificates.hostId, hostId))
       .orderBy(desc(infraCertificates.observedAt)).limit(1).then((r) => r[0] ?? null),
@@ -377,6 +378,11 @@ infraRouter.get('/hosts/:id', async (c) => {
     db.select().from(infraScanSchedules).where(eq(infraScanSchedules.hostId, hostId))
       .limit(1).then((r) => r[0] ?? null),
     db.select().from(infraFindingSuppressions).where(eq(infraFindingSuppressions.hostId, hostId)),
+    import('./scanner/cdn/proxy-detection.js').then(({ detectProxyStatus }) =>
+      detectProxyStatus(hostId, orgId!, getSharedConnection()),
+    ).catch(() => ({ isProxied: false, provider: null })),
+    db.select({ recordType: infraCdnOriginRecords.recordType, recordValue: infraCdnOriginRecords.recordValue })
+      .from(infraCdnOriginRecords).where(eq(infraCdnOriginRecords.hostId, hostId)),
   ]);
 
   const suppressionSet = new Set(suppressions.map((s) => `${s.category}:${s.issue}`));
@@ -440,6 +446,9 @@ infraRouter.get('/hosts/:id', async (c) => {
         geo: latestInfra.geoCountry ? { country: latestInfra.geoCountry, city: latestInfra.geoCity ?? '', region: '' } : null,
         cloudProvider: latestInfra.cloudProvider, asn: latestInfra.asn, asnOrg: latestInfra.asnOrg,
         openPorts: (latestInfra.openPorts as Array<{ port: number }>).map((p) => p.port),
+        isProxied: proxyStatus.isProxied,
+        proxyProvider: proxyStatus.provider,
+        originIps: cdnOriginRecords.map((r) => ({ recordType: r.recordType, recordValue: r.recordValue })),
       } : null,
       whois: latestWhois ? {
         registrar: latestWhois.registrar,

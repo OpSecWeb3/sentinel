@@ -75,6 +75,9 @@ interface InfraInfo {
   openPorts: number[];
   asn: string | null;
   asnOrg: string | null;
+  isProxied?: boolean;
+  proxyProvider?: string | null;
+  originIps?: Array<{ recordType: string; recordValue: string }>;
 }
 
 interface WhoisInfo {
@@ -944,14 +947,29 @@ export default function HostDetailPage() {
             {host.infra ? (
               <>
                 <p className="mt-1 text-lg font-bold text-foreground">
-                  {host.infra.ip}
+                  {host.infra.isProxied && host.infra.originIps?.length
+                    ? host.infra.originIps[0].recordValue
+                    : host.infra.ip}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {host.infra.cloudProvider ?? "unknown"} |{" "}
                   {host.infra.geo
                     ? `${host.infra.geo.city}, ${host.infra.geo.country}`
                     : "unknown location"}
+                  {host.infra.isProxied && (
+                    <span className="ml-1 text-yellow-500">
+                      | proxied{host.infra.proxyProvider ? ` via ${host.infra.proxyProvider}` : ""}
+                    </span>
+                  )}
                 </p>
+                {host.infra.isProxied && host.infra.originIps?.length ? (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    edge: {host.infra.ip}
+                    {host.infra.originIps.length > 1 && (
+                      <span> | origins: {host.infra.originIps.map((o) => o.recordValue).join(", ")}</span>
+                    )}
+                  </p>
+                ) : null}
               </>
             ) : (
               <p className="mt-1 text-sm text-muted-foreground">no infra data</p>
