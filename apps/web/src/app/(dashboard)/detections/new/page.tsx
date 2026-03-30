@@ -14,6 +14,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { ToastContainer } from "@/components/ui/toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import { SlackChannelPicker } from "@/components/slack-channel-picker";
 
 /* ── types ──────────────────────────────────────────────────────── */
 
@@ -440,6 +441,26 @@ function ConfigureDetection({
   const [cooldownMinutes, setCooldownMinutes] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
+  // Slack
+  const [slackChannelId, setSlackChannelId] = useState("");
+  const [slackChannelName, setSlackChannelName] = useState("");
+  const [slackConnected, setSlackConnected] = useState(false);
+  const [slackTeamName, setSlackTeamName] = useState("");
+
+  useEffect(() => {
+    apiFetch<{ connected: boolean; teamName?: string }>("/integrations/slack", { credentials: "include" })
+      .then((res) => { setSlackConnected(res.connected); setSlackTeamName(res.teamName ?? ""); })
+      .catch(() => {});
+  }, []);
+
+  async function fetchSlackChannels(q: string) {
+    const res = await apiFetch<{ channels: Array<{ id: string; name: string; isPrivate: boolean }> }>(
+      `/integrations/slack/channels?q=${encodeURIComponent(q)}`,
+      { credentials: "include" },
+    );
+    return res.channels;
+  }
+
   // Template inputs — raw string state for form fields
   const [inputValues, setInputValues] = useState<Record<string, string>>(() => {
     const defaults: Record<string, string> = {};
@@ -778,6 +799,8 @@ function ConfigureDetection({
         cooldownMinutes,
         inputs: parsedInputs,
         overrides,
+        slackChannelId: slackChannelId || undefined,
+        slackChannelName: slackChannelId ? slackChannelName || undefined : undefined,
       };
 
       const res = await apiFetch<{
@@ -927,6 +950,29 @@ function ConfigureDetection({
             )}
           </div>
         )}
+
+        {/* Slack channel */}
+        <div className="space-y-1 border-t border-border pt-4">
+          <label className="text-xs text-muted-foreground">slack channel</label>
+          {slackConnected ? (
+            <SlackChannelPicker
+              value={slackChannelId}
+              valueName={slackChannelName}
+              onValueChange={(id, name) => { setSlackChannelId(id); setSlackChannelName(name); }}
+              fetchChannels={fetchSlackChannels}
+            />
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              <a href="/settings" className="text-primary underline underline-offset-4 hover:text-primary/80">
+                Connect Slack in Settings
+              </a>{" "}
+              to post alerts to a channel.
+            </p>
+          )}
+          {slackConnected && slackTeamName && (
+            <p className="text-[10px] text-muted-foreground/60">{slackTeamName}</p>
+          )}
+        </div>
 
         <div className="flex gap-3 pt-2">
           <Button type="submit" disabled={submitting} className="flex-1">

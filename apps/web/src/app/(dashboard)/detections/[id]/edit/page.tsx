@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { ToastContainer } from "@/components/ui/toast";
+import { SlackChannelPicker } from "@/components/slack-channel-picker";
 
 /* ── types ────────────────────────────────────────────────────────── */
 
@@ -157,6 +158,26 @@ export default function EditDetectionPage() {
   // Infra host scope
   const [hostScope, setHostScope] = useState("");
 
+  // Slack
+  const [slackChannelId, setSlackChannelId] = useState("");
+  const [slackChannelName, setSlackChannelName] = useState("");
+  const [slackConnected, setSlackConnected] = useState(false);
+  const [slackTeamName, setSlackTeamName] = useState("");
+
+  useEffect(() => {
+    apiFetch<{ connected: boolean; teamName?: string }>("/integrations/slack", { credentials: "include" })
+      .then((res) => { setSlackConnected(res.connected); setSlackTeamName(res.teamName ?? ""); })
+      .catch(() => {});
+  }, []);
+
+  async function fetchSlackChannels(q: string) {
+    const res = await apiFetch<{ channels: Array<{ id: string; name: string; isPrivate: boolean }> }>(
+      `/integrations/slack/channels?q=${encodeURIComponent(q)}`,
+      { credentials: "include" },
+    );
+    return res.channels;
+  }
+
   // Legacy rule editor state (for detections without a templateId)
   const ACTIONS = ["alert", "log", "suppress"] as const;
   const [legacyRules, setLegacyRules] = useState<
@@ -193,6 +214,8 @@ export default function EditDetectionPage() {
       setDescription(d.description ?? "");
       setSeverity(d.severity as (typeof SEVERITIES)[number]);
       setCooldownMinutes(d.cooldownMinutes);
+      if (d.slackChannelId) setSlackChannelId(d.slackChannelId);
+      if (d.slackChannelName) setSlackChannelName(d.slackChannelName);
 
       if (d.templateId) {
         // Fetch the template definition so we can render proper form fields
@@ -789,6 +812,8 @@ export default function EditDetectionPage() {
           templateSlug: template.slug,
           inputs: parsedInputs,
           overrides,
+          slackChannelId: slackChannelId || null,
+          slackChannelName: slackChannelId ? slackChannelName || null : null,
         }),
       });
       router.push(`/detections/${id}`);
@@ -852,6 +877,8 @@ export default function EditDetectionPage() {
           severity,
           cooldownMinutes,
           rules: rulesPayload,
+          slackChannelId: slackChannelId || null,
+          slackChannelName: slackChannelId ? slackChannelName || null : null,
         }),
       });
       router.push(`/detections/${id}`);
@@ -1032,6 +1059,32 @@ export default function EditDetectionPage() {
               </div>
             )}
 
+            <div className="space-y-2 border-t border-border pt-4">
+              <p className="text-xs text-muted-foreground">
+                slack channel{" "}
+                <span className="text-muted-foreground/50">(optional)</span>
+              </p>
+              {slackConnected ? (
+                <SlackChannelPicker
+                  value={slackChannelId}
+                  valueName={slackChannelName}
+                  onValueChange={(id, name) => {
+                    setSlackChannelId(id);
+                    setSlackChannelName(name);
+                  }}
+                  fetchChannels={fetchSlackChannels}
+                />
+              ) : (
+                <p className="text-xs text-muted-foreground/60">
+                  Connect Slack in{" "}
+                  <a href="/settings" className="underline hover:text-foreground">
+                    Settings
+                  </a>{" "}
+                  to enable notifications.
+                </p>
+              )}
+            </div>
+
             <Button type="submit" className="w-full" disabled={saving}>
               {saving ? "> saving..." : "$ save changes"}
             </Button>
@@ -1158,6 +1211,32 @@ export default function EditDetectionPage() {
                 </div>
               );
             })}
+          </div>
+
+          <div className="space-y-2 border-t border-border pt-4">
+            <p className="text-xs text-muted-foreground">
+              slack channel{" "}
+              <span className="text-muted-foreground/50">(optional)</span>
+            </p>
+            {slackConnected ? (
+              <SlackChannelPicker
+                value={slackChannelId}
+                valueName={slackChannelName}
+                onValueChange={(id, name) => {
+                  setSlackChannelId(id);
+                  setSlackChannelName(name);
+                }}
+                fetchChannels={fetchSlackChannels}
+              />
+            ) : (
+              <p className="text-xs text-muted-foreground/60">
+                Connect Slack in{" "}
+                <a href="/settings" className="underline hover:text-foreground">
+                  Settings
+                </a>{" "}
+                to enable notifications.
+              </p>
+            )}
           </div>
 
           <Button type="submit" className="w-full" disabled={saving}>
