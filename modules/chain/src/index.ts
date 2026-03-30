@@ -12,11 +12,13 @@ import { windowedSumEvaluator } from './evaluators/windowed-sum.js';
 import { blockPollHandler, blockProcessHandler, statePollHandler, ruleSyncHandler, contractVerifyHandler, rpcUsageFlushHandler, blockAggregateHandler } from './handlers.js';
 import { eventTypes } from './event-types.js';
 import { templates } from './templates/index.js';
+import { formatSlackBlocks } from './slack-formatter.js';
 
 export const ChainModule: DetectionModule = {
   id: 'chain',
   name: 'Chain',
   router: chainRouter,
+  formatSlackBlocks,
   evaluators: [
     eventMatchEvaluator,
     functionCallMatchEvaluator,

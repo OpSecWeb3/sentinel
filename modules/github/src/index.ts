@@ -11,11 +11,13 @@ import { orgSettingsEvaluator } from './evaluators/org-settings.js';
 import { webhookProcessHandler, repoSyncHandler } from './handlers.js';
 import { eventTypes } from './event-types.js';
 import { templates } from './templates/index.js';
+import { formatSlackBlocks } from './slack-formatter.js';
 
 export const GitHubModule: DetectionModule = {
   id: 'github',
   name: 'GitHub',
   router: githubRouter,
+  formatSlackBlocks,
   evaluators: [
     repoVisibilityEvaluator,
     branchProtectionEvaluator,

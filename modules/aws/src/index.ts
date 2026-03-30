@@ -7,11 +7,13 @@ import { spotEvictionEvaluator } from './evaluators/spot-eviction.js';
 import { pollSweepHandler, sqsPollHandler, eventProcessHandler } from './handlers.js';
 import { eventTypes } from './event-types.js';
 import { templates } from './templates/index.js';
+import { formatSlackBlocks } from './slack-formatter.js';
 
 export const AwsModule: DetectionModule = {
   id: 'aws',
   name: 'AWS',
   router: awsRouter,
+  formatSlackBlocks,
   evaluators: [
     eventMatchEvaluator,
     rootActivityEvaluator,

@@ -8,6 +8,7 @@ import { anomalyDetectionEvaluator } from './evaluators/anomaly-detection.js';
 import { webhookProcessHandler, pollHandler, attributionHandler, ciNotifyHandler, verifyHandler, verifyAggregateHandler } from './handlers.js';
 import { eventTypes } from './event-types.js';
 import { templates } from './templates/index.js';
+import { formatSlackBlocks } from './slack-formatter.js';
 
 export { initVerification } from './verification.js';
 export { setRegistryWebhookRateLimitRedis } from './router.js';
@@ -16,6 +17,7 @@ export const RegistryModule: DetectionModule = {
   id: 'registry',
   name: 'Registry',
   router: registryRouter,
+  formatSlackBlocks,
   evaluators: [
     digestChangeEvaluator,
     attributionEvaluator,
