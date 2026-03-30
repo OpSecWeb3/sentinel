@@ -499,6 +499,13 @@ export default function HostDetailPage() {
     }
   }
 
+  // Auto-fetch CDN origins when section is expanded
+  useEffect(() => {
+    if (expandedSections.has("cdn-origins") && !cdnOriginsLoaded) {
+      fetchCdnOrigins();
+    }
+  }, [expandedSections]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function refreshCdnOrigins() {
     setCdnOriginsRefreshing(true);
     try {
@@ -1724,21 +1731,7 @@ export default function HostDetailPage() {
         {expandedSections.has("cdn-origins") && (
           <CardContent className="pt-3">
             {!cdnOriginsLoaded ? (
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={fetchCdnOrigins}
-                  className="text-xs text-primary hover:underline"
-                >
-                  $ load cdn origins
-                </button>
-                <button
-                  onClick={refreshCdnOrigins}
-                  disabled={cdnOriginsRefreshing}
-                  className="text-xs text-muted-foreground hover:text-primary hover:underline disabled:opacity-50"
-                >
-                  {cdnOriginsRefreshing ? "$ fetching..." : "$ refresh from provider"}
-                </button>
-              </div>
+              <p className="text-xs text-muted-foreground">$ loading...</p>
             ) : cdnOrigins.length > 0 ? (
               <div className="space-y-2">
                 <div className="flex justify-end">
