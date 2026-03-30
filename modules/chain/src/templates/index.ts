@@ -951,6 +951,7 @@ export const templates: DetectionTemplate[] = [
         label: 'Result field',
         type: 'text',
         required: false,
+        default: 'result',
         placeholder: '0',
         help: 'Index or name of the return value to evaluate (0 for first).',
       },

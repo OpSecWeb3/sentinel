@@ -10,6 +10,7 @@ import { getDb } from '@sentinel/db';
 import { detections, rules } from '@sentinel/db/schema/core';
 import { eq, and, sql, count, desc, asc, ilike, inArray, ne } from '@sentinel/db';
 import type { AppEnv } from '@sentinel/shared/hono-types';
+import type { DetectionTemplate, TemplateInput } from '@sentinel/shared/module';
 import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
 import { requireAuth, requireOrg, requireRole } from '../middleware/rbac.js';
 import { requireScope } from '../middleware/scope.js';
@@ -546,9 +547,10 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
     const template = mod.templates.find((t) => t.slug === body.templateSlug);
     if (!template) return c.json({ error: `Template "${body.templateSlug}" not found` }, 400);
 
-    const inputsMap = body.inputs ?? {};
+    const inputsMap = buildEffectiveTemplateInputs(template, body.inputs ?? {});
     const patchBuiltConfigs = template.rules.map((r) => applyTemplateInputs(r.config, inputsMap));
-    const patchUnresolved = findUnresolvedPlaceholders(patchBuiltConfigs);
+    finalizeTemplateRuleConfigs(patchBuiltConfigs);
+    const patchUnresolved = filterUnresolvedForTemplate(findUnresolvedPlaceholders(patchBuiltConfigs), template);
     if (patchUnresolved.length > 0) {
       return c.json({ error: `Missing required inputs: ${patchUnresolved.join(', ')}` }, 400);
     }
@@ -650,6 +652,67 @@ router.delete('/:id', requireRole('admin'), requireScope('api:write'), validate(
 // POST /detections/from-template — create detection from a module template
 // ---------------------------------------------------------------------------
 
+const STRINGISH_TEMPLATE_INPUT_TYPES = new Set<TemplateInput['type']>(['text', 'address', 'select', 'string-array']);
+
+/**
+ * Merge template input defaults and substitute omitted optional string fields with ""
+ * so {{placeholders}} resolve instead of staying in stored rule configs.
+ */
+function buildEffectiveTemplateInputs(
+  template: DetectionTemplate,
+  bodyInputs: Record<string, unknown>,
+): Record<string, unknown> {
+  const defs = template.inputs ?? [];
+  const out: Record<string, unknown> = {};
+
+  for (const inp of defs) {
+    if (inp.default !== undefined) {
+      out[inp.key] = inp.default;
+    }
+  }
+  for (const [k, v] of Object.entries(bodyInputs)) {
+    out[k] = v;
+  }
+  for (const inp of defs) {
+    if (inp.required) continue;
+    if (inp.default !== undefined) continue;
+    if (Object.prototype.hasOwnProperty.call(bodyInputs, inp.key)) continue;
+    if (STRINGISH_TEMPLATE_INPUT_TYPES.has(inp.type) && !(inp.key in out)) {
+      out[inp.key] = '';
+    }
+  }
+  return out;
+}
+
+/** Unresolved {{tokens}} that are optional template inputs are allowed (safety net for non-string optionals). */
+function filterUnresolvedForTemplate(unresolved: string[], template: DetectionTemplate): string[] {
+  const optional = new Set((template.inputs ?? []).filter((i) => !i.required).map((i) => i.key));
+  return unresolved.filter((k) => !optional.has(k));
+}
+
+/** Drop arg-filter conditions with an empty field (optional filters from templates). */
+function pruneEmptyConditionsInConfig(config: Record<string, unknown>) {
+  const conds = config.conditions;
+  if (!Array.isArray(conds)) return;
+  const filtered = conds.filter((c) => {
+    if (!c || typeof c !== 'object') return true;
+    const field = (c as Record<string, unknown>).field;
+    if (typeof field !== 'string') return true;
+    return field.trim() !== '';
+  });
+  if (filtered.length === 0) {
+    delete config.conditions;
+  } else {
+    config.conditions = filtered;
+  }
+}
+
+function finalizeTemplateRuleConfigs(configs: Record<string, unknown>[]) {
+  for (const c of configs) {
+    pruneEmptyConditionsInConfig(c);
+  }
+}
+
 /**
  * Deep-interpolate {{key}} placeholders in a config object using user inputs.
  * A token that is the ENTIRE string value (e.g. "{{threshold}}") is replaced
@@ -736,15 +799,16 @@ router.post('/from-template', requireRole('admin', 'editor'), requireScope('api:
 
   const detectionName = body.name ?? template.name;
 
-  // Guard: reject if any required template inputs were not provided
-  const builtConfigs = template.rules.map((r) => applyTemplateInputs(r.config, body.inputs));
-  const unresolved = findUnresolvedPlaceholders(builtConfigs);
+  const effectiveInputs = buildEffectiveTemplateInputs(template, body.inputs);
+  const builtConfigs = template.rules.map((r) => applyTemplateInputs(r.config, effectiveInputs));
+  finalizeTemplateRuleConfigs(builtConfigs);
+  const unresolved = filterUnresolvedForTemplate(findUnresolvedPlaceholders(builtConfigs), template);
   if (unresolved.length > 0) {
     return c.json({ error: `Missing required inputs: ${unresolved.join(', ')}` }, 400);
   }
 
   // Validate upstream resources exist
-  const mergedConfig = { ...body.inputs, ...body.overrides };
+  const mergedConfig = { ...effectiveInputs, ...body.overrides };
   const prereq = await validatePrerequisites(body.moduleId, orgId, mergedConfig, builtConfigs);
   if (!prereq.ok) {
     return c.json({ error: prereq.error }, 400);
@@ -763,7 +827,7 @@ router.post('/from-template', requireRole('admin', 'editor'), requireScope('api:
       slackChannelId: body.slackChannelId,
       slackChannelName: body.slackChannelName,
       cooldownMinutes: body.cooldownMinutes,
-      config: { ...body.inputs, ...body.overrides },
+      config: { ...effectiveInputs, ...body.overrides },
     }).returning();
 
     const ruleRows = await tx.insert(rules).values(
