@@ -292,7 +292,7 @@ async function fetchAllSlackChannels(token: string): Promise<SlackChannel[]> {
     const data = (await res.json()) as {
       ok: boolean;
       error?: string;
-      channels?: Array<{ id: string; name: string; is_private: boolean }>;
+      channels?: Array<{ id: string; name: string; is_private: boolean; is_member: boolean }>;
       response_metadata?: { next_cursor?: string };
     };
 
@@ -301,7 +301,12 @@ async function fetchAllSlackChannels(token: string): Promise<SlackChannel[]> {
     }
 
     for (const ch of data.channels ?? []) {
-      all.push({ id: ch.id, name: ch.name, isPrivate: ch.is_private });
+      // Only include channels the bot has been invited to — these are the only
+      // ones chat:write can post to. Public channels where the bot is not a
+      // member are visible via channels:read but posting will fail silently.
+      if (ch.is_member) {
+        all.push({ id: ch.id, name: ch.name, isPrivate: ch.is_private });
+      }
     }
 
     cursor = data.response_metadata?.next_cursor || undefined;
