@@ -172,9 +172,11 @@ export default function EditDetectionPage() {
       .catch(() => {});
   }, []);
 
-  async function fetchSlackChannels(q: string) {
+  async function fetchSlackChannels(q: string, refresh = false) {
+    const params = new URLSearchParams({ q });
+    if (refresh) params.set("refresh", "true");
     const res = await apiFetch<{ channels: Array<{ id: string; name: string; isPrivate: boolean }> }>(
-      `/integrations/slack/channels?q=${encodeURIComponent(q)}`,
+      `/integrations/slack/channels?${params}`,
       { credentials: "include" },
     );
     return res.channels;

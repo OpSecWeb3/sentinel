@@ -13,6 +13,7 @@ import { encrypt, decrypt } from '@sentinel/shared/crypto';
 import { env } from '@sentinel/shared/env';
 import type { AppEnv } from '@sentinel/shared/hono-types';
 import { requireAuth, requireOrg, requireRole } from '../middleware/rbac.js';
+import { getSharedRedis } from '../redis.js';
 
 const integrations = new Hono<AppEnv>();
 
@@ -160,6 +161,14 @@ integrations.get('/slack/callback', async (c) => {
     },
   });
 
+  // Invalidate channel cache so the next search reflects the new installation
+  try {
+    const redis = getSharedRedis();
+    await redis.del(SLACK_CHANNELS_CACHE_KEY(orgId));
+  } catch {
+    // Non-fatal — cache will expire naturally
+  }
+
   return c.redirect(`${webUrl}/settings?slack=success`);
 });
 
@@ -236,27 +245,37 @@ authed.delete('/slack', requireRole('admin'), async (c) => {
       .where(eq(correlationRules.orgId, orgId));
   });
 
+  // Clear channel cache
+  try {
+    const redis = getSharedRedis();
+    await redis.del(SLACK_CHANNELS_CACHE_KEY(orgId));
+  } catch {
+    // Non-fatal
+  }
+
   return c.json({ disconnected: true });
 });
 
-// GET /integrations/slack/channels?q=search — search Slack channels
-authed.get('/slack/channels', async (c) => {
-  const query = (c.req.query('q') ?? '').trim().toLowerCase();
-  if (query.length < 2) return c.json({ channels: [] });
+// ---------------------------------------------------------------------------
+// Slack channel cache helpers
+//
+// conversations.list is paginated and does not support server-side search.
+// For large workspaces we need to fetch all pages and search client-side,
+// but doing that on every keystroke is too slow and burns Slack rate limits.
+//
+// Solution: cache the full channel list in Redis per org (15-min TTL).
+// The first search after cache expiry pays the pagination cost; all
+// subsequent searches within that window are served from Redis instantly.
+// ---------------------------------------------------------------------------
 
-  const orgId = c.get('orgId');
-  const db = getDb();
+const SLACK_CHANNELS_CACHE_TTL_S = 15 * 60; // 15 minutes
+const SLACK_CHANNELS_CACHE_KEY = (orgId: string) => `sentinel:slack:channels:${orgId}`;
 
-  const [installation] = await db.select({ botToken: slackInstallations.botToken })
-    .from(slackInstallations).where(eq(slackInstallations.orgId, orgId)).limit(1);
+type SlackChannel = { id: string; name: string; isPrivate: boolean };
 
-  if (!installation) return c.json({ error: 'Slack is not connected' }, 400);
-
-  const token = decrypt(installation.botToken);
-  const matched: Array<{ id: string; name: string; isPrivate: boolean }> = [];
+async function fetchAllSlackChannels(token: string): Promise<SlackChannel[]> {
+  const all: SlackChannel[] = [];
   let cursor: string | undefined;
-  let pageCount = 0;
-  const MAX_PAGES = 5;
 
   do {
     const params = new URLSearchParams({
@@ -277,23 +296,59 @@ authed.get('/slack/channels', async (c) => {
       response_metadata?: { next_cursor?: string };
     };
 
-    pageCount++;
-
     if (!data.ok) {
-      c.get('logger').error({ slackError: data.error ?? 'unknown' }, '[slack] conversations.list failed');
-      return c.json({ error: 'Failed to fetch channels from Slack' }, 502);
+      throw new Error(data.error ?? 'conversations.list failed');
     }
 
     for (const ch of data.channels ?? []) {
-      if (ch.name.toLowerCase().includes(query)) {
-        matched.push({ id: ch.id, name: ch.name, isPrivate: ch.is_private });
-      }
+      all.push({ id: ch.id, name: ch.name, isPrivate: ch.is_private });
     }
 
     cursor = data.response_metadata?.next_cursor || undefined;
-  } while (cursor && matched.length < 50 && pageCount < MAX_PAGES);
+  } while (cursor);
 
-  return c.json({ channels: matched.slice(0, 50) });
+  return all;
+}
+
+// GET /integrations/slack/channels?q=search — search Slack channels
+authed.get('/slack/channels', async (c) => {
+  const query = (c.req.query('q') ?? '').trim().toLowerCase();
+  if (query.length < 1) return c.json({ channels: [] });
+
+  const orgId = c.get('orgId');
+  const db = getDb();
+  const redis = getSharedRedis();
+  const cacheKey = SLACK_CHANNELS_CACHE_KEY(orgId);
+
+  const [installation] = await db.select({ botToken: slackInstallations.botToken })
+    .from(slackInstallations).where(eq(slackInstallations.orgId, orgId)).limit(1);
+
+  if (!installation) return c.json({ error: 'Slack is not connected' }, 400);
+
+  // --- serve from cache if available ---
+  const forceRefresh = c.req.query('refresh') === 'true';
+  let allChannels: SlackChannel[];
+  const cached = forceRefresh ? null : await redis.get(cacheKey);
+
+  if (cached) {
+    allChannels = JSON.parse(cached) as SlackChannel[];
+  } else {
+    // Cache miss — fetch all pages from Slack and cache the result
+    try {
+      const token = decrypt(installation.botToken);
+      allChannels = await fetchAllSlackChannels(token);
+      await redis.set(cacheKey, JSON.stringify(allChannels), 'EX', SLACK_CHANNELS_CACHE_TTL_S);
+    } catch (err) {
+      c.get('logger').error({ err }, '[slack] conversations.list failed');
+      return c.json({ error: 'Failed to fetch channels from Slack' }, 502);
+    }
+  }
+
+  const matched = allChannels
+    .filter(ch => ch.name.toLowerCase().includes(query))
+    .slice(0, 50);
+
+  return c.json({ channels: matched });
 });
 
 // GET /integrations/slack/channels/:channelId — resolve channel ID to name

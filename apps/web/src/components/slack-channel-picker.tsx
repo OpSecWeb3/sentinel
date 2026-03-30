@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Lock, Loader2, Search } from "lucide-react";
+import { Lock, Loader2, Search, RefreshCw } from "lucide-react";
 
 interface SlackChannel {
   id: string;
@@ -13,7 +13,7 @@ interface SlackChannelPickerProps {
   value: string;
   valueName?: string;
   onValueChange: (id: string, name: string) => void;
-  fetchChannels: (query: string) => Promise<SlackChannel[]>;
+  fetchChannels: (query: string, refresh?: boolean) => Promise<SlackChannel[]>;
 }
 
 export function SlackChannelPicker({
@@ -39,13 +39,13 @@ export function SlackChannelPicker({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  async function handleFind() {
+  async function handleFind(refresh = false) {
     const q = search.trim();
-    if (q.length < 2) return;
+    if (q.length < 1) return;
     setSearching(true);
     setSearched(false);
     try {
-      const channels = await fetchChannels(q);
+      const channels = await fetchChannels(q, refresh);
       setResults(channels);
       setSearched(true);
       setOpen(true);
@@ -91,8 +91,8 @@ export function SlackChannelPicker({
         />
         <button
           type="button"
-          onClick={handleFind}
-          disabled={searching || search.trim().length < 2}
+          onClick={() => handleFind()}
+          disabled={searching || search.trim().length < 1}
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm transition-colors hover:bg-accent/50 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {searching ? (
@@ -102,6 +102,17 @@ export function SlackChannelPicker({
           )}
           Find
         </button>
+        {searched && (
+          <button
+            type="button"
+            onClick={() => handleFind(true)}
+            disabled={searching || search.trim().length < 1}
+            title="Refresh channel list from Slack"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm transition-colors hover:bg-accent/50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
       {open && searched && (
