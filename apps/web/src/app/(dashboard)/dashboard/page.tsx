@@ -36,16 +36,6 @@ interface RecentEvent {
   receivedAt: string;
 }
 
-interface ChainOverviewStats {
-  trackedContracts: number;
-  activeDetections: number;
-  recentAlerts: number;
-  totalEvents: number;
-}
-
-interface ChainOverviewResponse {
-  stats: ChainOverviewStats;
-}
 
 interface EventsResponse {
   data: RecentEvent[];
@@ -90,9 +80,6 @@ export default function DashboardPage() {
   const [eventsLoading, setEventsLoading] = useState(true);
   const showEventsLoading = useDelayedLoading(eventsLoading);
 
-  const [chainStats, setChainStats] = useState<ChainOverviewStats | null>(null);
-  const [chainLoading, setChainLoading] = useState(true);
-  const showChainLoading = useDelayedLoading(chainLoading);
 
   const fetchStats = useCallback(async () => {
     setLoading(true);
@@ -111,20 +98,6 @@ export default function DashboardPage() {
     }
   }, []);
 
-  const fetchChainStats = useCallback(async () => {
-    setChainLoading(true);
-    try {
-      const res = await apiFetch<ChainOverviewResponse>(
-        "/modules/chain/overview",
-        { credentials: "include" },
-      );
-      setChainStats(res.stats);
-    } catch {
-      // non-critical
-    } finally {
-      setChainLoading(false);
-    }
-  }, []);
 
   const fetchRecentEvents = useCallback(async () => {
     setEventsLoading(true);
@@ -145,8 +118,7 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchStats();
     fetchRecentEvents();
-    fetchChainStats();
-  }, [fetchStats, fetchRecentEvents, fetchChainStats]);
+  }, [fetchStats, fetchRecentEvents]);
 
   /* ── derived data ──────────────────────────────────────────── */
 
@@ -297,51 +269,6 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          {/* Chain module status */}
-          <section>
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                $ chain status
-              </p>
-              <Link
-                href="/chain/contracts"
-                className="text-xs text-primary hover:underline"
-              >
-                view contracts {">"}
-              </Link>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 min-h-[104px]">
-              {showChainLoading
-                ? [0, 1, 2, 3].map((i) => (
-                    <Card key={i}>
-                      <CardContent className="p-4 space-y-3 animate-pulse">
-                        <div className="h-3 bg-muted-foreground/20 rounded w-1/3" />
-                        <div className="h-8 bg-muted-foreground/20 rounded w-1/2" />
-                      </CardContent>
-                    </Card>
-                  ))
-                : chainStats
-                  ? [
-                      { key: "TRACKED_CONTRACTS", value: chainStats.trackedContracts },
-                      { key: "CHAIN_DETECTIONS", value: chainStats.activeDetections },
-                      { key: "CHAIN_ALERTS", value: chainStats.recentAlerts },
-                      { key: "CHAIN_EVENTS", value: chainStats.totalEvents },
-                    ].map((s) => (
-                      <Card key={s.key} className="animate-content-ready">
-                        <CardContent className="p-4">
-                          <p className="text-xs text-muted-foreground">{s.key}</p>
-                          <p className="mt-1 text-2xl font-bold text-primary text-glow">
-                            {s.value}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {s.value > 0 ? "[OK]" : "[--]"}
-                          </p>
-                        </CardContent>
-                      </Card>
-                    ))
-                  : null}
-            </div>
-          </section>
 
           {/* Events summary */}
           <section>
