@@ -62,6 +62,7 @@ describe('Chunk 088 — windowed_spike evaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TOPIC0,
+        contractAddress: '0x1234567890abcdef1234567890abcdef12345678',
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -87,6 +88,7 @@ describe('Chunk 088 — windowed_spike evaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TOPIC0,
+        contractAddress: '0x1234567890abcdef1234567890abcdef12345678',
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -119,6 +121,7 @@ describe('Chunk 088 — windowed_spike evaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TOPIC0,
+        contractAddress: '0x1234567890abcdef1234567890abcdef12345678',
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 100, // alert at 100% increase

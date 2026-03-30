@@ -84,7 +84,7 @@ describe('Gap 6 — Module route branch coverage', () => {
       },
       {
         moduleId: 'chain',
-        rules: [{ ruleType: 'chain.event_match', config: { eventSignature: '0xddf252ad' }, action: 'alert' }],
+        rules: [{ ruleType: 'chain.event_match', config: { eventSignature: '0xddf252ad', contractAddress: '0x1234567890abcdef1234567890abcdef12345678' }, action: 'alert' }],
       },
       {
         moduleId: 'infra',

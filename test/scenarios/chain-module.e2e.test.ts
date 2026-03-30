@@ -127,6 +127,7 @@ describe('Large Transfer — Threshold Boundary', () => {
       moduleId: 'chain',
       ruleType: 'chain.event_match',
       config: {
+        contractAddress: CONTRACT_ADDR,
         eventSignature: 'Transfer(address,address,uint256)',
         eventName: 'Transfer',
         conditions: [{ field: 'value', operator: '>', value: ONE_ETH }],
@@ -222,6 +223,7 @@ describe('Ownership Transfer Detection', () => {
       moduleId: 'chain',
       ruleType: 'chain.event_match',
       config: {
+        contractAddress: CONTRACT_ADDR,
         eventSignature: 'OwnershipTransferred(address,address)',
         eventName: 'OwnershipTransferred',
       },
@@ -382,6 +384,7 @@ describe('Windowed Count — Per-Entity Grouping', () => {
       moduleId: 'chain',
       ruleType: 'chain.windowed_count',
       config: {
+        contractAddress: CONTRACT_ADDR,
         topic0: TRANSFER_TOPIC0,
         groupByField: 'to',
         windowMinutes: 60,
@@ -573,6 +576,7 @@ describe('Proxy Upgrade Event Detection', () => {
       moduleId: 'chain',
       ruleType: 'chain.event_match',
       config: {
+        contractAddress: CONTRACT_ADDR,
         eventSignature: 'Upgraded(address)',
         eventName: 'Upgraded',
       },
@@ -623,6 +627,7 @@ describe('Proxy Upgrade Event Detection', () => {
       moduleId: 'chain',
       ruleType: 'chain.event_match',
       config: {
+        contractAddress: CONTRACT_ADDR,
         eventSignature: 'Upgraded(address)',
         eventName: 'Upgraded',
       },
