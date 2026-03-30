@@ -13,11 +13,13 @@ import { ctNewEntryEvaluator } from './evaluators/ct-new-entry.js';
 import { scanHandler, probeHandler, scheduleLoaderHandler, scanAggregateHandler } from './handlers.js';
 import { eventTypes } from './event-types.js';
 import { templates } from './templates/index.js';
+import { formatSlackBlocks } from './slack-formatter.js';
 
 export const InfraModule: DetectionModule = {
   id: 'infra',
   name: 'Infrastructure',
   router: infraRouter,
+  formatSlackBlocks,
   evaluators: [
     certExpiryEvaluator,
     certIssuesEvaluator,

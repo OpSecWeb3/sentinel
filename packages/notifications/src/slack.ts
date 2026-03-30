@@ -4,15 +4,8 @@
  * Ported from ChainAlert.
  */
 
-export interface SlackAlertPayload {
-  title: string;
-  severity: string;
-  description?: string;
-  module: string;
-  eventType: string;
-  fields?: Array<{ label: string; value: string }>;
-  timestamp: string;
-}
+export type { SlackAlertFields as SlackAlertPayload } from '@sentinel/shared/module';
+import type { SlackAlertFields as SlackAlertPayload } from '@sentinel/shared/module';
 
 const SEVERITY_BADGE: Record<string, string> = {
   critical: ':rotating_light:',
