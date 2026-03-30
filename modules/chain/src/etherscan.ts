@@ -8,6 +8,15 @@ export interface EtherscanAbiResult {
   contractName: string;
   /** Parsed storage layout from Etherscan getsourcecode, if available */
   storageLayout: { storage: { label: string; slot: string; type: string; offset: number }[] } | null;
+  /** Raw source metadata from getsourcecode — passed to storage-layout discovery to avoid a duplicate API call */
+  sourceResult?: {
+    SourceCode: string;
+    CompilerVersion: string;
+    OptimizationUsed: string;
+    Runs: string;
+    EVMVersion: string;
+    ContractName: string;
+  } | null;
 }
 
 export interface FetchContractAbiOptions {
@@ -160,9 +169,10 @@ export async function fetchContractAbi(
 
   const abi = JSON.parse(data.result) as unknown[];
 
-  // Extract contract name and storage layout from getsourcecode endpoint
+  // Extract contract name, storage layout, and source metadata from getsourcecode endpoint
   let contractName = 'Unknown';
   let storageLayout: EtherscanAbiResult['storageLayout'] = null;
+  let sourceResult: EtherscanAbiResult['sourceResult'] = null;
   try {
     const srcUrl = buildUrl('getsourcecode');
 
@@ -174,7 +184,15 @@ export async function fetchContractAbi(
     if (srcRes.ok) {
       const srcData = (await srcRes.json()) as {
         status: string;
-        result: Array<{ ContractName?: string; StorageLayout?: string }>;
+        result: Array<{
+          ContractName?: string;
+          StorageLayout?: string;
+          SourceCode?: string;
+          CompilerVersion?: string;
+          OptimizationUsed?: string;
+          Runs?: string;
+          EVMVersion?: string;
+        }>;
       };
       if (srcData.status === '1' && srcData.result?.[0]) {
         const row = srcData.result[0];
@@ -194,11 +212,22 @@ export async function fetchContractAbi(
             // StorageLayout parsing is best-effort
           }
         }
+        // Capture source metadata for solc-based layout discovery
+        if (row.SourceCode && row.SourceCode !== '' && row.CompilerVersion) {
+          sourceResult = {
+            SourceCode: row.SourceCode,
+            CompilerVersion: row.CompilerVersion,
+            OptimizationUsed: row.OptimizationUsed ?? '0',
+            Runs: row.Runs ?? '200',
+            EVMVersion: row.EVMVersion ?? '',
+            ContractName: row.ContractName ?? contractName,
+          };
+        }
       }
     }
   } catch {
     // Best effort — contract name and storage layout are nice-to-have
   }
 
-  return { abi, contractName, storageLayout };
+  return { abi, contractName, storageLayout, sourceResult };
 }

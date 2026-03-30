@@ -22,6 +22,8 @@ import { detections, rules, alerts, events } from '@sentinel/db/schema/core';
 import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
 import type { AppEnv } from '@sentinel/shared/hono-types';
 import { templates as chainTemplates } from './templates/index.js';
+import { getSuggestedSlots } from './well-known-slots.js';
+import { startLayoutDiscovery } from './storage-layout.js';
 
 export const chainRouter = new Hono<AppEnv>();
 
@@ -536,6 +538,99 @@ chainRouter.get('/contracts/:id', async (c) => {
       linkedDetections,
     },
   });
+});
+
+// ---------------------------------------------------------------------------
+// GET /modules/chain/contracts/:contractId/storage-slots
+// Returns both well-known and discovered storage slots for a contract.
+// ---------------------------------------------------------------------------
+
+chainRouter.get('/contracts/:contractId/storage-slots', async (c) => {
+  const orgId = c.get('orgId');
+  if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+
+  const contractId = parseInt(c.req.param('contractId'), 10);
+  if (!Number.isFinite(contractId)) {
+    return c.json({ error: 'Invalid contract ID' }, 400);
+  }
+
+  const db = getDb();
+
+  // Verify org has access to this contract
+  const [row] = await db
+    .select({
+      isProxy: chainContracts.isProxy,
+      storageLayout: chainContracts.storageLayout,
+      layoutStatus: chainContracts.layoutStatus,
+    })
+    .from(chainOrgContracts)
+    .innerJoin(chainContracts, eq(chainContracts.id, chainOrgContracts.contractId))
+    .where(
+      and(
+        eq(chainOrgContracts.contractId, contractId),
+        eq(chainOrgContracts.orgId, orgId),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    return c.json({ error: 'Contract not found' }, 404);
+  }
+
+  const wellKnown = getSuggestedSlots({ isProxy: row.isProxy });
+  const discovered = Array.isArray(row.storageLayout) ? row.storageLayout : [];
+
+  return c.json({
+    data: {
+      wellKnown,
+      discovered,
+      layoutStatus: row.layoutStatus,
+    },
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /modules/chain/contracts/:contractId/analyze-storage
+// Manual trigger for storage layout re-analysis.
+// ---------------------------------------------------------------------------
+
+chainRouter.post('/contracts/:contractId/analyze-storage', async (c) => {
+  const orgId = c.get('orgId');
+  if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+
+  const contractId = parseInt(c.req.param('contractId'), 10);
+  if (!Number.isFinite(contractId)) {
+    return c.json({ error: 'Invalid contract ID' }, 400);
+  }
+
+  const db = getDb();
+
+  // Verify org has access to this contract
+  const [row] = await db
+    .select({
+      contractId: chainContracts.id,
+      layoutStatus: chainContracts.layoutStatus,
+    })
+    .from(chainOrgContracts)
+    .innerJoin(chainContracts, eq(chainContracts.id, chainOrgContracts.contractId))
+    .where(
+      and(
+        eq(chainOrgContracts.contractId, contractId),
+        eq(chainOrgContracts.orgId, orgId),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    return c.json({ error: 'Contract not found' }, 404);
+  }
+
+  if (row.layoutStatus === 'pending') {
+    return c.json({ error: 'Analysis already in progress' }, 409);
+  }
+
+  startLayoutDiscovery(row.contractId, null); // will re-fetch source
+  return c.json({ data: { layoutStatus: 'pending' } });
 });
 
 // ---------------------------------------------------------------------------

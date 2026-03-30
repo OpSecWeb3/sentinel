@@ -45,6 +45,7 @@ import {
 } from './normalizer.js';
 import { decodeLog, decodeFunctionCallData } from './decoder.js';
 import { detectTraits } from './traits.js';
+import { startLayoutDiscovery } from './storage-layout.js';
 import { getChildResults } from '@sentinel/shared/fan-out';
 import { toFunctionSelector, toEventSelector } from 'viem';
 
@@ -1589,7 +1590,7 @@ export const contractVerifyHandler: JobHandler = {
       // explorer URLs; custom explorer bases (e.g. Blockscout) still use explorerApi.
       // When only explorerApi is present, it uses that URL directly.
       const etherscanApiKey = env().ETHERSCAN_API_KEY;
-      const { abi, contractName, storageLayout } = await fetchContractAbi(network.explorerApi ?? '', address, { chainId: network.chainId ?? undefined, apiKey: etherscanApiKey });
+      const { abi, contractName, storageLayout, sourceResult } = await fetchContractAbi(network.explorerApi ?? '', address, { chainId: network.chainId ?? undefined, apiKey: etherscanApiKey });
 
       // 2. Check ERC-1967 proxy slot
       let isProxy = false;
@@ -1648,6 +1649,12 @@ export const contractVerifyHandler: JobHandler = {
           layoutStatus: storageLayout ? 'fetched' : 'no_layout',
         })
         .where(eq(chainContracts.id, contractId));
+
+      // Fire-and-forget: compile source to extract full storage layout.
+      // If Etherscan already provided a StorageLayout, skip compilation.
+      if (!storageLayout && sourceResult) {
+        startLayoutDiscovery(contractId, sourceResult);
+      }
 
       log.info({ address, networkSlug, isProxy }, 'contract verified');
     } catch (err) {

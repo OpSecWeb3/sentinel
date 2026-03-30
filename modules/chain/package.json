@@ -8,16 +8,17 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@sentinel/shared": "workspace:*",
     "@sentinel/db": "workspace:*",
+    "@sentinel/shared": "workspace:*",
     "bullmq": "^5.34.0",
     "hono": "^4.7.0",
     "ioredis": "^5.4.2",
-    "zod": "^3.24.0",
-    "viem": "^2.21.0"
+    "solc": "^0.8.34",
+    "viem": "^2.21.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
   }
 }
