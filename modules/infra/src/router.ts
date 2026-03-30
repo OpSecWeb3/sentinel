@@ -932,6 +932,33 @@ infraRouter.get('/hosts/:id/cdn-origins', async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /modules/infra/hosts/:id/cdn-origins/refresh — on-demand origin fetch
+// ---------------------------------------------------------------------------
+
+infraRouter.post('/hosts/:id/cdn-origins/refresh', async (c) => {
+  const orgId = c.get('orgId');
+  const hostId = c.req.param('id');
+  if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+  const db = getDb();
+  const [host] = await db.select({ id: infraHosts.id, hostname: infraHosts.hostname })
+    .from(infraHosts)
+    .where(and(eq(infraHosts.id, hostId), eq(infraHosts.orgId, orgId))).limit(1);
+  if (!host) return c.json({ error: 'Host not found' }, 404);
+
+  const { getCdnProviderConfig, checkOriginChanges } = await import('./scanner/cdn/origin-check.js');
+  const cdnConfig = await getCdnProviderConfig(orgId, host.hostname);
+  if (!cdnConfig) return c.json({ data: [], message: 'No valid CDN provider config for this host' });
+
+  const redis = getSharedConnection();
+  const changes = await checkOriginChanges(hostId, host.hostname, cdnConfig, { redis });
+
+  // Return the current stored origins
+  const origins = await db.select().from(infraCdnOriginRecords)
+    .where(eq(infraCdnOriginRecords.hostId, hostId)).orderBy(infraCdnOriginRecords.provider);
+  return c.json({ data: origins, changes });
+});
+
+// ---------------------------------------------------------------------------
 // GET /modules/infra/overview — stats + recent alerts for the infra dashboard
 // ---------------------------------------------------------------------------
 

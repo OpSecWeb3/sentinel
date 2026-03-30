@@ -482,6 +482,8 @@ export default function HostDetailPage() {
     }
   }
 
+  const [cdnOriginsRefreshing, setCdnOriginsRefreshing] = useState(false);
+
   async function fetchCdnOrigins() {
     if (cdnOriginsLoaded) return;
     try {
@@ -494,6 +496,22 @@ export default function HostDetailPage() {
       // silently fail - section will show empty
     } finally {
       setCdnOriginsLoaded(true);
+    }
+  }
+
+  async function refreshCdnOrigins() {
+    setCdnOriginsRefreshing(true);
+    try {
+      const res = await apiFetch<{ data: Array<{ provider: string; recordType: string; recordValue: string; observedAt: string }> }>(
+        `/modules/infra/hosts/${hostId}/cdn-origins/refresh`,
+        { method: "POST", credentials: "include" },
+      );
+      setCdnOrigins(res.data);
+      setCdnOriginsLoaded(true);
+    } catch {
+      // silently fail
+    } finally {
+      setCdnOriginsRefreshing(false);
     }
   }
 
@@ -1706,16 +1724,32 @@ export default function HostDetailPage() {
         {expandedSections.has("cdn-origins") && (
           <CardContent className="pt-3">
             {!cdnOriginsLoaded ? (
-              <div>
+              <div className="flex items-center gap-3">
                 <button
                   onClick={fetchCdnOrigins}
                   className="text-xs text-primary hover:underline"
                 >
                   $ load cdn origins
                 </button>
+                <button
+                  onClick={refreshCdnOrigins}
+                  disabled={cdnOriginsRefreshing}
+                  className="text-xs text-muted-foreground hover:text-primary hover:underline disabled:opacity-50"
+                >
+                  {cdnOriginsRefreshing ? "$ fetching..." : "$ refresh from provider"}
+                </button>
               </div>
             ) : cdnOrigins.length > 0 ? (
               <div className="space-y-2">
+                <div className="flex justify-end">
+                  <button
+                    onClick={refreshCdnOrigins}
+                    disabled={cdnOriginsRefreshing}
+                    className="text-xs text-muted-foreground hover:text-primary hover:underline disabled:opacity-50"
+                  >
+                    {cdnOriginsRefreshing ? "$ fetching..." : "$ refresh from provider"}
+                  </button>
+                </div>
                 {cdnOrigins.map((origin, i) => (
                   <div
                     key={i}
@@ -1737,9 +1771,18 @@ export default function HostDetailPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground">
-                {">"} no CDN origins configured or detected
-              </p>
+              <div className="flex items-center gap-3">
+                <p className="text-xs text-muted-foreground">
+                  {">"} no CDN origins configured or detected
+                </p>
+                <button
+                  onClick={refreshCdnOrigins}
+                  disabled={cdnOriginsRefreshing}
+                  className="text-xs text-muted-foreground hover:text-primary hover:underline disabled:opacity-50"
+                >
+                  {cdnOriginsRefreshing ? "$ fetching..." : "$ refresh from provider"}
+                </button>
+              </div>
             )}
           </CardContent>
         )}
