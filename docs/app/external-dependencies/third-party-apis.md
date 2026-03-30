@@ -15,6 +15,7 @@ the credentials required, rate limits, and failure modes.
 | GitHub Container Registry (GHCR) | Docker image tag and digest polling | `@sentinel/module-registry` | `GITHUB_TOKEN` PAT or per-artifact credentials | GHCR image monitoring unavailable or limited to public images |
 | npm Registry API | Package metadata, version listing, dist-tag tracking | `@sentinel/module-registry` | Optional Bearer token per artifact | Registry version-change detection unavailable for npm artifacts |
 | crt.sh (Certificate Transparency) | CT log queries for subdomain discovery and certificate monitoring | `@sentinel/module-infra` | None (public API) | Subdomain discovery and CT log monitoring degrade gracefully |
+| VirusTotal API | Passive DNS subdomain discovery (supplements crt.sh) | `@sentinel/module-infra` | API key (optional) | VT enrichment skipped; crt.sh remains primary source |
 | WHOIS (port 43) | Domain registration expiry and registrar lookup | `@sentinel/module-infra` | None (raw TCP socket) | WHOIS expiry detection unavailable for affected TLDs |
 | Sigstore TUF / Rekor | Trust root for registry artifact signature and provenance verification | `@sentinel/module-registry` | None (public PKI) | Signature verification fails until trust root is fetched |
 | AWS SQS | Polling CloudTrail event notifications | `@sentinel/module-aws` | IAM role ARN (preferred) or access key | AWS module non-functional for affected integration |
@@ -513,6 +514,72 @@ during bulk host scanning operations.
 
 CT log entries are deduplicated by serial number before storage. The database schema enforces
 a unique index on `(hostId, crtShId)` to prevent duplicate entries across scan cycles.
+
+---
+
+## VirusTotal API (Passive Subdomain Discovery)
+
+**Module**: `@sentinel/module-infra`
+**Source**: `modules/infra/src/scanner/steps/virustotal-subdomains.ts`, `modules/infra/src/router.ts`
+**Environment variables**: `VIRUSTOTAL_API_KEY` (Zod-validated, optional)
+
+### Purpose
+
+The infra module queries the VirusTotal v3 API for passive DNS data to supplement crt.sh-based
+subdomain discovery. VT aggregates passive DNS observations from multiple sources, often
+returning subdomains that never appear in Certificate Transparency logs.
+
+VT enrichment is used in two contexts:
+
+1. **Interactive/emergency scans**: The orchestrator calls VT after the main scan steps complete
+   (scheduled scans skip VT to conserve quota).
+2. **Manual discovery** (`POST /hosts/:id/discover`): VT results are merged with crt.sh results.
+
+### Endpoint used
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `GET https://www.virustotal.com/api/v3/domains/{domain}/subdomains` | GET | Paginated list of observed subdomains for a domain |
+
+### Authentication
+
+Requests include the `x-apikey` header with the value of `VIRUSTOTAL_API_KEY`. If the env var
+is not set, VT enrichment is skipped entirely (no error).
+
+### Rate limiting
+
+Sentinel enforces a Redis-backed sliding-window rate limiter: **4 requests per 60 seconds**
+(key: `sentinel:vt:ratelimit`). This stays within the VT free-tier limit of 4 req/min. The
+limiter uses a sorted-set Lua script identical in pattern to the API middleware rate limiter.
+
+When the rate limit is reached, the VT fetch returns partial results (fail-open).
+
+### Pagination
+
+| Parameter | Value |
+|-----------|-------|
+| Page size | 20 subdomains per page |
+| Max pages per request | 10 |
+| Max subdomains per request | 200 |
+| Request timeout | 15,000 ms per page |
+
+Pagination follows the `links.next` URL returned by VT. Fetching stops when there is no next
+link, the page cap is reached, or the subdomain cap is reached.
+
+### Failure modes
+
+| Failure | Impact | Recovery |
+|---------|--------|----------|
+| No API key configured | VT enrichment silently skipped | Set `VIRUSTOTAL_API_KEY` |
+| VT API unreachable or timeout | Returns partial results (fail-open) | Scan continues with crt.sh data only |
+| HTTP 429 (rate limited by VT) | Returns partial results | Sliding-window limiter prevents further requests for the window |
+| Redis unavailable | Rate limiter bypassed; requests sent without throttling | Acceptable — VT's own 429 response acts as a backstop |
+
+### Data deduplication
+
+VT-discovered subdomains are deduplicated against crt.sh-discovered subdomains using a shared
+`Set` in the normalizer. Only subdomains not already found via crt.sh produce
+`infra.subdomain.discovered` events with `source: 'virustotal'`.
 
 ---
 

@@ -37,6 +37,7 @@ import { runHeadersStep } from './steps/headers.js';
 import { runCtLogsStep } from './steps/ct-logs.js';
 import { runInfrastructureStep } from './steps/infrastructure.js';
 import { runWhoisStep } from './steps/whois.js';
+import { fetchVtSubdomains } from './steps/virustotal-subdomains.js';
 import { calculateScore, applySuppressions, type FindingSuppression } from './scoring.js';
 
 // -------------------------------------------------------------------------
@@ -293,6 +294,28 @@ export async function runScan(data: ScanJobData, callbacks: ScanCallbacks): Prom
       } else {
         errors.push(`Step rejected: ${result.reason}`);
       }
+    }
+
+    // -- VT passive subdomain enrichment — interactive/emergency only, root domains only --
+    if (isRoot && data.jobPriority && data.jobPriority !== 'scheduled') {
+      try {
+        const vtResult = await fetchVtSubdomains(targetName, { redis });
+        if (vtResult.subdomains.length > 0) {
+          // Attach to ct_logs step data bag; create one if ct_logs errored/skipped
+          let ctStep = stepResults.find(s => s.step === 'ct_logs');
+          if (ctStep) {
+            if (!ctStep.data) ctStep.data = {};
+          } else {
+            // ct_logs step was rejected entirely — create a synthetic entry to carry VT data.
+            // Use 'skipped' so it doesn't flip hasSuccess or feed into scoring via findStep.
+            ctStep = { step: 'ct_logs', status: 'skipped', data: {}, startedAt: new Date(), completedAt: new Date() };
+            stepResults.push(ctStep);
+          }
+          ctStep.data!.vtSubdomains = vtResult.subdomains;
+          ctStep.data!.vtPagesFetched = vtResult.pagesFetched;
+          ctStep.data!.vtRateLimited = vtResult.rateLimited;
+        }
+      } catch { /* non-fatal */ }
     }
 
     // -- Extract typed data for scoring -------------------------------------

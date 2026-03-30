@@ -238,6 +238,7 @@ handle_param "SENTRY_PROJECT"      "Sentry project slug (from project settings)"
 handle_param "SENTRY_AUTH_TOKEN"   "Sentry auth token (for source map uploads during build)" \
   "Sentry auth token for source map uploads — generate at sentry.io/settings/auth-tokens/"
 handle_param "ETHERSCAN_API_KEY"   "Etherscan API key (chain module)"                  "Etherscan API key for blockchain data"
+handle_param "VIRUSTOTAL_API_KEY"  "VirusTotal API key (infra module, optional)"        "VirusTotal API key for passive subdomain discovery"
 handle_param "RPC_ETHEREUM"        "Ethereum RPC URL(s), comma-separated (skip to use public fallbacks)" \
   "Ethereum Mainnet RPC URL(s), comma-separated — overrides seeded public fallbacks"
 

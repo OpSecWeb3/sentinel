@@ -119,6 +119,15 @@ async function dedupDiscoveryEvents(
     }
 
     // Auto-register genuinely new subdomains
+    // Build a map of subdomain -> source from the events for correct attribution
+    const subdomainSourceMap = new Map<string, string>();
+    for (const evt of subdomainEvents) {
+      const sub = evt.payload.subdomain as string;
+      if (!subdomainSourceMap.has(sub)) {
+        subdomainSourceMap.set(sub, (evt.payload.source as string) ?? 'crt_sh');
+      }
+    }
+
     for (const subdomain of newSubdomains) {
       await db
         .insert(infraHosts)
@@ -127,7 +136,7 @@ async function dedupDiscoveryEvents(
           hostname: subdomain,
           isRoot: false,
           parentId: hostId,
-          source: 'crt_sh',
+          source: subdomainSourceMap.get(subdomain) ?? 'crt_sh',
           isActive: true,
         })
         .onConflictDoNothing();
@@ -465,6 +474,7 @@ export const scanHandler: JobHandler = {
         scanType: priority === 'emergency' ? 'emergency' : 'full',
         isRoot: true,
         orgId,
+        jobPriority: (priority as 'scheduled' | 'interactive' | 'emergency') ?? 'scheduled',
       },
       callbacks,
     );

@@ -74,7 +74,7 @@ export const eventTypes: EventTypeDefinition[] = [
   {
     type: 'infra.subdomain.discovered',
     label: 'New subdomain discovered',
-    description: 'A previously unknown subdomain was discovered via CT logs or DNS enumeration',
+    description: 'A previously unknown subdomain was discovered via CT logs, VirusTotal passive DNS, or DNS enumeration',
   },
 
   // ── WHOIS ──────────────────────────────────────────────────────────────

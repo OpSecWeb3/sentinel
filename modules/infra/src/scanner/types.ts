@@ -169,6 +169,8 @@ export interface ScanJobData {
   isRoot: boolean;
   orgId?: string;
   scanRequestId?: string;
+  /** Original job priority — gates VT enrichment (interactive/emergency = on). */
+  jobPriority?: 'scheduled' | 'interactive' | 'emergency';
 }
 
 /** BullMQ priority values: lower number = higher priority. */

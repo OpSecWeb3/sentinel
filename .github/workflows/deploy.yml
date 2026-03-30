@@ -18,13 +18,10 @@ permissions:
 
 jobs:
   ci:
-    # TEMP: skip full CI so deploy runs immediately. Remove `if: false` and
-    # restore `needs: ci` on deploy when you want the gate back.
-    if: false
     uses: ./.github/workflows/ci.yml
 
   deploy:
-    # needs: ci
+    needs: ci
     runs-on: ubuntu-latest
     environment: production
 
@@ -87,6 +84,7 @@ jobs:
           SENTRY_PROJECT=$(fetch_param /sentinel/production/SENTRY_PROJECT)
           SENTRY_AUTH_TOKEN=$(fetch_param /sentinel/production/SENTRY_AUTH_TOKEN)
           ETHERSCAN_API_KEY=$(fetch_param /sentinel/production/ETHERSCAN_API_KEY)
+          VIRUSTOTAL_API_KEY=$(fetch_param /sentinel/production/VIRUSTOTAL_API_KEY)
           RPC_ETHEREUM=$(fetch_param /sentinel/production/RPC_ETHEREUM)
           METRICS_TOKEN=$(fetch_param /sentinel/production/METRICS_TOKEN)
 
@@ -130,6 +128,7 @@ jobs:
             [ -n "$SENTRY_PROJECT" ] && sq SENTRY_PROJECT "$SENTRY_PROJECT" || true
             [ -n "$SENTRY_AUTH_TOKEN" ] && sq SENTRY_AUTH_TOKEN "$SENTRY_AUTH_TOKEN" || true
             sq ETHERSCAN_API_KEY "$ETHERSCAN_API_KEY"
+            [ -n "$VIRUSTOTAL_API_KEY" ] && sq VIRUSTOTAL_API_KEY "$VIRUSTOTAL_API_KEY" || true
             sq RPC_ETHEREUM "$RPC_ETHEREUM"
             [ -n "$METRICS_TOKEN" ] && sq METRICS_TOKEN "$METRICS_TOKEN" || true
           } >> /tmp/sentinel.env

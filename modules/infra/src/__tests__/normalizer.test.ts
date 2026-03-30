@@ -392,6 +392,104 @@ describe('normalizeScanResult — subdomain discovery', () => {
 });
 
 // ===========================================================================
+// VirusTotal subdomain discovery
+// ===========================================================================
+
+describe('normalizeScanResult — VT subdomain discovery', () => {
+  it('emits VT subdomains with source virustotal', () => {
+    const scan = baseScanResult({
+      stepResults: [
+        step('ct_logs', {
+          entries: [],
+          vtSubdomains: ['api.example.com', 'internal.example.com'],
+        }),
+      ],
+    });
+
+    const events = normalizeScanResult(scan, ORG_ID);
+    const subEvents = events.filter((e) => e.eventType === 'infra.subdomain.discovered');
+
+    expect(subEvents).toHaveLength(2);
+    expect(subEvents[0].payload.source).toBe('virustotal');
+    expect(subEvents[1].payload.source).toBe('virustotal');
+  });
+
+  it('deduplicates VT subdomains against crt.sh subdomains', () => {
+    const scan = baseScanResult({
+      stepResults: [
+        step('ct_logs', {
+          entries: [{ nameValue: 'api.example.com' }],
+          vtSubdomains: ['api.example.com', 'new.example.com'],
+        }),
+      ],
+    });
+
+    const events = normalizeScanResult(scan, ORG_ID);
+    const subEvents = events.filter((e) => e.eventType === 'infra.subdomain.discovered');
+
+    expect(subEvents).toHaveLength(2);
+    expect(subEvents[0].payload).toMatchObject({ subdomain: 'api.example.com', source: 'crt_sh' });
+    expect(subEvents[1].payload).toMatchObject({ subdomain: 'new.example.com', source: 'virustotal' });
+  });
+
+  it('produces no VT events when vtSubdomains is absent', () => {
+    const scan = baseScanResult({
+      stepResults: [
+        step('ct_logs', {
+          entries: [{ nameValue: 'api.example.com' }],
+        }),
+      ],
+    });
+
+    const events = normalizeScanResult(scan, ORG_ID);
+    const vtEvents = events.filter(
+      (e) => e.eventType === 'infra.subdomain.discovered' && e.payload.source === 'virustotal',
+    );
+    expect(vtEvents).toHaveLength(0);
+  });
+
+  it('reads VT data even when ct_logs step errored', () => {
+    const scan = baseScanResult({
+      stepResults: [
+        {
+          step: 'ct_logs' as const,
+          status: 'error',
+          error: 'crt.sh timeout',
+          data: { vtSubdomains: ['recovered.example.com'] },
+          startedAt: new Date(),
+          completedAt: new Date(),
+        },
+      ],
+    });
+
+    const events = normalizeScanResult(scan, ORG_ID);
+    const vtEvents = events.filter(
+      (e) => e.eventType === 'infra.subdomain.discovered' && e.payload.source === 'virustotal',
+    );
+    expect(vtEvents).toHaveLength(1);
+    expect(vtEvents[0].payload.subdomain).toBe('recovered.example.com');
+  });
+
+  it('filters out VT subdomains that do not match the apex domain', () => {
+    const scan = baseScanResult({
+      stepResults: [
+        step('ct_logs', {
+          entries: [],
+          vtSubdomains: ['api.example.com', 'evil.attacker.com', 'example.com'],
+        }),
+      ],
+    });
+
+    const events = normalizeScanResult(scan, ORG_ID);
+    const vtEvents = events.filter(
+      (e) => e.eventType === 'infra.subdomain.discovered' && e.payload.source === 'virustotal',
+    );
+    expect(vtEvents).toHaveLength(1);
+    expect(vtEvents[0].payload.subdomain).toBe('api.example.com');
+  });
+});
+
+// ===========================================================================
 // Score degradation
 // ===========================================================================
 

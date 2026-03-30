@@ -51,6 +51,9 @@ const envSchema = z.object({
   // GitHub personal access token (optional — used by registry module for API rate limits)
   GITHUB_TOKEN: z.string().optional(),
 
+  // VirusTotal (optional — used by infra module for passive subdomain discovery)
+  VIRUSTOTAL_API_KEY: z.string().optional(),
+
   // Reverse-proxy trust: number of trusted proxies in front of the API server.
   // Used to extract the real client IP from X-Forwarded-For.
   TRUSTED_PROXY_COUNT: z.coerce.number().int().nonnegative().default(0),

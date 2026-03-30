@@ -166,24 +166,43 @@ export function normalizeScanResult(
 
   // ── New subdomains from CT logs ─────────────────────────────────────
   const ctStep = stepMap.get('ct_logs');
+  const subdomainSeen = new Set<string>();
   if (ctStep?.status === 'success' && ctStep.data) {
     const entries = ctStep.data.entries as Array<Record<string, unknown>> | undefined;
     if (entries && hostname) {
-      const seen = new Set<string>();
       const lowerHostname = hostname.toLowerCase();
       for (const entry of entries) {
         const nameValue = entry.nameValue as string | undefined;
         if (!nameValue) continue;
         for (const name of nameValue.split('\n')) {
           const cn = name.trim().toLowerCase().replace(/^\*\./, '');
-          if (cn !== lowerHostname && cn.endsWith(`.${lowerHostname}`) && !seen.has(cn)) {
-            seen.add(cn);
+          if (cn !== lowerHostname && cn.endsWith(`.${lowerHostname}`) && !subdomainSeen.has(cn)) {
+            subdomainSeen.add(cn);
             out.push({
               eventType: 'infra.subdomain.discovered',
               payload: { resourceId: hostname, parentHostname: hostname, subdomain: cn, source: 'crt_sh' },
             });
           }
         }
+      }
+    }
+  }
+
+  // ── New subdomains from VirusTotal passive DNS ─────────────────────────
+  // VT data rides on the ct_logs step data bag. The orchestrator ensures the
+  // data bag exists even when ct_logs itself errored, so this works regardless
+  // of ct_logs status.
+  const vtSubdomains = ctStep?.data?.vtSubdomains as string[] | undefined;
+  if (vtSubdomains && hostname) {
+    const lowerHostname = hostname.toLowerCase();
+    for (const sub of vtSubdomains) {
+      const cn = sub.trim().toLowerCase();
+      if (cn !== lowerHostname && cn.endsWith(`.${lowerHostname}`) && !subdomainSeen.has(cn)) {
+        subdomainSeen.add(cn);
+        out.push({
+          eventType: 'infra.subdomain.discovered',
+          payload: { resourceId: hostname, parentHostname: hostname, subdomain: cn, source: 'virustotal' },
+        });
       }
     }
   }

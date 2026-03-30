@@ -28,7 +28,9 @@ import { eq, and, desc, asc, lte, gte, sql, inArray, ilike, count } from '@senti
 import { alerts, detections } from '@sentinel/db/schema/core';
 import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
 import { logger as rootLogger } from '@sentinel/shared/logger';
+import { env } from '@sentinel/shared/env';
 import type { AppEnv } from '@sentinel/shared/hono-types';
+import { fetchVtSubdomains } from './scanner/steps/virustotal-subdomains.js';
 
 const log = rootLogger.child({ component: 'infra-router' });
 
@@ -759,8 +761,9 @@ infraRouter.post('/hosts/:id/discover', async (c) => {
     .where(and(eq(infraHosts.id, hostId), eq(infraHosts.orgId, orgId))).limit(1);
   if (!host) return c.json({ error: 'Host not found' }, 404);
 
+  // crtShAllNames tracks the full crt.sh set (before slicing) for accurate totalFound
+  const crtShAllNames = new Set<string>();
   let discovered: string[] = [];
-  let totalUnique = 0;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15_000);
@@ -770,28 +773,47 @@ infraRouter.post('/hosts/:id/discover', async (c) => {
     clearTimeout(timeout);
     if (resp.ok) {
       const data = await resp.json() as Array<{ name_value: string }>;
-      const names = new Set<string>();
       for (const entry of data) {
         for (const name of entry.name_value.split('\n')) {
           const trimmed = name.trim().toLowerCase().replace(/^\*\./, '');
-          if (trimmed.endsWith(`.${host.hostname}`) && isValidHostname(trimmed)) names.add(trimmed);
+          if (trimmed.endsWith(`.${host.hostname}`) && isValidHostname(trimmed)) crtShAllNames.add(trimmed);
         }
       }
-      totalUnique = names.size;
-      discovered = Array.from(names).slice(0, MAX_DISCOVERY_RESULTS);
+      discovered = Array.from(crtShAllNames).slice(0, MAX_DISCOVERY_RESULTS);
     }
   } catch { /* crt.sh is best-effort */ }
 
+  // -- VT enrichment (best-effort, no Redis in router context — VT's own 429 is the backstop) --
+  const crtShNames = new Set(discovered);
+  const vtNames = new Set<string>();
+  try {
+    if (env().VIRUSTOTAL_API_KEY) {
+      const vtResult = await fetchVtSubdomains(host.hostname, {});
+      for (const sub of vtResult.subdomains) {
+        const trimmed = sub.trim().toLowerCase();
+        if (trimmed.endsWith(`.${host.hostname}`) && isValidHostname(trimmed)) {
+          vtNames.add(trimmed);
+          discovered.push(trimmed);
+        }
+      }
+    }
+  } catch { /* VT is best-effort */ }
+
+  // Deduplicate after merging VT results; compute totalFound from full sets
+  const uniqueDiscovered = [...new Set(discovered)].slice(0, MAX_DISCOVERY_RESULTS);
+  // totalFound = union of full crt.sh set + VT set (crt.sh may have had more than 100)
+  const totalUnique = new Set([...crtShAllNames, ...vtNames]).size;
   const truncated = totalUnique > MAX_DISCOVERY_RESULTS;
 
   const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
   let newCount = 0;
-  for (const sub of discovered) {
+  for (const sub of uniqueDiscovered) {
     const [existing] = await db.select({ id: infraHosts.id }).from(infraHosts)
       .where(and(eq(infraHosts.orgId, orgId), eq(infraHosts.hostname, sub))).limit(1);
     if (!existing) {
+      const source = crtShNames.has(sub) ? 'crt_sh' : 'virustotal';
       const [newHost] = await db.insert(infraHosts)
-        .values({ orgId, hostname: sub, isRoot: false, parentId: hostId, source: 'crt_sh', isActive: true })
+        .values({ orgId, hostname: sub, isRoot: false, parentId: hostId, source, isActive: true })
         .returning();
       await db.insert(infraScanSchedules).values({
         hostId: newHost.id, enabled: true, intervalMinutes: 1440,
@@ -803,7 +825,7 @@ infraRouter.post('/hosts/:id/discover', async (c) => {
   }
   return c.json({
     data: {
-      discovered: discovered.length,
+      discovered: uniqueDiscovered.length,
       newHosts: newCount,
       totalFound: totalUnique,
       truncated,
