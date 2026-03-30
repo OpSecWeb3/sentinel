@@ -141,9 +141,9 @@ router.post('/', requireScope('api:read'), validate('json', queryStateSchema), a
     : (table as typeof alerts).orgId;
   const conditions: ReturnType<typeof sql>[] = [sql`${orgCol} = ${orgId}`];
 
-  // Time range
-  if (qs.timeRange.from) conditions.push(sql`${tsCol} >= ${new Date(qs.timeRange.from)}`);
-  if (qs.timeRange.to) conditions.push(sql`${tsCol} <= ${new Date(qs.timeRange.to)}`);
+  // Time range — pass ISO strings; postgres casts text to timestamptz automatically
+  if (qs.timeRange.from) conditions.push(sql`${tsCol} >= ${qs.timeRange.from}::timestamptz`);
+  if (qs.timeRange.to) conditions.push(sql`${tsCol} <= ${qs.timeRange.to}::timestamptz`);
 
   // Clause groups (AND'd together)
   for (const group of qs.groups) {

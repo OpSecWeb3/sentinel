@@ -239,6 +239,12 @@ export function parseQuery(input: string): QueryState | null {
     break;
   }
 
+  // Normalize: the first clause's logic is meaningless (no preceding connector).
+  // Set it to match the second clause's connector so they group together.
+  if (clauses.length >= 2) {
+    clauses[0].logic = clauses[1].logic;
+  }
+
   // Group clauses by logic
   if (clauses.length === 0) {
     state.groups = [{ id: genId(), logic: 'AND', clauses: [{ id: genId(), field: '', operator: 'eq', value: '' }] }];
