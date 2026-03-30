@@ -27,7 +27,7 @@ import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import {
   createRpcClient,
   getTokenBalance,
-  callViewFunction,
+  callViewFunctionNumeric,
 } from './rpc.js';
 import {
   pollOnce,
@@ -588,7 +588,7 @@ export const statePollHandler: JobHandler = {
       if (!rule.viewCall) {
         throw new Error(`view-call rule ${ruleId} is missing required viewCall configuration`);
       }
-      currentValue = await callViewFunction(
+      currentValue = await callViewFunctionNumeric(
         client,
         rule.address,
         rule.viewCall.functionSignature,

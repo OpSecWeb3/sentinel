@@ -24,6 +24,7 @@ import type { AppEnv } from '@sentinel/shared/hono-types';
 import { templates as chainTemplates } from './templates/index.js';
 import { getSuggestedSlots } from './well-known-slots.js';
 import { startLayoutDiscovery } from './storage-layout.js';
+import { createRpcClient, callViewFunction } from './rpc.js';
 
 export const chainRouter = new Hono<AppEnv>();
 
@@ -501,7 +502,13 @@ chainRouter.get('/contracts/:id', async (c) => {
     .map((x: any) => ({ name: x.name, signature: buildSignature(x) }));
   const abiFunctions = abi
     .filter((x: any) => x.type === 'function')
-    .map((x: any) => ({ name: x.name, signature: buildSignature(x), stateMutability: x.stateMutability ?? null }));
+    .map((x: any) => ({
+      name: x.name,
+      signature: buildSignature(x),
+      stateMutability: x.stateMutability ?? null,
+      inputs: x.inputs ?? [],
+      outputs: x.outputs ?? [],
+    }));
 
   // Find linked detections (rules that reference this contract address)
   const linkedDetectionsRaw = await db
@@ -539,6 +546,131 @@ chainRouter.get('/contracts/:id', async (c) => {
     },
   });
 });
+
+// ---------------------------------------------------------------------------
+// POST /modules/chain/contracts/:contractId/call
+// Execute a view/pure function on a tracked contract and return the result.
+// ---------------------------------------------------------------------------
+
+const callBodySchema = z.object({
+  functionName: z.string().min(1),
+  args: z.array(z.unknown()).optional().default([]),
+});
+
+chainRouter.post('/contracts/:contractId/call', async (c) => {
+  const orgId = c.get('orgId');
+  if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+
+  const contractId = parseInt(c.req.param('contractId'), 10);
+  if (!Number.isFinite(contractId)) {
+    return c.json({ error: 'Invalid contract ID' }, 400);
+  }
+
+  const body = callBodySchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return c.json({ error: 'Invalid request body', details: body.error.flatten() }, 400);
+  }
+
+  const { functionName, args } = body.data;
+  const db = getDb();
+
+  // Load contract with ABI and network info
+  const [row] = await db
+    .select({
+      address: chainContracts.address,
+      abi: chainContracts.abi,
+      networkId: chainContracts.networkId,
+      chainId: chainNetworks.chainId,
+      rpcUrl: chainNetworks.rpcUrl,
+    })
+    .from(chainOrgContracts)
+    .innerJoin(chainContracts, eq(chainContracts.id, chainOrgContracts.contractId))
+    .innerJoin(chainNetworks, eq(chainNetworks.id, chainContracts.networkId))
+    .where(
+      and(
+        eq(chainOrgContracts.contractId, contractId),
+        eq(chainOrgContracts.orgId, orgId),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    return c.json({ error: 'Contract not found' }, 404);
+  }
+
+  const abi = Array.isArray(row.abi) ? (row.abi as any[]) : [];
+  const fnEntry = abi.find(
+    (x: any) => x.type === 'function' && x.name === functionName,
+  );
+
+  if (!fnEntry) {
+    return c.json({ error: `Function "${functionName}" not found in ABI` }, 404);
+  }
+
+  const mutability = fnEntry.stateMutability ?? '';
+  if (mutability !== 'view' && mutability !== 'pure') {
+    return c.json({ error: 'Only view/pure functions can be called' }, 400);
+  }
+
+  // Build function signature for callViewFunction
+  const sig = buildSignature(fnEntry);
+  const fullSig = `function ${sig}${mutability ? ` ${mutability}` : ''}${
+    fnEntry.outputs?.length
+      ? ` returns (${fnEntry.outputs.map((o: any) => `${o.type}${o.name ? ` ${o.name}` : ''}`).join(', ')})`
+      : ''
+  }`;
+
+  // Get RPC URLs — prefer org-specific config, fall back to network default
+  const orgRpcRows = await db
+    .select({ rpcUrl: chainOrgRpcConfigs.rpcUrl })
+    .from(chainOrgRpcConfigs)
+    .where(
+      and(
+        eq(chainOrgRpcConfigs.orgId, orgId),
+        eq(chainOrgRpcConfigs.networkId, row.networkId),
+        eq(chainOrgRpcConfigs.isActive, true),
+      ),
+    );
+
+  const rpcUrls =
+    orgRpcRows.length > 0
+      ? orgRpcRows.map((r) => r.rpcUrl)
+      : row.rpcUrl
+        ? row.rpcUrl.split(',').map((s: string) => s.trim()).filter(Boolean)
+        : [];
+
+  if (rpcUrls.length === 0) {
+    return c.json({ error: 'No RPC URLs configured for this network' }, 400);
+  }
+
+  try {
+    const client = createRpcClient(rpcUrls, row.chainId);
+    const result = await callViewFunction(client, row.address, fullSig, args);
+
+    // Determine Solidity return type from ABI outputs
+    const outputTypes = (fnEntry.outputs ?? []).map((o: any) => o.type);
+    const returnType = outputTypes.length === 1 ? outputTypes[0] : outputTypes.length > 1 ? `tuple(${outputTypes.join(',')})` : 'void';
+
+    return c.json({ data: { result: formatResult(result), type: returnType } });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ error: `Call failed: ${message}` }, 500);
+  }
+});
+
+/** Format decoded values for JSON serialization (bigints → strings) */
+function formatResult(value: unknown): unknown {
+  if (typeof value === 'bigint') return value.toString();
+  if (Array.isArray(value)) return value.map(formatResult);
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = formatResult(v);
+    }
+    return out;
+  }
+  return value;
+}
 
 // ---------------------------------------------------------------------------
 // GET /modules/chain/contracts/:contractId/storage-slots

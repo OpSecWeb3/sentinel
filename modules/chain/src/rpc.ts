@@ -600,15 +600,15 @@ function normaliseToBigInt(value: unknown, returnType: string): bigint {
  * Encode, execute, and decode a view function call.
  * Handles dynamic arg tokens ($NOW, $BLOCK_NUMBER, $BLOCK_TIMESTAMP),
  * UDVT signature normalisation, and return-value decoding.
- * Returns the result normalised to bigint.
+ * Returns the raw decoded value from Viem (preserves original type).
  */
 export async function callViewFunction(
   client: RpcClient,
   contractAddress: string,
   functionSignature: string,
   args?: unknown[],
-  returnType?: string,
-): Promise<bigint> {
+  _returnType?: string,
+): Promise<unknown> {
   if (!contractAddress) {
     throw new Error(`callViewFunction: contractAddress required`);
   }
@@ -644,5 +644,20 @@ export async function callViewFunction(
     data: result as `0x${string}`,
   });
 
+  return decoded;
+}
+
+/**
+ * Like callViewFunction but normalises the result to bigint.
+ * Used by the polling system which stores numeric snapshots.
+ */
+export async function callViewFunctionNumeric(
+  client: RpcClient,
+  contractAddress: string,
+  functionSignature: string,
+  args?: unknown[],
+  returnType?: string,
+): Promise<bigint> {
+  const decoded = await callViewFunction(client, contractAddress, functionSignature, args, returnType);
   return normaliseToBigInt(decoded, returnType ?? 'uint256');
 }
