@@ -17,6 +17,29 @@ export interface FetchContractAbiOptions {
   apiKey?: string;
 }
 
+/** V1 explorer API bases (path `/api`) were deprecated Aug 2025; V2 is unified at api.etherscan.io/v2/api + chainid. */
+function isDeprecatedEtherscanFamilyV1Api(explorerApi: string): boolean {
+  const trimmed = explorerApi.trim();
+  if (!trimmed) return false;
+  try {
+    const u = new URL(trimmed);
+    const path = u.pathname.replace(/\/+$/, '') || '/';
+    if (path !== '/api') return false;
+    const host = u.hostname.toLowerCase();
+    return (
+      /^api(?:-[a-z0-9]+)?\.etherscan\.io$/i.test(host) ||
+      /^api(?:-[a-z0-9]+)?\.polygonscan\.com$/i.test(host) ||
+      /^api(?:-[a-z0-9]+)?\.arbiscan\.io$/i.test(host) ||
+      /^api(?:-[a-z0-9]+)?\.basescan\.org$/i.test(host) ||
+      /^api(?:-[a-z0-9]+)?\.bscscan\.com$/i.test(host) ||
+      /^api(?:-[a-z0-9]+)?\.ftmscan\.com$/i.test(host) ||
+      /^api(?:-[a-z0-9]+)?\.[a-z0-9-]*scan\.(com|org|io|build|dev)$/i.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Internal retry helper — no external dependencies
 // ---------------------------------------------------------------------------
@@ -74,14 +97,13 @@ export async function fetchContractAbi(
   opts?: FetchContractAbiOptions,
 ): Promise<EtherscanAbiResult> {
   const buildUrl = (action: 'getabi' | 'getsourcecode'): URL => {
-    // Use the Etherscan V2 unified endpoint only when:
+    // Use the Etherscan V2 unified endpoint when:
     //   (a) a chainId is provided, AND
-    //   (b) the caller has NOT explicitly provided a custom explorerApi URL.
+    //   (b) explorerApi is empty OR is a known deprecated Etherscan-family V1 base
+    //       (e.g. https://api.etherscan.io/api — still common in DB seeds / settings).
     //
-    // Previously, a non-empty explorerApi was silently ignored whenever
-    // chainId was set, which made it impossible for callers to route through
-    // a custom or self-hosted explorer (e.g. Blockscout, private chains).
-    if (opts?.chainId && !explorerApi) {
+    // Custom explorers (Blockscout, private chains) keep their URL when chainId is set.
+    if (opts?.chainId && (!explorerApi || isDeprecatedEtherscanFamilyV1Api(explorerApi))) {
       // Etherscan V2 unified endpoint
       const url = new URL('https://api.etherscan.io/v2/api');
       url.searchParams.set('chainid', String(opts.chainId));

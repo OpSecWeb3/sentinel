@@ -626,17 +626,19 @@ in sequence.
 ### Chain networks
 
 The `seedChainNetworks` function (`packages/db/src/seed/chain-networks.ts`)
-inserts known blockchain network records into the `chain_networks` table using
-`onConflictDoNothing()` to remain idempotent. The current seed includes:
+inserts default blockchain network rows into the `chain_networks` table. On
+conflict by `slug`, it **updates** metadata and `is_active` so redeploys stay
+aligned with product defaults (idempotent).
 
-| Network | Chain ID | Block Time | RPC URLs |
-|---------|----------|------------|----------|
-| Ethereum Mainnet | 1 | 12,000 ms | `cloudflare-eth.com`, `eth.llamarpc.com`, `rpc.ankr.com/eth` |
-| Polygon | 137 | 2,000 ms | `polygon-rpc.com`, `rpc.ankr.com/polygon` |
-| Arbitrum One | 42161 | 250 ms | `arb1.arbitrum.io/rpc`, `rpc.ankr.com/arbitrum` |
-| Optimism | 10 | 2,000 ms | `mainnet.optimism.io`, `rpc.ankr.com/optimism` |
-| Base | 8453 | 2,000 ms | `mainnet.base.org`, `rpc.ankr.com/base` |
-| Ethereum Sepolia | 11155111 | 12,000 ms | `rpc.sepolia.org`, `rpc.ankr.com/eth_sepolia` |
+| Network | Chain ID | `is_active` | Block Time | RPC URLs |
+|---------|----------|-------------|------------|----------|
+| Ethereum Mainnet | 1 | yes | 12,000 ms | `cloudflare-eth.com`, `eth.llamarpc.com`, `rpc.ankr.com/eth` |
+| Ethereum Sepolia | 11155111 | no | 12,000 ms | `rpc.sepolia.org`, `rpc.ankr.com/eth_sepolia` |
+
+Only `is_active = true` networks appear in the chain module network list API.
+Sepolia remains in the database for optional testing (`is_active` can be set
+to true manually). Older databases may still contain previously seeded networks;
+remove or deactivate those rows if they are no longer needed.
 
 The `rpcUrl` column stores comma-separated URLs. The RPC client rotates across
 them hourly with automatic failover.
@@ -648,5 +650,5 @@ To add a new seed function:
 1. Create a new file under `packages/db/src/seed/` (e.g. `my-data.ts`).
 2. Export an async function that accepts `Db` and inserts the data.
 3. Import and call it from `packages/db/src/seed.ts`.
-4. Use `onConflictDoNothing()` or `onConflictDoUpdate()` so the seed is
-   idempotent and safe to rerun.
+4. Use `onConflictDoNothing()` or `onConflictDoUpdate()` (as in
+   `seed/chain-networks.ts`) so the seed is idempotent and safe to rerun.

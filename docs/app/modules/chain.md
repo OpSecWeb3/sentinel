@@ -499,17 +499,13 @@ Routes are mounted under `/modules/chain/`.
 
 ## Supported networks
 
-The Chain module supports any EVM-compatible network. Networks are identified by their chain ID and configured with an RPC URL. Sentinel has been tested against:
+The Chain module targets **Ethereum Mainnet** by default. The database seed adds
+Mainnet (active) and **Sepolia** (inactive); Sepolia can be enabled by setting
+`is_active` on that row. Additional EVM networks can be added manually to
+`chain_networks` with RPC and explorer metadata.
 
-- Ethereum Mainnet (chain ID 1)
-- Ethereum Sepolia testnet (chain ID 11155111)
-- Base (chain ID 8453)
-- Arbitrum One (chain ID 42161)
-- Optimism (chain ID 10)
-- Polygon (chain ID 137)
-- BNB Smart Chain (chain ID 56)
-
-Any network that implements the Ethereum JSON-RPC specification is compatible.
+The module is built for Ethereum JSON-RPC semantics; other chains are supported
+in principle when configured, subject to block-time and polling constraints below.
 
 ### Known limitation: fast block time chains
 

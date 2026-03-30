@@ -1585,7 +1585,8 @@ export const contractVerifyHandler: JobHandler = {
 
     try {
       // 1. Fetch ABI from explorer
-      // When chainId is present, fetchContractAbi uses Etherscan V2 (explorerApi is ignored).
+      // When chainId is present, fetchContractAbi uses Etherscan V2 for unified / seeded V1
+      // explorer URLs; custom explorer bases (e.g. Blockscout) still use explorerApi.
       // When only explorerApi is present, it uses that URL directly.
       const etherscanApiKey = env().ETHERSCAN_API_KEY;
       const { abi, contractName, storageLayout } = await fetchContractAbi(network.explorerApi ?? '', address, { chainId: network.chainId ?? undefined, apiKey: etherscanApiKey });

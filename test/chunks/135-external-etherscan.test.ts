@@ -31,10 +31,23 @@ describe('Chunk 135 — Etherscan API integration', () => {
       expect(result.abi).toHaveLength(1);
       expect(result.contractName).toBe('TestToken');
     });
+
+    it('should use V2 URL when chainId is set but explorerApi is a deprecated Etherscan V1 base', async () => {
+      fetchMock
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', message: 'OK', result: SAMPLE_ABI }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', result: [{ ContractName: 'Seeded' }] }), { status: 200 }));
+
+      const { fetchContractAbi } = await import('../../modules/chain/src/etherscan.js');
+      await fetchContractAbi('https://api.etherscan.io/api', '0xcafe', { chainId: 1, apiKey: 'k' });
+
+      const [url] = fetchMock.mock.calls[0];
+      expect(String(url)).toContain('api.etherscan.io/v2/api');
+      expect(String(url)).toContain('chainid=1');
+    });
   });
 
   describe('fetchContractAbi with legacy explorer URL', () => {
-    it('should use custom explorerApi when provided', async () => {
+    it('should use custom explorerApi when provided without chainId', async () => {
       fetchMock
         .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', message: 'OK', result: SAMPLE_ABI }), { status: 200 }))
         .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', result: [{ ContractName: 'Custom' }] }), { status: 200 }));
@@ -45,6 +58,19 @@ describe('Chunk 135 — Etherscan API integration', () => {
       const [url] = fetchMock.mock.calls[0];
       expect(String(url)).toContain('api.basescan.org');
       expect(result.contractName).toBe('Custom');
+    });
+
+    it('should still use custom non-Etherscan explorer when chainId and custom host are set', async () => {
+      fetchMock
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', message: 'OK', result: SAMPLE_ABI }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', result: [{ ContractName: 'Blockscout' }] }), { status: 200 }));
+
+      const { fetchContractAbi } = await import('../../modules/chain/src/etherscan.js');
+      await fetchContractAbi('https://eth.blockscout.com/api', '0xabc', { chainId: 1, apiKey: 'x' });
+
+      const [url] = fetchMock.mock.calls[0];
+      expect(String(url)).toContain('eth.blockscout.com');
+      expect(String(url)).not.toContain('api.etherscan.io/v2');
     });
   });
 

@@ -3,6 +3,10 @@ import type { Db } from '../../index.js';
 
 // rpcUrl is comma-separated — loadNetworkConfig() splits on ',' and createRpcClient()
 // rotates across them hourly with automatic failover, matching ChainAlert's behaviour.
+//
+// Product default: mainnet only in the UI (`is_active` gates GET /networks). Sepolia is
+// seeded inactive so it can be enabled in DB for testing without appearing for normal users.
+// Other EVM chains can still be added manually to `chain_networks` if needed.
 const KNOWN_NETWORKS = [
   {
     name: 'Ethereum Mainnet',
@@ -16,50 +20,6 @@ const KNOWN_NETWORKS = [
     isActive: true,
   },
   {
-    name: 'Polygon',
-    slug: 'polygon',
-    chainKey: 'polygon',
-    chainId: 137,
-    rpcUrl: 'https://polygon-rpc.com,https://rpc.ankr.com/polygon',
-    blockTimeMs: 2_000,
-    explorerUrl: 'https://polygonscan.com',
-    explorerApi: 'https://api.polygonscan.com/api',
-    isActive: true,
-  },
-  {
-    name: 'Arbitrum One',
-    slug: 'arbitrum',
-    chainKey: 'arbitrum',
-    chainId: 42161,
-    rpcUrl: 'https://arb1.arbitrum.io/rpc,https://rpc.ankr.com/arbitrum',
-    blockTimeMs: 250,
-    explorerUrl: 'https://arbiscan.io',
-    explorerApi: 'https://api.arbiscan.io/api',
-    isActive: true,
-  },
-  {
-    name: 'Optimism',
-    slug: 'optimism',
-    chainKey: 'optimism',
-    chainId: 10,
-    rpcUrl: 'https://mainnet.optimism.io,https://rpc.ankr.com/optimism',
-    blockTimeMs: 2_000,
-    explorerUrl: 'https://optimistic.etherscan.io',
-    explorerApi: 'https://api-optimistic.etherscan.io/api',
-    isActive: true,
-  },
-  {
-    name: 'Base',
-    slug: 'base',
-    chainKey: 'base',
-    chainId: 8453,
-    rpcUrl: 'https://mainnet.base.org,https://rpc.ankr.com/base',
-    blockTimeMs: 2_000,
-    explorerUrl: 'https://basescan.org',
-    explorerApi: 'https://api.basescan.org/api',
-    isActive: true,
-  },
-  {
     name: 'Ethereum Sepolia',
     slug: 'sepolia',
     chainKey: 'sepolia',
@@ -68,12 +28,27 @@ const KNOWN_NETWORKS = [
     blockTimeMs: 12_000,
     explorerUrl: 'https://sepolia.etherscan.io',
     explorerApi: 'https://api-sepolia.etherscan.io/api',
-    isActive: true,
+    isActive: false,
   },
-];
+] as const;
 
 export async function seedChainNetworks(db: Db): Promise<void> {
   for (const network of KNOWN_NETWORKS) {
-    await db.insert(chainNetworks).values(network).onConflictDoNothing();
+    await db
+      .insert(chainNetworks)
+      .values(network)
+      .onConflictDoUpdate({
+        target: chainNetworks.slug,
+        set: {
+          name: network.name,
+          chainKey: network.chainKey,
+          chainId: network.chainId,
+          rpcUrl: network.rpcUrl,
+          blockTimeMs: network.blockTimeMs,
+          explorerUrl: network.explorerUrl,
+          explorerApi: network.explorerApi,
+          isActive: network.isActive,
+        },
+      });
   }
 }
