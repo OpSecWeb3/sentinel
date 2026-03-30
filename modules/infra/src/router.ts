@@ -788,7 +788,9 @@ infraRouter.post('/hosts/:id/discover', async (c) => {
   const vtNames = new Set<string>();
   try {
     if (env().VIRUSTOTAL_API_KEY) {
+      log.info({ hostname: host.hostname }, 'VT enrichment: starting fetch');
       const vtResult = await fetchVtSubdomains(host.hostname, {});
+      log.info({ hostname: host.hostname, vtCount: vtResult.subdomains.length, pagesFetched: vtResult.pagesFetched, rateLimited: vtResult.rateLimited }, 'VT enrichment: fetch complete');
       for (const sub of vtResult.subdomains) {
         const trimmed = sub.trim().toLowerCase();
         if (trimmed.endsWith(`.${host.hostname}`) && isValidHostname(trimmed)) {
@@ -796,8 +798,13 @@ infraRouter.post('/hosts/:id/discover', async (c) => {
           discovered.push(trimmed);
         }
       }
+      log.info({ hostname: host.hostname, vtNew: vtNames.size }, 'VT enrichment: filtering complete');
+    } else {
+      log.info('VT enrichment: skipped (no API key)');
     }
-  } catch { /* VT is best-effort */ }
+  } catch (err) {
+    log.warn({ err, hostname: host.hostname }, 'VT enrichment failed');
+  }
 
   // Deduplicate after merging VT results; compute totalFound from full sets
   const uniqueDiscovered = [...new Set(discovered)].slice(0, MAX_DISCOVERY_RESULTS);
@@ -829,6 +836,7 @@ infraRouter.post('/hosts/:id/discover', async (c) => {
       newHosts: newCount,
       totalFound: totalUnique,
       truncated,
+      sources: { crtSh: crtShAllNames.size, virustotal: vtNames.size },
       ...(truncated ? { message: `Results capped at ${MAX_DISCOVERY_RESULTS} of ${totalUnique} unique subdomains` } : {}),
     },
   });
