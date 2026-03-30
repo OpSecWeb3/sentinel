@@ -249,3 +249,28 @@ export const auditLog = pgTable('audit_log', {
   index('idx_audit_log_org').on(t.orgId),
   index('idx_audit_log_user').on(t.userId),
 ]);
+
+// ---------------------------------------------------------------------------
+// Payload field catalog — auto-discovered JSON key paths from event payloads
+// and alert triggerData. Populated by the worker on first sight of each
+// (source, sourceType, fieldPath) combination.
+// ---------------------------------------------------------------------------
+
+export const payloadFieldCatalog = pgTable('payload_field_catalog', {
+  id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+  /** 'events' or 'alerts' */
+  source: text('source').notNull(),
+  /** moduleId for events, triggerType for alerts */
+  sourceType: text('source_type').notNull(),
+  /** Dot-notation path, e.g. "sender.login" or "eventArgs.from" */
+  fieldPath: text('field_path').notNull(),
+  /** Inferred JSON type */
+  fieldType: text('field_type').notNull().default('string'),
+  /** When this path was first cataloged */
+  firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
+  /** Rolling update on re-catalog (e.g. after TTL expiry) */
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex('uq_payload_catalog_path').on(t.source, t.sourceType, t.fieldPath),
+  index('idx_payload_catalog_source').on(t.source, t.sourceType),
+]);

@@ -33,6 +33,7 @@ import { chainAnalyticsRouter } from './routes/chain-analytics.js';
 import { registryAnalyticsRouter } from './routes/registry-analytics.js';
 import { githubAnalyticsRouter } from './routes/github-analytics.js';
 import { queryRouter } from './routes/query.js';
+import { fieldCatalogRouter } from './routes/field-catalog.js';
 
 // Module imports
 import { GitHubModule, setWebhookRateLimitRedis } from '@sentinel/module-github';
@@ -217,6 +218,7 @@ app.route('/api/chain', chainAnalyticsRouter);
 app.route('/api/registry', registryAnalyticsRouter);
 app.route('/api/github', githubAnalyticsRouter);
 app.route('/api/query', queryRouter);
+app.route('/api/field-catalog', fieldCatalogRouter);
 
 // ── Module routes ───────────────────────────────────────────────────────
 
