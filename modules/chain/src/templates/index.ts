@@ -1097,6 +1097,15 @@ export const templates: DetectionTemplate[] = [
         help: 'Return value key to track. Leave as "result" for single-return functions, or use the named output parameter for multi-return functions.',
       },
       {
+        key: 'pollIntervalMs',
+        label: 'Poll interval (ms)',
+        type: 'number',
+        required: false,
+        default: 60000,
+        min: 10000,
+        help: 'How often to call the function. Must be short enough that enough readings accumulate within your observation window (e.g. a 5-min observation window at 60s polling = 5 readings).',
+      },
+      {
         key: 'observationMinutes',
         label: 'Observation window (min)',
         type: 'number',
@@ -1147,6 +1156,17 @@ export const templates: DetectionTemplate[] = [
     ],
     rules: [
       {
+        ruleType: 'chain.view_call',
+        config: {
+          functionSignature: '{{functionSignature}}',
+          resultField: '{{resultField}}',
+          intervalMs: '{{pollIntervalMs}}',
+          conditions: [],
+        },
+        action: 'log',
+        priority: 10,
+      },
+      {
         ruleType: 'chain.view_call_change',
         config: {
           functionSignature: '{{functionSignature}}',
@@ -1194,13 +1214,22 @@ export const templates: DetectionTemplate[] = [
         help: 'Return value key to track. Leave as "result" for single-return functions, or use the named output parameter for multi-return functions.',
       },
       {
+        key: 'pollIntervalMs',
+        label: 'Poll interval (ms)',
+        type: 'number',
+        required: false,
+        default: 60000,
+        min: 10000,
+        help: 'How often to call the function. Together with observation and baseline readings this determines the effective time span — e.g. 12 baseline readings at 60s = 12 minutes of history.',
+      },
+      {
         key: 'observationSamples',
         label: 'Observation readings',
         type: 'number',
         required: true,
         default: 3,
         min: 1,
-        help: 'Number of most-recent poll readings to treat as the observation window. E.g. 3 readings at a 2-min poll interval = ~6 minutes of data.',
+        help: 'Number of most-recent poll readings to use as the observation window. E.g. 3 readings at a 60s poll interval = ~3 minutes of data.',
       },
       {
         key: 'baselineSamples',
@@ -1243,6 +1272,17 @@ export const templates: DetectionTemplate[] = [
       },
     ],
     rules: [
+      {
+        ruleType: 'chain.view_call',
+        config: {
+          functionSignature: '{{functionSignature}}',
+          resultField: '{{resultField}}',
+          intervalMs: '{{pollIntervalMs}}',
+          conditions: [],
+        },
+        action: 'log',
+        priority: 10,
+      },
       {
         ruleType: 'chain.view_call_change',
         config: {
