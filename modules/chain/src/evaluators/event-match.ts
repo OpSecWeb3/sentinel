@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { toEventSelector } from 'viem';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
 import { NETWORK_UI_FIELD, CONTRACT_UI_FIELD, EVENT_SIG_UI_FIELD } from './_ui-shared.js';
 
@@ -128,9 +129,28 @@ export const eventMatchEvaluator: RuleEvaluator = {
       // Verify the event actually matches the rule's expected event signature.
       // RuleEngine evaluates ALL rules against every event, so a Transfer event
       // would otherwise match a Paused rule if they share a contract address.
-      const expectedEventName = config.eventSignature?.split('(')[0];
-      if (expectedEventName && p.eventName && p.eventName !== expectedEventName) {
-        return null;
+      //
+      // When ABI decoding fails, the block processor stores eventName as
+      // "topic0:0x<hex>" instead of the decoded name. In that case fall back
+      // to comparing the embedded topic0 against the one derived from the
+      // rule's eventSignature so we don't silently drop valid matches.
+      if (config.eventSignature && p.eventName) {
+        const isFallbackName = p.eventName.startsWith('topic0:');
+        if (isFallbackName) {
+          const embeddedTopic0 = p.eventName.slice('topic0:'.length);
+          let expectedTopic0: string | null = null;
+          try {
+            expectedTopic0 = toEventSelector(config.eventSignature).toLowerCase();
+          } catch { /* invalid signature — skip check */ }
+          if (expectedTopic0 && !embeddedTopic0.startsWith(expectedTopic0)) {
+            return null;
+          }
+        } else {
+          const expectedEventName = config.eventSignature.split('(')[0];
+          if (expectedEventName && p.eventName !== expectedEventName) {
+            return null;
+          }
+        }
       }
 
       contractAddress = p.contractAddress;
