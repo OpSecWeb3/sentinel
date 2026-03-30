@@ -56,7 +56,7 @@ rollback() {
     echo "    Manual intervention required:"
     echo "      1. Check migration state: psql \$DATABASE_URL -c 'SELECT * FROM drizzle.migrations ORDER BY created_at DESC LIMIT 5;'"
     echo "      2. If migration succeeded but app failed, fix the app code"
-    echo "      3. If migration failed, restore from backup: ./scripts/restore-db.sh /backups/postgres/<latest>"
+    echo "      3. If migration failed, restore from backup: ./scripts/restore-db.sh ${APP_DIR}/backups/sentinel-pre-migration.sql.gz"
     echo "      4. To revert code: git checkout ${PREV_SHA} && DEPLOY_PREV_SHA=\$(git rev-parse HEAD) bash scripts/deploy.sh"
     docker compose -f "$COMPOSE_FILE" logs --tail=50
     exit 1
@@ -102,7 +102,7 @@ set -a; source .env; set +a
 # Skipped when there are no pending migration files to avoid slowing every deploy.
 if [ "$HAS_MIGRATIONS" = true ]; then
   echo "==> Taking pre-migration database backup..."
-  bash ./scripts/backup-db.sh || { echo "ERROR: Pre-migration backup failed — aborting deploy"; exit 1; }
+  BACKUP_DIR="${APP_DIR}/backups" BACKUP_SINGLE=true bash ./scripts/backup-db.sh || { echo "ERROR: Pre-migration backup failed — aborting deploy"; exit 1; }
 fi
 
 docker compose -f "$COMPOSE_FILE" --profile migrate run --rm --no-deps migrate
