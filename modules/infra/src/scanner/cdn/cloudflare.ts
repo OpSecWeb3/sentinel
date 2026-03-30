@@ -1,7 +1,11 @@
+import type { Redis } from 'ioredis';
+
 import { logger as rootLogger } from '@sentinel/shared/logger';
 
 const log = rootLogger.child({ component: 'cdn-cloudflare' });
 const CF_API_BASE = 'https://api.cloudflare.com/client/v4';
+const ZONE_CACHE_PREFIX = 'cache:cf:zone:';
+const ZONE_CACHE_TTL = 86_400; // 24 hours
 
 async function cfFetch(url: string, apiToken: string): Promise<Response> {
   const controller = new AbortController();
@@ -29,8 +33,8 @@ export async function validateCredentials(apiToken: string, accountId: string): 
   }
 }
 
-export async function getOriginIps(apiToken: string, domain: string): Promise<Record<string, string[]>> {
-  const zoneId = await getZoneId(apiToken, domain);
+export async function getOriginIps(apiToken: string, domain: string, options?: { redis?: Redis }): Promise<Record<string, string[]>> {
+  const zoneId = await getZoneId(apiToken, domain, options?.redis);
   if (!zoneId) return {};
 
   const origins: Record<string, string[]> = {};
@@ -51,7 +55,16 @@ export async function getOriginIps(apiToken: string, domain: string): Promise<Re
   return origins;
 }
 
-async function getZoneId(apiToken: string, domain: string): Promise<string | null> {
+async function getZoneId(apiToken: string, domain: string, redis?: Redis): Promise<string | null> {
+  // Check Redis cache (zone IDs are stable — 24h TTL)
+  const cacheKey = `${ZONE_CACHE_PREFIX}${domain}`;
+  if (redis) {
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) return cached;
+    } catch { /* cache miss */ }
+  }
+
   const parts = domain.split('.');
   for (let i = 0; i < parts.length - 1; i++) {
     const candidate = parts.slice(i).join('.');
@@ -62,7 +75,11 @@ async function getZoneId(apiToken: string, domain: string): Promise<string | nul
       );
       const data = await resp.json() as { success: boolean; result?: Array<{ id: string }> };
       if (data.success && data.result?.length) {
-        return data.result[0].id;
+        const zoneId = data.result[0].id;
+        if (redis) {
+          try { await redis.set(cacheKey, zoneId, 'EX', ZONE_CACHE_TTL); } catch { /* non-fatal */ }
+        }
+        return zoneId;
       }
     } catch (err) {
       log.error({ err, candidate }, 'Cloudflare zone lookup failed');

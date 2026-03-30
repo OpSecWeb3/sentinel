@@ -7,8 +7,11 @@
 import dns from 'node:dns/promises';
 import net from 'node:net';
 
+import type { Redis } from 'ioredis';
+
 import type { InfraResult, PortResult, StepResult } from '../types.js';
 import { isPrivateIp } from '../orchestrator.js';
+import { detectCloudProviderByIp, hasCloudRanges, loadCloudRanges } from './cloud-ranges.js';
 
 const PORT_SCAN_TIMEOUT_MS = 3_000;
 
@@ -91,7 +94,23 @@ async function reverseLookup(ip: string): Promise<string | null> {
 // Cloud provider detection
 // -------------------------------------------------------------------------
 
-function detectCloudProvider(reverseDns: string | null): string | null {
+/**
+ * Detect cloud provider for an IP address.
+ *
+ * Layer 1: Match IP against published cloud CIDR ranges (AWS, GCP, Cloudflare).
+ * Layer 2: Match reverse DNS hostname against well-known patterns.
+ *
+ * IP range matching is the primary signal — many CDN IPs lack rDNS entries
+ * pointing back to the provider domain.
+ */
+function detectCloudProvider(ip: string, reverseDns: string | null): string | null {
+  // Layer 1: IP range match (most reliable)
+  if (hasCloudRanges()) {
+    const provider = detectCloudProviderByIp(ip);
+    if (provider) return provider;
+  }
+
+  // Layer 2: Reverse DNS pattern match (fallback)
   if (!reverseDns) return null;
 
   for (const { pattern, provider } of CLOUD_PATTERNS) {
@@ -154,7 +173,7 @@ async function scanPorts(ip: string): Promise<PortResult[]> {
 }
 
 // -------------------------------------------------------------------------
-// Geo IP / ASN lookup
+// Geo IP / ASN lookup (cached 7 days, rate-limited 40 req/min)
 // -------------------------------------------------------------------------
 
 interface GeoIpData {
@@ -166,8 +185,55 @@ interface GeoIpData {
   asnOrg: string | null;
 }
 
-async function lookupGeoIp(ip: string): Promise<GeoIpData> {
+const GEO_CACHE_PREFIX = 'cache:geoip:';
+const GEO_CACHE_TTL = 604_800; // 7 days in seconds
+
+// ip-api.com free tier: 45 requests/minute. We use 40 to leave headroom.
+const IPAPI_RATE_KEY = 'sentinel:ipapi:ratelimit';
+const IPAPI_RATE_WINDOW_MS = 60_000;
+const IPAPI_RATE_MAX = 40;
+
+const SLIDING_WINDOW_LUA = `
+  local key = KEYS[1]
+  local now = tonumber(ARGV[1])
+  local windowMs = tonumber(ARGV[2])
+  local maxRequests = tonumber(ARGV[3])
+  redis.call('ZREMRANGEBYSCORE', key, 0, now - windowMs)
+  local count = redis.call('ZCARD', key)
+  if count >= maxRequests then
+    return 0
+  end
+  redis.call('ZADD', key, now, now .. ':' .. math.random(1000000))
+  redis.call('EXPIRE', key, math.ceil(windowMs / 1000))
+  return 1
+`;
+
+async function acquireIpApiSlot(redis: Redis): Promise<boolean> {
+  const result = await redis.eval(
+    SLIDING_WINDOW_LUA, 1, IPAPI_RATE_KEY, Date.now(), IPAPI_RATE_WINDOW_MS, IPAPI_RATE_MAX,
+  ) as number;
+  return result === 1;
+}
+
+async function lookupGeoIp(ip: string, redis?: Redis): Promise<GeoIpData> {
   const empty: GeoIpData = { country: null, city: null, lat: null, lon: null, asn: null, asnOrg: null };
+
+  // Check Redis cache
+  if (redis) {
+    try {
+      const cached = await redis.get(`${GEO_CACHE_PREFIX}${ip}`);
+      if (cached) return JSON.parse(cached) as GeoIpData;
+    } catch { /* cache miss */ }
+  }
+
+  // Rate limit check
+  if (redis) {
+    try {
+      const allowed = await acquireIpApiSlot(redis);
+      if (!allowed) return empty;
+    } catch { /* proceed without rate limiting */ }
+  }
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5_000);
@@ -181,7 +247,7 @@ async function lookupGeoIp(ip: string): Promise<GeoIpData> {
     // Parse ASN from "as" field (e.g. "AS13335 Cloudflare, Inc.")
     const asField = (data.as as string) ?? '';
     const asnMatch = asField.match(/^(AS\d+)/);
-    return {
+    const result: GeoIpData = {
       country: (data.country as string) ?? null,
       city: (data.city as string) ?? null,
       lat: typeof data.lat === 'number' ? data.lat : null,
@@ -189,6 +255,13 @@ async function lookupGeoIp(ip: string): Promise<GeoIpData> {
       asn: asnMatch ? asnMatch[1] : null,
       asnOrg: (data.org as string) ?? null,
     };
+
+    // Cache successful results
+    if (redis && result.country) {
+      try { await redis.set(`${GEO_CACHE_PREFIX}${ip}`, JSON.stringify(result), 'EX', GEO_CACHE_TTL); } catch { /* non-fatal */ }
+    }
+
+    return result;
   } catch {
     return empty;
   }
@@ -198,7 +271,10 @@ async function lookupGeoIp(ip: string): Promise<GeoIpData> {
 // Full infrastructure scan
 // -------------------------------------------------------------------------
 
-export async function scanInfrastructure(domain: string): Promise<InfraResult[]> {
+export async function scanInfrastructure(domain: string, options?: { redis?: Redis }): Promise<InfraResult[]> {
+  // Ensure cloud IP ranges are loaded before scanning
+  await loadCloudRanges(options?.redis);
+
   const allIps = await resolveIps(domain);
   // Filter out private IPs to prevent SSRF / DNS rebinding
   const ips = allIps.filter(({ ip }) => !isPrivateIp(ip));
@@ -209,10 +285,10 @@ export async function scanInfrastructure(domain: string): Promise<InfraResult[]>
       const [reverseDns, ports, geo] = await Promise.all([
         reverseLookup(ip),
         scanPorts(ip),
-        lookupGeoIp(ip),
+        lookupGeoIp(ip, options?.redis),
       ]);
 
-      const cloudProvider = detectCloudProvider(reverseDns);
+      const cloudProvider = detectCloudProvider(ip, reverseDns);
 
       return {
         ip,
@@ -239,11 +315,11 @@ export async function scanInfrastructure(domain: string): Promise<InfraResult[]>
 // Step runner
 // -------------------------------------------------------------------------
 
-export async function runInfrastructureStep(domain: string): Promise<StepResult> {
+export async function runInfrastructureStep(domain: string, options?: { redis?: Redis }): Promise<StepResult> {
   const startedAt = new Date();
 
   try {
-    const infraResults = await scanInfrastructure(domain);
+    const infraResults = await scanInfrastructure(domain, options);
 
     return {
       step: 'infrastructure',

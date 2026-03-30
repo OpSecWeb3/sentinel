@@ -39,6 +39,7 @@ import { runInfrastructureStep } from './steps/infrastructure.js';
 import { runWhoisStep } from './steps/whois.js';
 import { fetchVtSubdomains } from './steps/virustotal-subdomains.js';
 import { calculateScore, applySuppressions, type FindingSuppression } from './scoring.js';
+import { invalidateProxyStatusCache } from './cdn/proxy-detection.js';
 
 // -------------------------------------------------------------------------
 // Concurrency keys
@@ -277,7 +278,7 @@ export async function runScan(data: ScanJobData, callbacks: ScanCallbacks): Prom
       withRetry('tls_analysis', () => runTlsAnalysisStep(targetName)),
       withRetry('headers', () => runHeadersStep(targetName)),
       withRetry('ct_logs', () => runCtLogsStep(targetName, { isRoot, redis })),
-      withRetry('infrastructure', () => runInfrastructureStep(targetName)),
+      withRetry('infrastructure', () => runInfrastructureStep(targetName, { redis })),
       withRetry('whois', () => runWhoisStep(targetName, { isRoot, storedWhois: storedWhoisData })),
     ]);
 
@@ -323,6 +324,13 @@ export async function runScan(data: ScanJobData, callbacks: ScanCallbacks): Prom
     const certInfo = extractCertInfo(findStep(stepResults, 'certificate'));
     const tlsInfo = extractTlsInfo(findStep(stepResults, 'tls_analysis'));
     const infraResults = extractInfraResults(findStep(stepResults, 'infrastructure'));
+
+    // Invalidate proxy status cache after a successful infrastructure scan
+    // so the next probe picks up fresh detection data.
+    if (redis && findStep(stepResults, 'infrastructure')) {
+      await invalidateProxyStatusCache(hostId, redis);
+    }
+
     const headerInfo = extractHeaderInfo(findStep(stepResults, 'headers'));
     const whoisInfo = extractWhoisInfo(findStep(stepResults, 'whois'));
 

@@ -17,6 +17,33 @@ const FETCH_TIMEOUT_MS = 30_000;
 const CONCURRENCY_KEY = 'slot:crtsh';
 const MAX_CONCURRENT = 5;
 
+// Rate limiter: 10 requests per 60 seconds (matches Scout's conservative limit)
+const CRTSH_RATE_KEY = 'sentinel:crtsh:ratelimit';
+const CRTSH_RATE_WINDOW_MS = 60_000;
+const CRTSH_RATE_MAX = 10;
+
+const SLIDING_WINDOW_LUA = `
+  local key = KEYS[1]
+  local now = tonumber(ARGV[1])
+  local windowMs = tonumber(ARGV[2])
+  local maxRequests = tonumber(ARGV[3])
+  redis.call('ZREMRANGEBYSCORE', key, 0, now - windowMs)
+  local count = redis.call('ZCARD', key)
+  if count >= maxRequests then
+    return 0
+  end
+  redis.call('ZADD', key, now, now .. ':' .. math.random(1000000))
+  redis.call('EXPIRE', key, math.ceil(windowMs / 1000))
+  return 1
+`;
+
+async function acquireCrtshRateSlot(redis: Redis): Promise<boolean> {
+  const result = await redis.eval(
+    SLIDING_WINDOW_LUA, 1, CRTSH_RATE_KEY, Date.now(), CRTSH_RATE_WINDOW_MS, CRTSH_RATE_MAX,
+  ) as number;
+  return result === 1;
+}
+
 // -------------------------------------------------------------------------
 // crt.sh API
 // -------------------------------------------------------------------------
@@ -129,6 +156,28 @@ export async function runCtLogsStep(
           startedAt,
           completedAt: new Date(),
         };
+      }
+
+      // Rate limit: 10 req/min to avoid overwhelming the free crt.sh service
+      try {
+        const allowed = await acquireCrtshRateSlot(options.redis);
+        if (!allowed) {
+          log.info({ domain }, 'crt.sh rate limit reached (10/min)');
+          return {
+            step: 'ct_logs',
+            status: 'success',
+            data: {
+              ctLogEntries: 0,
+              ctNewEntries: 0,
+              ctIssuers: [],
+              rateLimited: true,
+            },
+            startedAt,
+            completedAt: new Date(),
+          };
+        }
+      } catch {
+        // Rate limit check failed — proceed anyway rather than blocking
       }
     }
 

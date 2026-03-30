@@ -26,7 +26,7 @@ import {
 } from '@sentinel/db/schema/infra';
 import { eq, and, desc, asc, lte, gte, sql, inArray, ilike, count } from '@sentinel/db';
 import { alerts, detections } from '@sentinel/db/schema/core';
-import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
+import { getQueue, getSharedConnection, QUEUE_NAMES } from '@sentinel/shared/queue';
 import { logger as rootLogger } from '@sentinel/shared/logger';
 import { env } from '@sentinel/shared/env';
 import type { AppEnv } from '@sentinel/shared/hono-types';
@@ -1413,7 +1413,7 @@ infraRouter.post('/cdn-providers/check-proxy', async (c) => {
   if (!orgId) return c.json({ error: 'Organisation required' }, 403);
   const body = z.object({ hostIds: z.array(z.string().uuid()) }).parse(await c.req.json());
   const { checkProxyStatusBatch } = await import('./scanner/cdn/proxy-detection.js');
-  const results = await checkProxyStatusBatch(body.hostIds, orgId);
+  const results = await checkProxyStatusBatch(body.hostIds, orgId, getSharedConnection());
   return c.json({ data: results });
 });
 

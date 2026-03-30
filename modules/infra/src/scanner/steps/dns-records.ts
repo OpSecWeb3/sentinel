@@ -15,10 +15,12 @@ const RECORD_TYPES = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'CNAME'] as const;
 
 /** Well-known CDN CNAME suffixes used for edge-IP-rotation suppression. */
 const CDN_CNAME_PATTERNS: Record<string, string[]> = {
-  cloudflare: ['.cdn.cloudflare.net', '.cloudflare.net'],
+  cloudflare: ['.cloudflare.com', '.cloudflare-dns.com', '.cdn.cloudflare.net', '.cloudflare.net'],
   cloudfront: ['.cloudfront.net'],
+  netlify: ['.netlify.app', '.netlify.com'],
   fastly: ['.fastly.net', '.fastlylb.net'],
   akamai: ['.akamaiedge.net', '.akamai.net', '.edgekey.net'],
+  s3: ['.amazonaws.com'],
 };
 
 /**

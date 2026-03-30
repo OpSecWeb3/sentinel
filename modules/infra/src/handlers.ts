@@ -28,7 +28,7 @@ import {
   infraCtLogEntries,
 } from '@sentinel/db/schema/infra';
 import { eq, and, lte, desc, inArray } from '@sentinel/db';
-import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
+import { getQueue, getSharedConnection, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { getChildResults } from '@sentinel/shared/fan-out';
 import type { ScanCallbacks, ScanResult } from './scanner/orchestrator.js';
 import type { DnsRecord, WhoisData, StepName } from './scanner/types.js';
@@ -160,7 +160,7 @@ async function dedupDiscoveryEvents(
 // Shared ScanCallbacks factory
 // ---------------------------------------------------------------------------
 
-function createScanCallbacks(): ScanCallbacks {
+function createScanCallbacks(redis?: import('ioredis').Redis): ScanCallbacks {
   const db = getDb();
 
   return {
@@ -209,8 +209,10 @@ function createScanCallbacks(): ScanCallbacks {
         .limit(1);
       if (!host) return { isProxied: false, provider: null };
       const { detectProxyStatus } = await import('./scanner/cdn/proxy-detection.js');
-      return detectProxyStatus(hostId, host.orgId);
+      return detectProxyStatus(hostId, host.orgId, redis);
     },
+
+    redis,
 
     async saveScanResult(result: ScanResult): Promise<void> {
       // Create scan event
@@ -466,7 +468,7 @@ export const scanHandler: JobHandler = {
 
     const { runScan } = await import('./scanner/orchestrator.js');
 
-    const callbacks = createScanCallbacks();
+    const callbacks = createScanCallbacks(getSharedConnection());
     const result = await runScan(
       {
         hostId,
@@ -525,7 +527,7 @@ export const probeHandler: JobHandler = {
     };
 
     const { probeHost } = await import('./scanner/probe.js');
-    const callbacks = createScanCallbacks();
+    const callbacks = createScanCallbacks(getSharedConnection());
 
     const storedRecords = await callbacks.getStoredDnsRecords(hostId);
     const result = await probeHost({
@@ -701,7 +703,7 @@ export const scanAggregateHandler: JobHandler = {
         : 'success';
 
     // Build aggregated result for persistence via existing callbacks
-    const callbacks = createScanCallbacks();
+    const callbacks = createScanCallbacks(getSharedConnection());
     const aggregatedResult: ScanResult = {
       hostId,
       hostName: hostname,

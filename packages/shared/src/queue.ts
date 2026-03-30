@@ -25,6 +25,11 @@ export function setSharedConnection(redis: Redis): void {
   _connection = redis;
 }
 
+/** Return the shared Redis connection, or undefined if not yet initialised. */
+export function getSharedConnection(): Redis | undefined {
+  return _connection;
+}
+
 function getConnection(): Redis {
   if (!_connection) {
     throw new Error('Shared Redis connection not initialised. Call setSharedConnection() first.');

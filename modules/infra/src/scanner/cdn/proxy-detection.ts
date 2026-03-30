@@ -1,3 +1,5 @@
+import type { Redis } from 'ioredis';
+
 import { getDb } from '@sentinel/db';
 import {
   infraSnapshots, infraDnsRecords, infraHttpHeaderChecks,
@@ -6,25 +8,34 @@ import {
 import { eq, desc, and } from '@sentinel/db';
 import type { ProxyCheckResult } from './types.js';
 
+const PROXY_CACHE_KEY_PREFIX = 'cache:proxy_status:';
+const PROXY_CACHE_TTL_SECONDS = 86_400; // 24 hours
+
 const CDN_CNAME_PATTERNS: Record<string, string[]> = {
-  cloudflare: ['.cloudflare.com', '.cloudflare-dns.com'],
+  cloudflare: ['.cloudflare.com', '.cloudflare-dns.com', '.cdn.cloudflare.net', '.cloudflare.net'],
   cloudfront: ['.cloudfront.net'],
   netlify: ['.netlify.app', '.netlify.com'],
   fastly: ['.fastly.net', '.fastlylb.net'],
+  akamai: ['.akamaiedge.net', '.akamai.net', '.edgekey.net'],
+  s3: ['.amazonaws.com'],
 };
 
 const CDN_REVERSE_DNS_PATTERNS: Record<string, string[]> = {
   cloudfront: ['.cloudfront.net'],
+  akamai: ['.akamaiedge.net', '.deploy.static.akamaitechnologies.com'],
 };
 
 const CDN_CLOUD_PROVIDERS: Record<string, string[]> = {
   cloudflare: ['cloudflare'],
   cloudfront: ['cloudfront', 'amazon'],
+  s3: ['s3', 'amazonaws'],
 };
 
 const CDN_HEADER_SIGNALS: Record<string, string[]> = {
   cloudflare: ['cloudflare'],
   cloudfront: ['cloudfront', 'amazons3'],
+  netlify: ['netlify'],
+  akamai: ['akamaighost', 'akamai'],
 };
 
 export function hostMatchesPattern(hostname: string, pattern: string | null): boolean {
@@ -38,7 +49,56 @@ export function hostMatchesPattern(hostname: string, pattern: string | null): bo
   });
 }
 
-export async function detectProxyStatus(hostId: string, orgId: string): Promise<{ isProxied: boolean; provider: string | null }> {
+export async function detectProxyStatus(
+  hostId: string,
+  orgId: string,
+  redis?: Redis,
+): Promise<{ isProxied: boolean; provider: string | null }> {
+  // Check Redis cache first
+  if (redis) {
+    try {
+      const cached = await redis.get(`${PROXY_CACHE_KEY_PREFIX}${hostId}`);
+      if (cached) {
+        return JSON.parse(cached) as { isProxied: boolean; provider: string | null };
+      }
+    } catch {
+      // Redis failure is non-fatal — fall through to DB detection
+    }
+  }
+
+  const result = await detectProxyStatusFromDb(hostId);
+
+  // Cache the result (positive or negative) in Redis
+  if (redis) {
+    try {
+      await redis.set(
+        `${PROXY_CACHE_KEY_PREFIX}${hostId}`,
+        JSON.stringify(result),
+        'EX',
+        PROXY_CACHE_TTL_SECONDS,
+      );
+    } catch {
+      // Redis failure is non-fatal
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Invalidate the cached proxy status for a host.
+ * Call after an infrastructure scan completes to ensure fresh data on next check.
+ */
+export async function invalidateProxyStatusCache(hostId: string, redis: Redis): Promise<void> {
+  try {
+    await redis.del(`${PROXY_CACHE_KEY_PREFIX}${hostId}`);
+  } catch {
+    // Redis failure is non-fatal
+  }
+}
+
+/** Internal: run the 4-layer DB detection without caching. */
+async function detectProxyStatusFromDb(hostId: string): Promise<{ isProxied: boolean; provider: string | null }> {
   const db = getDb();
 
   // Layer 1: cloud_provider from infra snapshot
@@ -107,7 +167,7 @@ export async function detectProxyStatus(hostId: string, orgId: string): Promise<
   return { isProxied: false, provider: null };
 }
 
-export async function checkProxyStatusBatch(hostIds: string[], orgId: string): Promise<ProxyCheckResult[]> {
+export async function checkProxyStatusBatch(hostIds: string[], orgId: string, redis?: Redis): Promise<ProxyCheckResult[]> {
   const db = getDb();
 
   // Fetch hostnames
@@ -127,7 +187,7 @@ export async function checkProxyStatusBatch(hostIds: string[], orgId: string): P
 
   for (const hostId of hostIds) {
     const hostname = hostMap.get(hostId) ?? '';
-    const { isProxied, provider } = await detectProxyStatus(hostId, orgId);
+    const { isProxied, provider } = await detectProxyStatus(hostId, orgId, redis);
 
     const hasProviderConfig = provider
       ? cdnConfigs.some((c) => c.provider === provider && hostMatchesPattern(hostname, c.hostPattern))
