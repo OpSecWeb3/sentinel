@@ -281,19 +281,41 @@ infraRouter.post('/hosts', async (c) => {
 
   const db = getDb();
 
+  // Auto-discover parent: walk up domain labels to find an existing root host
+  // e.g. api.staging.example.com → staging.example.com → example.com
+  let parentId: string | null = null;
+  let isRoot = true;
+  const labels = body.hostname.split('.');
+  if (labels.length > 2) {
+    for (let i = 1; i < labels.length - 1; i++) {
+      const candidate = labels.slice(i).join('.');
+      const [existing] = await db
+        .select({ id: infraHosts.id })
+        .from(infraHosts)
+        .where(and(eq(infraHosts.orgId, orgId), eq(infraHosts.hostname, candidate), eq(infraHosts.isActive, true)))
+        .limit(1);
+      if (existing) {
+        parentId = existing.id;
+        isRoot = false;
+        break;
+      }
+    }
+  }
+
   // Upsert: re-activate if previously removed
   const [host] = await db
     .insert(infraHosts)
     .values({
       orgId,
       hostname: body.hostname,
-      isRoot: true,
+      parentId,
+      isRoot,
       isActive: true,
       source: 'manual',
     })
     .onConflictDoUpdate({
       target: [infraHosts.orgId, infraHosts.hostname],
-      set: { isActive: true },
+      set: { isActive: true, parentId, isRoot },
     })
     .returning();
 
@@ -321,6 +343,23 @@ infraRouter.post('/hosts', async (c) => {
       },
     });
 
+  // Reverse discovery: if this is a root host, adopt any existing orphan
+  // subdomains that end with this hostname and currently have no parent.
+  if (isRoot) {
+    await db
+      .update(infraHosts)
+      .set({ parentId: host.id, isRoot: false })
+      .where(
+        and(
+          eq(infraHosts.orgId, orgId),
+          eq(infraHosts.isActive, true),
+          eq(infraHosts.isRoot, true),
+          sql`${infraHosts.hostname} LIKE ${'%.' + body.hostname}`,
+          sql`${infraHosts.id} != ${host.id}`,
+        ),
+      );
+  }
+
   // Enqueue an initial full scan
   const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
   await queue.add('infra.scan', {
@@ -330,7 +369,7 @@ infraRouter.post('/hosts', async (c) => {
     priority: 'interactive',
   });
 
-  return c.json({ data: { id: host.id, hostname: host.hostname } }, 201);
+  return c.json({ data: { id: host.id, hostname: host.hostname, parentId, isRoot } }, 201);
 });
 
 // ---------------------------------------------------------------------------
