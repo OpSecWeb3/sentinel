@@ -527,13 +527,19 @@ export const probeHandler: JobHandler = {
     };
 
     const { probeHost } = await import('./scanner/probe.js');
-    const callbacks = createScanCallbacks(getSharedConnection());
+    const redis = getSharedConnection();
+    const callbacks = createScanCallbacks(redis);
 
     const storedRecords = await callbacks.getStoredDnsRecords(hostId);
+    const proxyStatus = await callbacks.getProxyStatus?.(hostId)
+      ?? { isProxied: false, provider: null };
+
     const result = await probeHost({
       hostId,
       domain: hostname,
       storedRecords,
+      isProxied: proxyStatus.isProxied,
+      knownProvider: proxyStatus.provider,
     });
 
     // Store probe result
@@ -547,6 +553,31 @@ export const probeHandler: JobHandler = {
       dnsChanged: result.dnsChanged,
       checkedAt: new Date(),
     });
+
+    // CDN origin change detection — runs for proxied hosts with valid config
+    if (proxyStatus.isProxied) {
+      try {
+        const { getCdnProviderConfig, checkOriginChanges } = await import('./scanner/cdn/origin-check.js');
+        const cdnConfig = await getCdnProviderConfig(orgId, hostname);
+        if (cdnConfig) {
+          const originChanges = await checkOriginChanges(hostId, hostname, cdnConfig, { redis });
+          if (originChanges.length > 0) {
+            // Append origin changes to the probe result so they flow into events
+            result.dnsChanged = true;
+            result.dnsChangesCount += originChanges.length;
+            result.dnsChanges.push(...originChanges.map((c) => ({
+              recordType: c.recordType,
+              oldValue: c.oldValue,
+              newValue: c.newValue,
+              changeType: c.changeType,
+              severity: c.severity,
+            })));
+          }
+        }
+      } catch (err) {
+        log.warn({ err, hostId, hostname }, 'CDN origin check failed (non-fatal)');
+      }
+    }
 
     // Normalize into platform events
     const normalized = await normalizeProbeResult(result, orgId);
