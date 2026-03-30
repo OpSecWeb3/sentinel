@@ -143,6 +143,7 @@ export default function SettingsPage() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [keysLoading, setKeysLoading] = useState(true);
   const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyAllowWrite, setNewKeyAllowWrite] = useState(false);
   const [newKeyResult, setNewKeyResult] = useState<string | null>(null);
   const [createKeyLoading, setCreateKeyLoading] = useState(false);
 
@@ -366,11 +367,12 @@ export default function SettingsPage() {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: newKeyName }),
+          body: JSON.stringify({ name: newKeyName, scopes: newKeyAllowWrite ? ["api:read", "api:write"] : ["api:read"] }),
         },
       );
       setNewKeyResult(res.key);
       setNewKeyName("");
+      setNewKeyAllowWrite(false);
       fetchApiKeys();
     } catch (err) {
       toast(
@@ -916,6 +918,15 @@ export default function SettingsPage() {
                     required
                   />
                 </div>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    checked={newKeyAllowWrite}
+                    onChange={(e) => setNewKeyAllowWrite(e.target.checked)}
+                    className="h-3 w-3"
+                  />
+                  --write
+                </label>
                 <Button type="submit" disabled={createKeyLoading}>
                   {createKeyLoading ? "..." : "$ create"}
                 </Button>
