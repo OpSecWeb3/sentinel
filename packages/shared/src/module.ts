@@ -102,6 +102,13 @@ export interface DetectionModule {
 // Supporting types
 // ---------------------------------------------------------------------------
 
+export interface PayloadFieldDef {
+  path: string;
+  label: string;
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
+  examples?: string[];
+}
+
 export interface EventTypeDefinition {
   /** Fully qualified type, e.g. 'github.repository.publicized' */
   type: string;
@@ -114,6 +121,9 @@ export interface EventTypeDefinition {
 
   /** Zod schema for the normalized payload */
   payloadSchema?: ZodSchema;
+
+  /** Curated payload field metadata for the query builder field picker */
+  payloadFields?: PayloadFieldDef[];
 }
 
 export interface DetectionTemplate {

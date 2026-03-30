@@ -14,3 +14,4 @@ export * from './hono-types.js';
 export * from './auto-rules.js';
 export * from './correlation-types.js';
 export * from './correlation-engine.js';
+export * from './query.js';
