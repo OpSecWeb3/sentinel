@@ -690,6 +690,23 @@ infraRouter.post('/hosts/:id/suppressions', async (c) => {
         eq(infraFindingSuppressions.issue, body.item),
       ));
   }
+
+  // Recalculate and persist the adjusted score so it survives page refresh.
+  const [latestScore] = await db.select({ score: infraScoreHistory.score, deductions: infraScoreHistory.deductions })
+    .from(infraScoreHistory).where(eq(infraScoreHistory.hostId, hostId))
+    .orderBy(desc(infraScoreHistory.recordedAt)).limit(1);
+  if (latestScore) {
+    const currentSuppressions = await db.select({ category: infraFindingSuppressions.category, issue: infraFindingSuppressions.issue })
+      .from(infraFindingSuppressions).where(eq(infraFindingSuppressions.hostId, hostId));
+    const { applySuppressions } = await import('./scanner/scoring.js');
+    const deductions = (latestScore.deductions ?? []) as import('./scanner/types.js').Deduction[];
+    const adjusted = applySuppressions(
+      { hostId, score: latestScore.score, grade: 'A', deductions, breakdown: {} },
+      currentSuppressions,
+    );
+    await db.update(infraHosts).set({ currentScore: adjusted }).where(eq(infraHosts.id, hostId));
+  }
+
   return c.json({ data: { suppressed: body.action === 'suppress' } });
 });
 
