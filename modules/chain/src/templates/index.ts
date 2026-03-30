@@ -1066,6 +1066,200 @@ export const templates: DetectionTemplate[] = [
     ],
   },
 
+  // ── View Call Change — time-based ───────────────────────────────────
+  {
+    slug: 'chain-view-call-time-change',
+    name: 'View Call Time-Window Change Monitor',
+    description:
+      'Call a read-only contract function on a schedule and alert when its return value shifts by a configurable percentage relative to a rolling time-based baseline. ' +
+      'Use this when you reason in wall-clock terms: "did this value change by more than X% in the last 5 minutes compared to the past hour?" ' +
+      'Good for oracle prices, protocol parameters, and any numeric state that has a natural time horizon.',
+    category: 'custom',
+    severity: 'high',
+    inputs: [
+      NETWORK_INPUT,
+      CONTRACT_REQUIRED_INPUT,
+      {
+        key: 'functionSignature',
+        label: 'View function signature',
+        type: 'text',
+        required: true,
+        placeholder: 'totalSupply()',
+        help: 'Read-only (view/pure) function to call periodically. Use the full Solidity signature, e.g. balanceOf(address).',
+      },
+      {
+        key: 'resultField',
+        label: 'Result field',
+        type: 'text',
+        required: false,
+        default: 'result',
+        placeholder: 'result',
+        help: 'Return value key to track. Leave as "result" for single-return functions, or use the named output parameter for multi-return functions.',
+      },
+      {
+        key: 'observationMinutes',
+        label: 'Observation window (min)',
+        type: 'number',
+        required: true,
+        default: 5,
+        min: 1,
+        help: 'Recent time window whose average is compared against the baseline. Keep this shorter than the baseline window.',
+      },
+      {
+        key: 'baselineMinutes',
+        label: 'Baseline window (min)',
+        type: 'number',
+        required: true,
+        default: 60,
+        min: 1,
+        help: 'Historical time window that defines "normal". Must be longer than the observation window.',
+      },
+      {
+        key: 'changePercent',
+        label: 'Change % to alert',
+        type: 'number',
+        required: true,
+        default: 50,
+        min: 1,
+        help: 'Fire an alert when the observation average deviates from the baseline average by at least this percentage.',
+      },
+      {
+        key: 'direction',
+        label: 'Direction',
+        type: 'select',
+        required: false,
+        options: [
+          { value: 'either', label: 'Either direction' },
+          { value: 'increase', label: 'Increase only' },
+          { value: 'decrease', label: 'Decrease only' },
+        ],
+        help: 'Whether to alert on increases, decreases, or any significant change.',
+      },
+      {
+        key: 'minBaselineSamples',
+        label: 'Min baseline samples',
+        type: 'number',
+        required: false,
+        default: 3,
+        min: 1,
+        help: 'Suppress alerts until the baseline window contains at least this many readings. Prevents false positives at startup.',
+      },
+    ],
+    rules: [
+      {
+        ruleType: 'chain.view_call_change',
+        config: {
+          functionSignature: '{{functionSignature}}',
+          resultField: '{{resultField}}',
+          windowMode: 'time',
+          observationMinutes: '{{observationMinutes}}',
+          baselineMinutes: '{{baselineMinutes}}',
+          changePercent: '{{changePercent}}',
+          direction: '{{direction}}',
+          minBaselineSamples: '{{minBaselineSamples}}',
+        },
+        action: 'alert',
+      },
+    ],
+  },
+
+  // ── View Call Change — snapshot-based ───────────────────────────────
+  {
+    slug: 'chain-view-call-snapshot-change',
+    name: 'View Call Snapshot Change Monitor',
+    description:
+      'Call a read-only contract function on a schedule and alert when its return value shifts by a configurable percentage relative to a baseline of N prior readings. ' +
+      'Use this when you reason in poll counts: "did this value change by more than X% compared to the previous 12 readings?" ' +
+      'Unlike time-based detection, the window size is defined by reading count — making it predictable regardless of polling interval and resilient during startup when few readings exist.',
+    category: 'custom',
+    severity: 'high',
+    inputs: [
+      NETWORK_INPUT,
+      CONTRACT_REQUIRED_INPUT,
+      {
+        key: 'functionSignature',
+        label: 'View function signature',
+        type: 'text',
+        required: true,
+        placeholder: 'totalSupply()',
+        help: 'Read-only (view/pure) function to call periodically. Use the full Solidity signature, e.g. balanceOf(address).',
+      },
+      {
+        key: 'resultField',
+        label: 'Result field',
+        type: 'text',
+        required: false,
+        default: 'result',
+        placeholder: 'result',
+        help: 'Return value key to track. Leave as "result" for single-return functions, or use the named output parameter for multi-return functions.',
+      },
+      {
+        key: 'observationSamples',
+        label: 'Observation readings',
+        type: 'number',
+        required: true,
+        default: 3,
+        min: 1,
+        help: 'Number of most-recent poll readings to treat as the observation window. E.g. 3 readings at a 2-min poll interval = ~6 minutes of data.',
+      },
+      {
+        key: 'baselineSamples',
+        label: 'Baseline readings',
+        type: 'number',
+        required: true,
+        default: 12,
+        min: 1,
+        help: 'Number of prior poll readings (immediately before the observation window) that define the normal baseline.',
+      },
+      {
+        key: 'changePercent',
+        label: 'Change % to alert',
+        type: 'number',
+        required: true,
+        default: 50,
+        min: 1,
+        help: 'Fire an alert when the observation average deviates from the baseline average by at least this percentage.',
+      },
+      {
+        key: 'direction',
+        label: 'Direction',
+        type: 'select',
+        required: false,
+        options: [
+          { value: 'either', label: 'Either direction' },
+          { value: 'increase', label: 'Increase only' },
+          { value: 'decrease', label: 'Decrease only' },
+        ],
+        help: 'Whether to alert on increases, decreases, or any significant change.',
+      },
+      {
+        key: 'minBaselineSamples',
+        label: 'Min baseline samples',
+        type: 'number',
+        required: false,
+        default: 3,
+        min: 1,
+        help: 'Suppress alerts until the baseline window has at least this many valid readings. Prevents false positives before enough data has been collected.',
+      },
+    ],
+    rules: [
+      {
+        ruleType: 'chain.view_call_change',
+        config: {
+          functionSignature: '{{functionSignature}}',
+          resultField: '{{resultField}}',
+          windowMode: 'snapshots',
+          observationSamples: '{{observationSamples}}',
+          baselineSamples: '{{baselineSamples}}',
+          changePercent: '{{changePercent}}',
+          direction: '{{direction}}',
+          minBaselineSamples: '{{minBaselineSamples}}',
+        },
+        action: 'alert',
+      },
+    ],
+  },
+
   // ── Windowed Sum ────────────────────────────────────────────────────
   {
     slug: 'chain-transfer-volume',

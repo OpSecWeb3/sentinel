@@ -7,6 +7,7 @@ import { windowedSpikeEvaluator } from './evaluators/windowed-spike.js';
 import { balanceTrackEvaluator } from './evaluators/balance-track.js';
 import { statePollEvaluator } from './evaluators/state-poll.js';
 import { viewCallEvaluator } from './evaluators/view-call.js';
+import { viewCallChangeEvaluator } from './evaluators/view-call-change.js';
 import { windowedSumEvaluator } from './evaluators/windowed-sum.js';
 import { blockPollHandler, blockProcessHandler, statePollHandler, ruleSyncHandler, contractVerifyHandler, rpcUsageFlushHandler, blockAggregateHandler } from './handlers.js';
 import { eventTypes } from './event-types.js';
@@ -24,6 +25,7 @@ export const ChainModule: DetectionModule = {
     balanceTrackEvaluator,
     statePollEvaluator,
     viewCallEvaluator,
+    viewCallChangeEvaluator,
     windowedSumEvaluator,
   ],
   jobHandlers: [blockPollHandler, blockProcessHandler, statePollHandler, ruleSyncHandler, contractVerifyHandler, rpcUsageFlushHandler, blockAggregateHandler],

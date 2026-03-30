@@ -7,6 +7,7 @@ import { windowedSpikeEvaluator } from '../evaluators/windowed-spike.js';
 import { balanceTrackEvaluator } from '../evaluators/balance-track.js';
 import { statePollEvaluator } from '../evaluators/state-poll.js';
 import { viewCallEvaluator } from '../evaluators/view-call.js';
+import { viewCallChangeEvaluator } from '../evaluators/view-call-change.js';
 
 // ---------------------------------------------------------------------------
 // Constants — realistic blockchain values
@@ -1387,5 +1388,260 @@ describe('viewCallEvaluator', () => {
     const result = await viewCallEvaluator.evaluate(makeCtx(event, rule));
 
     expect(result).not.toBeNull();
+  });
+});
+
+// ===========================================================================
+// view-call-change evaluator
+// ===========================================================================
+
+describe('viewCallChangeEvaluator', () => {
+  const basePayload = {
+    contractAddress: CONTRACT_ADDR,
+    functionName: 'activeAttesterCount',
+    returnValues: { result: '100', '0': '100' },
+    blockNumber: '19000000',
+  };
+
+  const baseConfig = {
+    contractAddress: CONTRACT_ADDR,
+    functionSignature: 'activeAttesterCount()',
+    windowMode: 'time',
+    observationMinutes: 5,
+    baselineMinutes: 60,
+    changePercent: 50,
+    direction: 'either',
+    minBaselineSamples: 3,
+  };
+
+  // --- event / address guards ---
+
+  it('returns null for non-chain.view_call_result event type', async () => {
+    const event = makeEvent({ eventType: 'chain.log', payload: basePayload });
+    const rule = makeRule({ ruleType: 'chain.view_call_change', config: baseConfig });
+    const result = await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, makeMockRedis()));
+    expect(result).toBeNull();
+  });
+
+  it('returns null for address mismatch', async () => {
+    const event = makeEvent({
+      eventType: 'chain.view_call_result',
+      payload: { ...basePayload, contractAddress: OTHER_CONTRACT },
+    });
+    const rule = makeRule({ ruleType: 'chain.view_call_change', config: baseConfig });
+    const result = await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, makeMockRedis()));
+    expect(result).toBeNull();
+  });
+
+  // --- baseline guards (time mode) ---
+
+  it('returns null when baseline has fewer than minBaselineSamples', async () => {
+    // Only 1 baseline sample; minBaselineSamples = 3
+    const redis = makeMockRedis({
+      zrangebyscore: vi.fn()
+        .mockResolvedValueOnce(['e1:100'])  // baseline — too few
+        .mockResolvedValueOnce(['e2:200']), // obs
+    });
+    const event = makeEvent({ eventType: 'chain.view_call_result', payload: basePayload });
+    const rule = makeRule({ ruleType: 'chain.view_call_change', config: baseConfig });
+    expect(await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, redis))).toBeNull();
+  });
+
+  it('returns null when baseline average is zero (no division by zero)', async () => {
+    const redis = makeMockRedis({
+      zrangebyscore: vi.fn()
+        .mockResolvedValueOnce(['e1:0', 'e2:0', 'e3:0']) // baseline avg = 0
+        .mockResolvedValueOnce(['e4:100']),
+    });
+    const event = makeEvent({ eventType: 'chain.view_call_result', payload: basePayload });
+    const rule = makeRule({ ruleType: 'chain.view_call_change', config: baseConfig });
+    expect(await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, redis))).toBeNull();
+  });
+
+  it('returns null when observation window is empty', async () => {
+    const redis = makeMockRedis({
+      zrangebyscore: vi.fn()
+        .mockResolvedValueOnce(['e1:100', 'e2:110', 'e3:90']) // baseline — ok
+        .mockResolvedValueOnce([]),                            // obs — empty
+    });
+    const event = makeEvent({ eventType: 'chain.view_call_result', payload: basePayload });
+    const rule = makeRule({ ruleType: 'chain.view_call_change', config: baseConfig });
+    expect(await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, redis))).toBeNull();
+  });
+
+  it('returns null when percent change is below threshold', async () => {
+    // baseline avg = 100, obs avg = 110 → +10% < 50%
+    const redis = makeMockRedis({
+      zrangebyscore: vi.fn()
+        .mockResolvedValueOnce(['e1:100', 'e2:100', 'e3:100'])
+        .mockResolvedValueOnce(['e4:110']),
+    });
+    const event = makeEvent({ eventType: 'chain.view_call_result', payload: basePayload });
+    const rule = makeRule({ ruleType: 'chain.view_call_change', config: baseConfig });
+    expect(await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, redis))).toBeNull();
+  });
+
+  // --- direction: 'either' ---
+
+  it('triggers (direction: either) when value increases past threshold', async () => {
+    // baseline avg = 100, obs avg = 200 → +100% ≥ 50%
+    const redis = makeMockRedis({
+      zrangebyscore: vi.fn()
+        .mockResolvedValueOnce(['e1:100', 'e2:100', 'e3:100'])
+        .mockResolvedValueOnce(['e4:200']),
+    });
+    const event = makeEvent({ eventType: 'chain.view_call_result', payload: basePayload });
+    const rule = makeRule({ ruleType: 'chain.view_call_change', config: baseConfig });
+    const result = await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, redis));
+
+    expect(result).not.toBeNull();
+    expect(result!.triggerType).toBe('windowed');
+    expect(result!.triggerData.type).toBe('view-call-change');
+    expect(result!.triggerData.percentChange).toBeGreaterThanOrEqual(50);
+    expect(result!.triggerData.currentAvg).toBe('200');
+    expect(result!.triggerData.baselineAvg).toBe('100');
+    expect(result!.triggerData.observationCount).toBe(1);
+    expect(result!.triggerData.baselineCount).toBe(3);
+    expect(result!.triggerData.windowMode).toBe('time');
+    expect(result!.triggerData.observationMinutes).toBe(5);
+    expect(result!.triggerData.baselineMinutes).toBe(60);
+  });
+
+  it('triggers (direction: either) when value decreases past threshold', async () => {
+    // baseline avg = 100, obs avg = 40 → -60% → |−60%| ≥ 50%
+    const redis = makeMockRedis({
+      zrangebyscore: vi.fn()
+        .mockResolvedValueOnce(['e1:100', 'e2:100', 'e3:100'])
+        .mockResolvedValueOnce(['e4:40']),
+    });
+    const event = makeEvent({ eventType: 'chain.view_call_result', payload: basePayload });
+    const rule = makeRule({ ruleType: 'chain.view_call_change', config: baseConfig });
+    const result = await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, redis));
+
+    expect(result).not.toBeNull();
+    expect(result!.triggerData.percentChange).toBeLessThanOrEqual(-50);
+    expect(result!.triggerData.currentAvg).toBe('40');
+    expect(result!.triggerData.baselineAvg).toBe('100');
+  });
+
+  // --- direction: 'increase' ---
+
+  it('triggers (direction: increase) when value increases past threshold', async () => {
+    const redis = makeMockRedis({
+      zrangebyscore: vi.fn()
+        .mockResolvedValueOnce(['e1:100', 'e2:100', 'e3:100'])
+        .mockResolvedValueOnce(['e4:200']),
+    });
+    const event = makeEvent({ eventType: 'chain.view_call_result', payload: basePayload });
+    const rule = makeRule({
+      ruleType: 'chain.view_call_change',
+      config: { ...baseConfig, direction: 'increase' },
+    });
+    const result = await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, redis));
+    expect(result).not.toBeNull();
+    expect(result!.triggerData.percentChange).toBeGreaterThanOrEqual(50);
+  });
+
+  it('does NOT trigger (direction: increase) when value decreases', async () => {
+    // -60% change, but direction only fires on increases
+    const redis = makeMockRedis({
+      zrangebyscore: vi.fn()
+        .mockResolvedValueOnce(['e1:100', 'e2:100', 'e3:100'])
+        .mockResolvedValueOnce(['e4:40']),
+    });
+    const event = makeEvent({ eventType: 'chain.view_call_result', payload: basePayload });
+    const rule = makeRule({
+      ruleType: 'chain.view_call_change',
+      config: { ...baseConfig, direction: 'increase' },
+    });
+    expect(await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, redis))).toBeNull();
+  });
+
+  // --- direction: 'decrease' ---
+
+  it('triggers (direction: decrease) when value decreases past threshold', async () => {
+    const redis = makeMockRedis({
+      zrangebyscore: vi.fn()
+        .mockResolvedValueOnce(['e1:100', 'e2:100', 'e3:100'])
+        .mockResolvedValueOnce(['e4:40']),
+    });
+    const event = makeEvent({ eventType: 'chain.view_call_result', payload: basePayload });
+    const rule = makeRule({
+      ruleType: 'chain.view_call_change',
+      config: { ...baseConfig, direction: 'decrease' },
+    });
+    const result = await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, redis));
+    expect(result).not.toBeNull();
+    expect(result!.triggerData.percentChange).toBeLessThanOrEqual(-50);
+  });
+
+  it('does NOT trigger (direction: decrease) when value increases', async () => {
+    const redis = makeMockRedis({
+      zrangebyscore: vi.fn()
+        .mockResolvedValueOnce(['e1:100', 'e2:100', 'e3:100'])
+        .mockResolvedValueOnce(['e4:200']),
+    });
+    const event = makeEvent({ eventType: 'chain.view_call_result', payload: basePayload });
+    const rule = makeRule({
+      ruleType: 'chain.view_call_change',
+      config: { ...baseConfig, direction: 'decrease' },
+    });
+    expect(await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, redis))).toBeNull();
+  });
+
+  // --- snapshots mode ---
+
+  it('triggers in snapshots mode when value increases past threshold', async () => {
+    // all = [e1:100, e2:90, e3:110, e4:200, e5:180]
+    // observationSamples=2 → obs = [e4:200, e5:180] → avg = 190
+    // baselineSamples=3   → baseline = [e1:100, e2:90, e3:110] → avg = 100
+    // percentChange = +90% ≥ 50% → triggered
+    const redis = makeMockRedis({
+      zrangebyscore: vi.fn().mockResolvedValueOnce([
+        'e1:100', 'e2:90', 'e3:110', 'e4:200', 'e5:180',
+      ]),
+    });
+    const event = makeEvent({ eventType: 'chain.view_call_result', payload: basePayload });
+    const rule = makeRule({
+      ruleType: 'chain.view_call_change',
+      config: {
+        ...baseConfig,
+        windowMode: 'snapshots',
+        observationSamples: 2,
+        baselineSamples: 3,
+        minBaselineSamples: 3,
+        direction: 'increase',
+      },
+    });
+    const result = await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, redis));
+
+    expect(result).not.toBeNull();
+    expect(result!.triggerData.currentAvg).toBe('190');
+    expect(result!.triggerData.baselineAvg).toBe('100');
+    expect(result!.triggerData.percentChange).toBeCloseTo(90);
+    expect(result!.triggerData.observationCount).toBe(2);
+    expect(result!.triggerData.baselineCount).toBe(3);
+    expect(result!.triggerData.windowMode).toBe('snapshots');
+    expect(result!.triggerData.observationSamples).toBe(2);
+    expect(result!.triggerData.baselineSamples).toBe(3);
+  });
+
+  it('returns null in snapshots mode when insufficient baseline readings', async () => {
+    // only 2 total readings, observationSamples=2 → baseline is empty → 0 < minBaselineSamples(3)
+    const redis = makeMockRedis({
+      zrangebyscore: vi.fn().mockResolvedValueOnce(['e1:100', 'e2:200']),
+    });
+    const event = makeEvent({ eventType: 'chain.view_call_result', payload: basePayload });
+    const rule = makeRule({
+      ruleType: 'chain.view_call_change',
+      config: {
+        ...baseConfig,
+        windowMode: 'snapshots',
+        observationSamples: 2,
+        baselineSamples: 3,
+        minBaselineSamples: 3,
+      },
+    });
+    expect(await viewCallChangeEvaluator.evaluate(makeCtx(event, rule, redis))).toBeNull();
   });
 });
