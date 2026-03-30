@@ -260,7 +260,9 @@ router.post('/', requireRole('admin', 'editor'), requireScope('api:write'), vali
       slackChannelId: body.slackChannelId,
       slackChannelName: body.slackChannelName,
       cooldownMinutes: body.cooldownMinutes,
-      config: body.config,
+      config: Object.keys(body.config).length > 0
+        ? body.config
+        : body.rules.reduce<Record<string, unknown>>((acc, r) => ({ ...acc, ...r.config }), {}),
     }).returning();
 
     const ruleRows = await tx.insert(rules).values(
