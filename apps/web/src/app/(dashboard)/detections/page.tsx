@@ -94,7 +94,7 @@ export default function DetectionsPage() {
   const [loading, setLoading] = useState(true);
   const showLoading = useDelayedLoading(loading);
   const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("active");
   const [severityFilter, setSeverityFilter] = useState<string>("all");
   const [moduleFilter, setModuleFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");

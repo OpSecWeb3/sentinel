@@ -151,7 +151,7 @@ describe('eventMatchEvaluator', () => {
       },
     });
     const rule = makeRule({
-      config: { topic0: TRANSFER_TOPIC0, conditions: [] },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: DAI_ADDR, conditions: [] },
     });
     const ctx = makeCtx(event, rule);
     const result = await eventMatchEvaluator.evaluate(ctx);
@@ -176,6 +176,7 @@ describe('eventMatchEvaluator', () => {
     const rule = makeRule({
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         conditions: [{ field: 'value', operator: '>', value: ONE_MILLION_ETH }],
       },
     });
@@ -198,6 +199,7 @@ describe('eventMatchEvaluator', () => {
     const rule = makeRule({
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: USDC_ADDR,
         conditions: [{ field: 'to', operator: '==', value: BLACKLISTED }],
       },
     });
@@ -239,6 +241,7 @@ describe('eventMatchEvaluator', () => {
     const rule = makeRule({
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         conditions: [
           { field: 'to', operator: '==', value: BOB },
           { field: 'value', operator: '>', value: ONE_MILLION_ETH },
@@ -263,6 +266,7 @@ describe('eventMatchEvaluator', () => {
     const rule = makeRule({
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         conditions: [{ field: 'from', operator: '==', value: ALICE }],
       },
     });
@@ -284,6 +288,7 @@ describe('eventMatchEvaluator', () => {
     const rule = makeRule({
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         conditions: [{ field: 'value', operator: '>=', value: '99999999999999999999999999999' }],
       },
     });
@@ -304,6 +309,7 @@ describe('eventMatchEvaluator', () => {
     const rule = makeRule({
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         conditions: [{ field: 'value', operator: '==', value: '0' }],
       },
     });
@@ -343,7 +349,7 @@ describe('eventMatchEvaluator', () => {
       },
     });
     const rule = makeRule({
-      config: { topic0: TRANSFER_TOPIC0, conditions: [] },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: DAI_ADDR, conditions: [] },
     });
     const result = await eventMatchEvaluator.evaluate(makeCtx(event, rule));
     expect(result).toBeNull();
@@ -360,7 +366,7 @@ describe('eventMatchEvaluator', () => {
       },
     });
     const rule = makeRule({
-      config: { topic0: APPROVAL_TOPIC0, conditions: [] },
+      config: { topic0: APPROVAL_TOPIC0, contractAddress: DAI_ADDR, conditions: [] },
     });
     const result = await eventMatchEvaluator.evaluate(makeCtx(event, rule));
     expect(result).not.toBeNull();
@@ -378,7 +384,7 @@ describe('eventMatchEvaluator', () => {
       },
     });
     const rule = makeRule({
-      config: { topic0: OWNERSHIP_TRANSFERRED_TOPIC0, conditions: [] },
+      config: { topic0: OWNERSHIP_TRANSFERRED_TOPIC0, contractAddress: PROXY_ADDR, conditions: [] },
     });
     const result = await eventMatchEvaluator.evaluate(makeCtx(event, rule));
     expect(result).not.toBeNull();
@@ -396,7 +402,7 @@ describe('eventMatchEvaluator', () => {
       },
     });
     const rule = makeRule({
-      config: { topic0: TRANSFER_TOPIC0.toLowerCase(), conditions: [] },
+      config: { topic0: TRANSFER_TOPIC0.toLowerCase(), contractAddress: DAI_ADDR, conditions: [] },
     });
     const result = await eventMatchEvaluator.evaluate(makeCtx(event, rule));
     expect(result).not.toBeNull();
@@ -408,7 +414,7 @@ describe('eventMatchEvaluator', () => {
       payload: { address: DAI_ADDR },
     });
     const rule = makeRule({
-      config: { topic0: TRANSFER_TOPIC0, conditions: [] },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: DAI_ADDR, conditions: [] },
     });
     const result = await eventMatchEvaluator.evaluate(makeCtx(event, rule));
     expect(result).toBeNull();
@@ -427,6 +433,7 @@ describe('eventMatchEvaluator', () => {
     const rule = makeRule({
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         conditions: [{ field: 'to', operator: '!=', value: CHARLIE }],
       },
     });
@@ -445,7 +452,7 @@ describe('eventMatchEvaluator', () => {
       },
     });
     const rule = makeRule({
-      config: { topic0: TRANSFER_TOPIC0, conditions: [] },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: DAI_ADDR, conditions: [] },
     });
     const result = await eventMatchEvaluator.evaluate(makeCtx(event, rule));
     expect(result).not.toBeNull();
@@ -474,7 +481,7 @@ describe('eventMatchEvaluator', () => {
       },
     });
     const rule = makeRule({
-      config: { topic0: TRANSFER_TOPIC0, conditions: [] },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: DAI_ADDR, conditions: [] },
     });
     const r1 = await eventMatchEvaluator.evaluate(makeCtx(evt1, rule));
     const r2 = await eventMatchEvaluator.evaluate(makeCtx(evt2, rule));
@@ -536,6 +543,7 @@ describe('eventMatchEvaluator', () => {
     const rule = makeRule({
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         conditions: [{ field: 'nonExistentField', operator: '>', value: '0' }],
       },
     });
@@ -561,6 +569,7 @@ describe('eventMatchEvaluator', () => {
     const rule = makeRule({
       config: {
         topic0: customTopic0,
+        contractAddress: DAI_ADDR,
         conditions: [
           { field: 'amount', operator: '>=', value: ONE_ETH },
           { field: 'user', operator: '==', value: ALICE },
@@ -971,6 +980,7 @@ describe('windowedCountEvaluator', () => {
       ruleType: 'chain.windowed_count',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         windowMinutes: 10,
         threshold: 20,
       },
@@ -995,6 +1005,7 @@ describe('windowedCountEvaluator', () => {
       ruleType: 'chain.windowed_count',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         windowMinutes: 60,
         threshold: 5,
       },
@@ -1017,6 +1028,7 @@ describe('windowedCountEvaluator', () => {
       ruleType: 'chain.windowed_count',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         windowMinutes: 60,
         threshold: 5,
       },
@@ -1039,6 +1051,7 @@ describe('windowedCountEvaluator', () => {
       ruleType: 'chain.windowed_count',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         windowMinutes: 10,
         threshold: 100,
       },
@@ -1066,6 +1079,7 @@ describe('windowedCountEvaluator', () => {
       ruleType: 'chain.windowed_count',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         windowMinutes: 10,
         threshold: 5,
         groupByField: 'to',
@@ -1091,6 +1105,7 @@ describe('windowedCountEvaluator', () => {
       ruleType: 'chain.windowed_count',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         windowMinutes: 1,
         threshold: 10,
       },
@@ -1114,6 +1129,7 @@ describe('windowedCountEvaluator', () => {
       ruleType: 'chain.windowed_count',
       config: {
         topic0: MINT_TOPIC0,
+        contractAddress: DAI_ADDR,
         windowMinutes: 1,
         threshold: 50,
       },
@@ -1138,6 +1154,7 @@ describe('windowedCountEvaluator', () => {
       ruleType: 'chain.windowed_count',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         windowMinutes: 1,
         threshold: 20,
       },
@@ -1160,6 +1177,7 @@ describe('windowedCountEvaluator', () => {
       ruleType: 'chain.windowed_count',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         windowMinutes: 60,
         threshold: 1,
       },
@@ -1182,6 +1200,7 @@ describe('windowedCountEvaluator', () => {
       ruleType: 'chain.windowed_count',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         windowMinutes: 1440,
         threshold: 1000,
       },
@@ -1205,6 +1224,7 @@ describe('windowedCountEvaluator', () => {
       ruleType: 'chain.windowed_count',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         windowMinutes: 10,
         threshold: 5,
       },
@@ -1228,6 +1248,7 @@ describe('windowedCountEvaluator', () => {
       ruleType: 'chain.windowed_count',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         windowMinutes: 10,
         threshold: 5,
         groupByField: 'from',
@@ -1251,12 +1272,12 @@ describe('windowedCountEvaluator', () => {
     const rule1 = makeRule({
       id: 'rule-a',
       ruleType: 'chain.windowed_count',
-      config: { topic0: TRANSFER_TOPIC0, windowMinutes: 5, threshold: 5 },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: DAI_ADDR, windowMinutes: 5, threshold: 5 },
     });
     const rule2 = makeRule({
       id: 'rule-b',
       ruleType: 'chain.windowed_count',
-      config: { topic0: TRANSFER_TOPIC0, windowMinutes: 5, threshold: 5 },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: DAI_ADDR, windowMinutes: 5, threshold: 5 },
     });
     await windowedCountEvaluator.evaluate({ event, rule: rule1, redis });
     await windowedCountEvaluator.evaluate({ event, rule: rule2, redis });
@@ -1278,7 +1299,7 @@ describe('windowedCountEvaluator', () => {
     });
     const rule = makeRule({
       ruleType: 'chain.windowed_count',
-      config: { topic0: TRANSFER_TOPIC0, windowMinutes: 10, threshold: 100 },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: DAI_ADDR, windowMinutes: 10, threshold: 100 },
     });
     await windowedCountEvaluator.evaluate({ event, rule, redis });
     expect(redis.pexpire).toHaveBeenCalledWith(
@@ -1299,7 +1320,7 @@ describe('windowedCountEvaluator', () => {
     });
     const rule = makeRule({
       ruleType: 'chain.windowed_count',
-      config: { topic0: TRANSFER_TOPIC0, windowMinutes: 10, threshold: 5 },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: DAI_ADDR, windowMinutes: 10, threshold: 5 },
     });
     const result = await windowedCountEvaluator.evaluate({ event, rule, redis });
     expect(result).toBeNull();
@@ -1332,6 +1353,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -1365,6 +1387,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -1393,6 +1416,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 100,
@@ -1424,6 +1448,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -1455,6 +1480,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: WETH_ADDR,
         observationMinutes: 5,
         baselineMinutes: 120,
         increasePercent: 1000,
@@ -1485,6 +1511,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -1517,6 +1544,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         observationMinutes: 2,
         baselineMinutes: 60,
         increasePercent: 300,
@@ -1548,6 +1576,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -1579,6 +1608,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -1607,6 +1637,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 100,
@@ -1638,6 +1669,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -1662,6 +1694,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -2503,6 +2536,7 @@ describe('windowedSumEvaluator', () => {
       ruleType: 'chain.windowed_sum',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         sumField: 'value',
         windowMinutes: 60,
         threshold: ONE_MILLION_ETH,
@@ -2535,6 +2569,7 @@ describe('windowedSumEvaluator', () => {
       ruleType: 'chain.windowed_sum',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         sumField: 'value',
         windowMinutes: 60,
         threshold: ONE_MILLION_ETH,
@@ -2565,6 +2600,7 @@ describe('windowedSumEvaluator', () => {
       ruleType: 'chain.windowed_sum',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         sumField: 'value',
         windowMinutes: 60,
         threshold: ONE_MILLION_ETH,
@@ -2595,6 +2631,7 @@ describe('windowedSumEvaluator', () => {
       ruleType: 'chain.windowed_sum',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         sumField: 'value',
         windowMinutes: 60,
         threshold: '1000',
@@ -2625,6 +2662,7 @@ describe('windowedSumEvaluator', () => {
       ruleType: 'chain.windowed_sum',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         sumField: 'value',
         windowMinutes: 60,
         threshold: ONE_MILLION_ETH,
@@ -2659,6 +2697,7 @@ describe('windowedSumEvaluator', () => {
       ruleType: 'chain.windowed_sum',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         sumField: 'value',
         windowMinutes: 60,
         threshold: largeVal, // sum of 2x should be > 1x
@@ -2686,6 +2725,7 @@ describe('windowedSumEvaluator', () => {
       ruleType: 'chain.windowed_sum',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         sumField: 'value',
         windowMinutes: 10,
         threshold: '10000',
@@ -2718,6 +2758,7 @@ describe('windowedSumEvaluator', () => {
       ruleType: 'chain.windowed_sum',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         sumField: 'value',
         windowMinutes: 60,
         threshold: '999', // sum = 1000 > 999
@@ -2749,6 +2790,7 @@ describe('windowedSumEvaluator', () => {
       ruleType: 'chain.windowed_sum',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         sumField: 'value',
         windowMinutes: 60,
         threshold: '500000000000000000000000', // 500k ETH
@@ -2780,6 +2822,7 @@ describe('windowedSumEvaluator', () => {
       ruleType: 'chain.windowed_sum',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         sumField: 'value',
         windowMinutes: 60,
         threshold: '1',
@@ -2805,6 +2848,7 @@ describe('windowedSumEvaluator', () => {
       ruleType: 'chain.windowed_sum',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         sumField: 'value',
         windowMinutes: 60,
         threshold: '100',
@@ -2830,6 +2874,7 @@ describe('windowedSumEvaluator', () => {
       ruleType: 'chain.windowed_sum',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         sumField: 'value',
         windowMinutes: 60,
         threshold: '100',
@@ -2860,6 +2905,7 @@ describe('windowedSumEvaluator', () => {
       ruleType: 'chain.windowed_sum',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: DAI_ADDR,
         sumField: 'value',
         windowMinutes: 60,
         threshold: '1000', // sum = 1000 <= 1000

@@ -150,6 +150,10 @@ async function validatePrerequisites(
     }
 
     const contractAddress = (config.contractAddress as string) ?? ruleConfigs.find((r) => r.contractAddress)?.contractAddress as string | undefined;
+    if (!contractAddress) {
+      return { ok: false, error: 'Contract address is required for chain detections.' };
+    }
+
     const contractId = (config.contractId as number) ?? ruleConfigs.find((r) => r.contractId)?.contractId as number | undefined;
 
     if (contractId) {
@@ -165,6 +169,29 @@ async function validatePrerequisites(
   }
 
   return { ok: true, warnings: warnings.length > 0 ? warnings : undefined };
+}
+
+/**
+ * For chain rules, resolve networkId (chainId) → networkSlug and inject it
+ * into rule configs so loaders can filter by either field.
+ */
+async function injectNetworkSlugIntoChainConfigs(
+  moduleId: string,
+  configs: Record<string, unknown>[],
+): Promise<void> {
+  if (moduleId !== 'chain') return;
+  const networkId = configs.find(c => c.networkId !== undefined)?.networkId;
+  if (!networkId) return;
+  const db = getDb();
+  const [network] = await db
+    .select({ slug: chainNetworks.slug })
+    .from(chainNetworks)
+    .where(eq(chainNetworks.chainId, Number(networkId)))
+    .limit(1);
+  if (!network) return;
+  for (const c of configs) {
+    if (!c.networkSlug) c.networkSlug = network.slug;
+  }
 }
 
 const router = new Hono<AppEnv>();
@@ -552,6 +579,7 @@ router.patch('/:id', requireRole('admin', 'editor'), requireScope('api:write'), 
     const inputsMap = buildEffectiveTemplateInputs(template, body.inputs ?? {});
     const patchBuiltConfigs = template.rules.map((r) => applyTemplateInputs(r.config, inputsMap));
     finalizeTemplateRuleConfigs(patchBuiltConfigs);
+    await injectNetworkSlugIntoChainConfigs(existing.moduleId, patchBuiltConfigs);
     const patchUnresolved = filterUnresolvedForTemplate(findUnresolvedPlaceholders(patchBuiltConfigs), template);
     if (patchUnresolved.length > 0) {
       return c.json({ error: `Missing required inputs: ${patchUnresolved.join(', ')}` }, 400);
@@ -804,6 +832,7 @@ router.post('/from-template', requireRole('admin', 'editor'), requireScope('api:
   const effectiveInputs = buildEffectiveTemplateInputs(template, body.inputs);
   const builtConfigs = template.rules.map((r) => applyTemplateInputs(r.config, effectiveInputs));
   finalizeTemplateRuleConfigs(builtConfigs);
+  await injectNetworkSlugIntoChainConfigs(body.moduleId, builtConfigs);
   const unresolved = filterUnresolvedForTemplate(findUnresolvedPlaceholders(builtConfigs), template);
   if (unresolved.length > 0) {
     return c.json({ error: `Missing required inputs: ${unresolved.join(', ')}` }, 400);

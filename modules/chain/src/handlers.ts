@@ -909,9 +909,14 @@ async function loadActiveEventRules(
   return rows.flatMap((r) => {
     const config = r.config as Record<string, unknown>;
     const cfgNetworkId = config.networkId !== undefined ? Number(config.networkId) : undefined;
+    const cfgNetworkSlug = config.networkSlug as string | undefined;
 
-    // Filter to the requested network by chainId (config stores Ethereum chainId, not DB row ID)
-    if (cfgNetworkId !== undefined && cfgNetworkId !== chainId) return [];
+    // Filter to the requested network by chainId or slug
+    if (cfgNetworkId !== undefined) {
+      if (cfgNetworkId !== chainId) return [];
+    } else if (cfgNetworkSlug) {
+      if (cfgNetworkSlug !== networkSlug) return [];
+    }
 
     let topic0 = (config.topic0 as string)?.toLowerCase();
     if (!topic0 && config.eventSignature) {
@@ -953,6 +958,12 @@ async function loadActiveEventRules(
       }
     }
 
+    const contractAddress = (config.contractAddress as string | undefined)?.toLowerCase();
+    if (!contractAddress) {
+      log.warn({ ruleId: r.id }, 'event rule has no contractAddress, skipping');
+      return [];
+    }
+
     return [
       {
         id: r.id,
@@ -961,7 +972,7 @@ async function loadActiveEventRules(
         networkSlug,
         chainId,
         topic0,
-        contractAddress: ((config.contractAddress ?? config.contract_address) as string | undefined)?.toLowerCase(),
+        contractAddress,
         conditions,
         window: config.window_config
           ? {
@@ -1005,9 +1016,14 @@ async function loadActiveFnCallRules(
   return rows.flatMap((r) => {
     const config = r.config as Record<string, unknown>;
     const cfgNetworkId = config.networkId !== undefined ? Number(config.networkId) : undefined;
-    // config.networkId stores the Ethereum chain ID (e.g. 1 for mainnet), not the DB row ID.
-    // Compare against chainId, not networkId (which is the DB sequential primary key).
-    if (cfgNetworkId !== undefined && cfgNetworkId !== chainId) return [];
+    const cfgNetworkSlug = config.networkSlug as string | undefined;
+
+    // Filter to the requested network by chainId or slug
+    if (cfgNetworkId !== undefined) {
+      if (cfgNetworkId !== chainId) return [];
+    } else if (cfgNetworkSlug) {
+      if (cfgNetworkSlug !== networkSlug) return [];
+    }
 
     const functionSignature = config.functionSignature as string | undefined;
     if (!functionSignature) {
@@ -1017,7 +1033,7 @@ async function loadActiveFnCallRules(
 
     // The selector should be pre-computed and stored in the rule config
     const selector = (config.selector as string)?.toLowerCase() ?? computeSelector(functionSignature);
-    const contractAddr = (config.contract_address as string)?.toLowerCase();
+    const contractAddr = (config.contractAddress as string | undefined)?.toLowerCase();
 
     if (!contractAddr) {
       log.warn({ ruleId: r.id }, 'fn-call rule has no contract address, skipping');

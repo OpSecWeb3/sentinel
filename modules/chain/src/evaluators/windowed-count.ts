@@ -11,8 +11,8 @@ const configSchema = z.object({
   eventSignature: z.string().optional(),
   /** Pre-computed topic0 */
   topic0: z.string().optional(),
-  /** Optional contract address filter */
-  contractAddress: z.string().optional(),
+  /** Contract address filter (lowercase hex) */
+  contractAddress: z.string(),
   /** Sliding window duration in minutes */
   windowMinutes: z.coerce.number().default(60),
   /** Threshold count that must be reached or exceeded to trigger */

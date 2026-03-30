@@ -1309,6 +1309,12 @@ chainRouter.post('/detections', async (c) => {
     return c.json({ error: 'Validation error', details: parsed.error.flatten() }, 400);
   }
 
+  // Every chain rule must specify a contract address — global rules are not supported
+  const missingContract = parsed.data.rules.find((r) => !r.config.contractAddress);
+  if (missingContract) {
+    return c.json({ error: 'Contract address is required for all chain rules.' }, 400);
+  }
+
   const db = getDb();
 
   // Insert detection

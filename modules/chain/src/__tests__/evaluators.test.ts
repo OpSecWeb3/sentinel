@@ -103,7 +103,7 @@ describe('eventMatchEvaluator', () => {
     });
     const rule = makeRule({
       ruleType: 'chain.event_match',
-      config: { topic0: TRANSFER_TOPIC0 },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: CONTRACT_ADDR },
     });
     const result = await eventMatchEvaluator.evaluate(makeCtx(event, rule));
 
@@ -131,7 +131,7 @@ describe('eventMatchEvaluator', () => {
     });
     const rule = makeRule({
       ruleType: 'chain.event_match',
-      config: { topic0: TRANSFER_TOPIC0 },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: CONTRACT_ADDR },
     });
     const result = await eventMatchEvaluator.evaluate(makeCtx(event, rule));
 
@@ -190,6 +190,7 @@ describe('eventMatchEvaluator', () => {
       ruleType: 'chain.event_match',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         conditions: [{ field: 'value', operator: '>', value: '1000000000000000000' }],
       },
     });
@@ -212,6 +213,7 @@ describe('eventMatchEvaluator', () => {
       ruleType: 'chain.event_match',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         conditions: [{ field: 'value', operator: '<', value: '1000' }],
       },
     });
@@ -234,6 +236,7 @@ describe('eventMatchEvaluator', () => {
       ruleType: 'chain.event_match',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         conditions: [{ field: 'value', operator: '>=', value: '1000' }],
       },
     });
@@ -256,6 +259,7 @@ describe('eventMatchEvaluator', () => {
       ruleType: 'chain.event_match',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         conditions: [{ field: 'value', operator: '<=', value: '1000' }],
       },
     });
@@ -278,6 +282,7 @@ describe('eventMatchEvaluator', () => {
       ruleType: 'chain.event_match',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         conditions: [{ field: 'to', operator: '==', value: BOB_ADDR.toUpperCase() }],
       },
     });
@@ -300,6 +305,7 @@ describe('eventMatchEvaluator', () => {
       ruleType: 'chain.event_match',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         conditions: [{ field: 'to', operator: '!=', value: ALICE_ADDR }],
       },
     });
@@ -322,6 +328,7 @@ describe('eventMatchEvaluator', () => {
       ruleType: 'chain.event_match',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         conditions: [
           { field: 'to', operator: '==', value: BOB_ADDR },
           { field: 'value', operator: '>', value: '1000000000000000000' },
@@ -347,6 +354,7 @@ describe('eventMatchEvaluator', () => {
       ruleType: 'chain.event_match',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         conditions: [
           { field: 'to', operator: '==', value: BOB_ADDR },
           { field: 'value', operator: '>', value: '1000000000000000000' },
@@ -372,6 +380,7 @@ describe('eventMatchEvaluator', () => {
       ruleType: 'chain.event_match',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         conditions: [{ field: 'nonExistentField', operator: '>', value: '100' }],
       },
     });
@@ -390,7 +399,7 @@ describe('eventMatchEvaluator', () => {
     });
     const rule = makeRule({
       ruleType: 'chain.event_match',
-      config: { topic0: TRANSFER_TOPIC0 },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: CONTRACT_ADDR },
     });
     const result = await eventMatchEvaluator.evaluate(makeCtx(event, rule));
 
@@ -566,7 +575,7 @@ describe('windowedCountEvaluator', () => {
     const event = makeEvent({ eventType: 'chain.log', payload: baseLogPayload });
     const rule = makeRule({
       ruleType: 'chain.windowed_count',
-      config: { topic0: TRANSFER_TOPIC0, windowMinutes: 60, threshold: 5 },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: CONTRACT_ADDR, windowMinutes: 60, threshold: 5 },
     });
     const result = await windowedCountEvaluator.evaluate(makeCtx(event, rule, redis));
 
@@ -580,7 +589,7 @@ describe('windowedCountEvaluator', () => {
     const event = makeEvent({ eventType: 'chain.log', payload: baseLogPayload });
     const rule = makeRule({
       ruleType: 'chain.windowed_count',
-      config: { topic0: TRANSFER_TOPIC0, windowMinutes: 60, threshold: 5 },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: CONTRACT_ADDR, windowMinutes: 60, threshold: 5 },
     });
     const result = await windowedCountEvaluator.evaluate(makeCtx(event, rule, redis));
 
@@ -609,6 +618,7 @@ describe('windowedCountEvaluator', () => {
       ruleType: 'chain.windowed_count',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         windowMinutes: 10,
         threshold: 3,
         groupByField: 'to',
@@ -630,7 +640,7 @@ describe('windowedCountEvaluator', () => {
     const event = makeEvent({ eventType: 'chain.log', payload: baseLogPayload });
     const rule = makeRule({
       ruleType: 'chain.windowed_count',
-      config: { topic0: TRANSFER_TOPIC0, windowMinutes: 30, threshold: 5 },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: CONTRACT_ADDR, windowMinutes: 30, threshold: 5 },
     });
     await windowedCountEvaluator.evaluate(makeCtx(event, rule, redis));
 
@@ -647,7 +657,7 @@ describe('windowedCountEvaluator', () => {
     const event = makeEvent({ eventType: 'chain.transaction', payload: baseLogPayload });
     const rule = makeRule({
       ruleType: 'chain.windowed_count',
-      config: { topic0: TRANSFER_TOPIC0, windowMinutes: 60, threshold: 5 },
+      config: { topic0: TRANSFER_TOPIC0, contractAddress: CONTRACT_ADDR, windowMinutes: 60, threshold: 5 },
     });
     const result = await windowedCountEvaluator.evaluate(makeCtx(event, rule, redis));
 
@@ -685,6 +695,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -713,6 +724,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -736,6 +748,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -766,6 +779,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,
@@ -788,6 +802,7 @@ describe('windowedSpikeEvaluator', () => {
       ruleType: 'chain.windowed_spike',
       config: {
         topic0: TRANSFER_TOPIC0,
+        contractAddress: CONTRACT_ADDR,
         observationMinutes: 5,
         baselineMinutes: 60,
         increasePercent: 200,

@@ -112,6 +112,7 @@ function buildRulesFromTemplate(
   networkSlug: string,
   contractAddress: string,
   inputs: Record<string, string>,
+  networkChainId?: number,
 ): Rule[] {
   switch (templateSlug) {
     case "chain-large-transfer":
@@ -120,7 +121,8 @@ function buildRulesFromTemplate(
           ruleType: "chain.event_match",
           config: {
             networkSlug,
-            contractAddress: contractAddress || undefined,
+            networkId: networkChainId,
+            contractAddress,
             eventSignature: "Transfer(address,address,uint256)",
             eventName: "Transfer",
             conditions: inputs.threshold
@@ -137,7 +139,8 @@ function buildRulesFromTemplate(
           ruleType: "chain.event_match",
           config: {
             networkSlug,
-            contractAddress: contractAddress || undefined,
+            networkId: networkChainId,
+            contractAddress,
             eventSignature: "OwnershipTransferred(address,address)",
             eventName: "OwnershipTransferred",
             conditions: [],
@@ -152,7 +155,8 @@ function buildRulesFromTemplate(
           ruleType: "chain.windowed_count",
           config: {
             networkSlug,
-            contractAddress: contractAddress || undefined,
+            networkId: networkChainId,
+            contractAddress,
             eventSignature: "Transfer(address,address,uint256)",
             eventName: "Transfer",
             windowMinutes: Number(inputs.windowMinutes ?? 60),
@@ -164,6 +168,22 @@ function buildRulesFromTemplate(
           action: "alert",
           priority: 10,
         },
+        {
+          ruleType: "chain.balance_track",
+          config: {
+            networkSlug,
+            networkId: networkChainId,
+            contractAddress,
+            asset: inputs.tokenAddress || "",
+            windowMinutes: Number(inputs.windowMinutes ?? 60),
+            condition: {
+              type: "percent_change",
+              value: Number(inputs.dropPercent ?? 20),
+            },
+          },
+          action: "alert",
+          priority: 20,
+        },
       ];
     case "chain-proxy-upgrade":
       return [
@@ -171,7 +191,8 @@ function buildRulesFromTemplate(
           ruleType: "chain.event_match",
           config: {
             networkSlug,
-            contractAddress: contractAddress || undefined,
+            networkId: networkChainId,
+            contractAddress,
             eventSignature: "Upgraded(address)",
             eventName: "Upgraded",
             conditions: [],
@@ -186,7 +207,8 @@ function buildRulesFromTemplate(
           ruleType: inputs.ruleType || "chain.event_match",
           config: {
             networkSlug,
-            contractAddress: contractAddress || undefined,
+            networkId: networkChainId,
+            contractAddress,
             eventSignature: inputs.eventSignature || undefined,
           },
           action: "alert",
@@ -344,15 +366,21 @@ export default function ChainDetectionsPage() {
       toast("Network is required");
       return;
     }
+    if (!contractAddress.trim()) {
+      toast("Contract address is required");
+      return;
+    }
 
     const networkObj = networks.find((n) => String(n.id) === selectedNetwork);
     const networkSlug = networkObj?.slug ?? selectedNetwork;
+    const networkChainId = networkObj?.chainId;
 
     const rules = buildRulesFromTemplate(
       selectedTemplate,
       networkSlug,
       contractAddress,
       templateInputs,
+      networkChainId,
     );
 
     setSubmitting(true);

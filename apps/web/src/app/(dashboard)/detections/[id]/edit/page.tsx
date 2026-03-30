@@ -456,7 +456,7 @@ export default function EditDetectionPage() {
               options={[
                 { value: "", label: "select network..." },
                 ...networks.map((n) => ({
-                  value: String(n.id),
+                  value: String(n.chainId),
                   label: `${n.name} (chainId: ${n.chainId})`,
                 })),
               ]}
@@ -623,7 +623,7 @@ export default function EditDetectionPage() {
               options={[
                 { value: "", label: "select network..." },
                 ...networks.map((n) => ({
-                  value: String(n.id),
+                  value: String(n.chainId),
                   label: `${n.name} (chainId: ${n.chainId})`,
                 })),
               ]}

@@ -11,8 +11,8 @@ const configSchema = z.object({
   eventSignature: z.string().optional(),
   /** Pre-computed topic0 */
   topic0: z.string().optional(),
-  /** Optional contract address filter */
-  contractAddress: z.string().optional(),
+  /** Contract address filter (lowercase hex) */
+  contractAddress: z.string(),
   /** Decoded arg field whose value to sum (e.g. "value", "amount") */
   sumField: z.string(),
   /** Sliding window duration in minutes */

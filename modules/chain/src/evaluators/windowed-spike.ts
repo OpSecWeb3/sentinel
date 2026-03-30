@@ -11,8 +11,8 @@ const configSchema = z.object({
   eventSignature: z.string().optional(),
   /** Pre-computed topic0 */
   topic0: z.string().optional(),
-  /** Optional contract address filter */
-  contractAddress: z.string().optional(),
+  /** Contract address filter (lowercase hex) */
+  contractAddress: z.string(),
   /** Observation (recent) window in minutes */
   observationMinutes: z.coerce.number().default(5),
   /** Baseline (historical) window in minutes */

@@ -26,8 +26,8 @@ const configSchema = z.object({
   eventSignature: z.string().optional(),
   /** Pre-computed topic0 (keccak256 of event signature). Either this or eventSignature required. */
   topic0: z.string().optional(),
-  /** Optional contract address filter (lowercase hex) */
-  contractAddress: z.string().optional(),
+  /** Contract address filter (lowercase hex) */
+  contractAddress: z.string(),
   /** Field-level conditions applied to decoded event args */
   conditions: z.array(conditionSchema).default([]),
 });
