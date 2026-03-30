@@ -30,6 +30,30 @@ export function setModuleFormatters(modules: DetectionModule[]): void {
   }
 }
 
+/**
+ * Flatten triggerData into a label/value array for Slack formatters.
+ * Walks one level deep into nested objects (e.g. repository.full_name).
+ * Skips objects/arrays that aren't useful as display values.
+ */
+function flattenTriggerData(td: Record<string, unknown>): Array<{ label: string; value: string }> {
+  const fields: Array<{ label: string; value: string }> = [];
+  for (const [key, val] of Object.entries(td)) {
+    if (val === null || val === undefined) continue;
+    if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
+      fields.push({ label: key, value: String(val) });
+    } else if (typeof val === 'object' && !Array.isArray(val)) {
+      // One level deep: e.g. repository.full_name, sender.login
+      for (const [subKey, subVal] of Object.entries(val as Record<string, unknown>)) {
+        if (subVal === null || subVal === undefined) continue;
+        if (typeof subVal === 'string' || typeof subVal === 'number' || typeof subVal === 'boolean') {
+          fields.push({ label: `${key}.${subKey}`, value: String(subVal) });
+        }
+      }
+    }
+  }
+  return fields;
+}
+
 export const alertDispatchHandler: JobHandler = {
   jobName: 'alert.dispatch',
   queueName: QUEUE_NAMES.ALERTS,
@@ -89,15 +113,17 @@ export const alertDispatchHandler: JobHandler = {
     }
 
     // Build alert payload
+    const webUrl = process.env.WEB_URL;
+    const td = (typeof alert.triggerData === 'object' && alert.triggerData !== null ? alert.triggerData : {}) as Record<string, unknown>;
     const alertPayload: SlackAlertPayload = {
       title: alert.title,
       severity: alert.severity,
       description: alert.description ?? undefined,
-      module: typeof alert.triggerData === 'object' && alert.triggerData !== null && 'moduleId' in alert.triggerData && typeof (alert.triggerData as Record<string, unknown>).moduleId === 'string'
-        ? (alert.triggerData as Record<string, unknown>).moduleId as string
-        : 'unknown',
+      module: typeof td.moduleId === 'string' ? td.moduleId : 'unknown',
       eventType: alert.triggerType,
       timestamp: (alert.createdAt instanceof Date ? alert.createdAt : new Date(String(alert.createdAt))).toISOString(),
+      alertUrl: webUrl ? `${webUrl}/alerts/${alertId}` : undefined,
+      fields: flattenTriggerData(td),
     };
 
     // Skip channels that already succeeded on a previous attempt.

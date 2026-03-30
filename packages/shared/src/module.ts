@@ -63,6 +63,22 @@ export interface TemplateInput {
 }
 
 // ---------------------------------------------------------------------------
+// Slack alert payload — shared across formatters and dispatcher
+// ---------------------------------------------------------------------------
+
+export interface SlackAlertFields {
+  title: string;
+  severity: string;
+  description?: string;
+  module: string;
+  eventType: string;
+  fields?: Array<{ label: string; value: string }>;
+  timestamp: string;
+  /** Deep-link to this alert in the Sentinel dashboard */
+  alertUrl?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Detection module interface
 // ---------------------------------------------------------------------------
 
@@ -95,7 +111,7 @@ export interface DetectionModule {
   readonly defaultTemplates?: string[];
 
   /** Custom Slack Block Kit formatter. If provided, dispatcher uses this instead of generic blocks. */
-  formatSlackBlocks?: (alert: { title: string; severity: string; description?: string; module: string; eventType: string; fields?: Array<{ label: string; value: string }>; timestamp: string }) => object[];
+  formatSlackBlocks?: (alert: SlackAlertFields) => object[];
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +119,9 @@ export interface DetectionModule {
 // ---------------------------------------------------------------------------
 
 export interface PayloadFieldDef {
+  /** Dot-notation path, e.g. "sender.login" */
   path: string;
+  /** Human-readable label */
   label: string;
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   examples?: string[];
