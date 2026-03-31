@@ -52,11 +52,6 @@ export default function GitHubInstallationsPage() {
   const [showSetup, setShowSetup] = useState(false);
   const [setupForm, setSetupForm] = useState({
     installationId: "",
-    appSlug: "",
-    targetType: "Organization" as "Organization" | "User",
-    targetLogin: "",
-    targetId: "",
-    webhookSecret: "",
   });
   const [setupLoading, setSetupLoading] = useState(false);
   const [installLoading, setInstallLoading] = useState(false);
@@ -131,23 +126,11 @@ export default function GitHubInstallationsPage() {
     try {
       await apiPost("/modules/github/installations", {
         installationId: Number(setupForm.installationId),
-        appSlug: setupForm.appSlug,
-        targetType: setupForm.targetType,
-        targetLogin: setupForm.targetLogin,
-        targetId: Number(setupForm.targetId),
-        webhookSecret: setupForm.webhookSecret,
-        permissions: {},
-        events: [],
       });
       toast("Installation registered successfully", "success");
       setShowSetup(false);
       setSetupForm({
         installationId: "",
-        appSlug: "",
-        targetType: "Organization",
-        targetLogin: "",
-        targetId: "",
-        webhookSecret: "",
       });
       fetchInstallations();
     } catch (err) {
@@ -211,104 +194,21 @@ export default function GitHubInstallationsPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleManualSetup} className="space-y-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    --installation-id
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    value={setupForm.installationId}
-                    onChange={(e) => setSetupForm((f) => ({ ...f, installationId: e.target.value }))}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary transition-colors"
-                    placeholder="12345678"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    --app-slug
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={setupForm.appSlug}
-                    onChange={(e) => setSetupForm((f) => ({ ...f, appSlug: e.target.value }))}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary transition-colors"
-                    placeholder="sentinel"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    --target-login
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={setupForm.targetLogin}
-                    onChange={(e) => setSetupForm((f) => ({ ...f, targetLogin: e.target.value }))}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary transition-colors"
-                    placeholder="my-org"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    --target-type
-                  </label>
-                  <div className="flex items-center gap-3 py-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setSetupForm((f) => ({ ...f, targetType: "Organization" }))}
-                      className={cn(
-                        "transition-colors",
-                        setupForm.targetType === "Organization"
-                          ? "text-foreground"
-                          : "text-muted-foreground/60 hover:text-foreground",
-                      )}
-                    >
-                      {setupForm.targetType === "Organization" ? "[Organization]" : "Organization"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSetupForm((f) => ({ ...f, targetType: "User" }))}
-                      className={cn(
-                        "transition-colors",
-                        setupForm.targetType === "User"
-                          ? "text-foreground"
-                          : "text-muted-foreground/60 hover:text-foreground",
-                      )}
-                    >
-                      {setupForm.targetType === "User" ? "[User]" : "User"}
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    --target-id
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    value={setupForm.targetId}
-                    onChange={(e) => setSetupForm((f) => ({ ...f, targetId: e.target.value }))}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary transition-colors"
-                    placeholder="9876543"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    --webhook-secret
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    minLength={20}
-                    value={setupForm.webhookSecret}
-                    onChange={(e) => setSetupForm((f) => ({ ...f, webhookSecret: e.target.value }))}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary transition-colors"
-                    placeholder="min 20 characters"
-                  />
-                </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  --installation-id
+                </label>
+                <p className="text-xs text-muted-foreground/60 mb-2">
+                  find this in the URL on your GitHub App installation page (e.g. github.com/settings/installations/<strong>12345678</strong>)
+                </p>
+                <input
+                  type="number"
+                  required
+                  value={setupForm.installationId}
+                  onChange={(e) => setSetupForm((f) => ({ ...f, installationId: e.target.value }))}
+                  className="w-full max-w-xs rounded-md border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary transition-colors"
+                  placeholder="12345678"
+                />
               </div>
               <div className="flex justify-end pt-2">
                 <Button type="submit" disabled={setupLoading}>

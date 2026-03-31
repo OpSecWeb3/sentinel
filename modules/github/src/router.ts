@@ -176,8 +176,12 @@ githubRouter.get('/app/callback', async (c) => {
     return c.redirect(`${webUrl}/github/installations?status=error&reason=github_api_error`);
   }
 
-  // Generate a unique webhook secret for this installation and encrypt it
-  const webhookSecret = crypto.randomBytes(32).toString('hex');
+  // Use the app-level webhook secret so signature verification matches
+  // what GitHub actually signs payloads with.
+  const webhookSecret = env().GITHUB_APP_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    return c.redirect(`${webUrl}/github/installations?status=error&reason=missing_webhook_secret`);
+  }
   const encryptedSecret = encrypt(webhookSecret);
 
   // Store in github_installations table (upsert on installation_id)
@@ -261,7 +265,6 @@ githubRouter.get('/app/install', async (c) => {
 
 const manualSetupSchema = z.object({
   installationId: z.coerce.number().int().positive(),
-  webhookSecret: z.string().min(20, 'Webhook secret must be at least 20 characters'),
   baseUrl: z.string().url().optional(), // for GitHub Enterprise Server
 });
 
@@ -283,8 +286,12 @@ githubRouter.post('/app/setup', bodyLimit({ maxSize: 1 * 1024 * 1024 }), async (
     return c.json({ error: 'Could not verify installation with GitHub API' }, 400);
   }
 
-  // Encrypt the provided webhook secret
-  const encryptedSecret = encrypt(body.webhookSecret);
+  // Use the app-level webhook secret from env
+  const webhookSecret = env().GITHUB_APP_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    return c.json({ error: 'GITHUB_APP_WEBHOOK_SECRET not configured' }, 500);
+  }
+  const encryptedSecret = encrypt(webhookSecret);
 
   const db = getDb();
   const [installation] = await db.insert(githubInstallations).values({
@@ -461,13 +468,6 @@ githubRouter.get('/installations', async (c) => {
 // POST /modules/github/installations — register a new GitHub App installation
 const createInstallationSchema = z.object({
   installationId: z.coerce.number().int().positive(),
-  appSlug: z.string().min(1),
-  targetType: z.enum(['Organization', 'User']),
-  targetLogin: z.string().min(1),
-  targetId: z.coerce.number().int().positive(),
-  webhookSecret: z.string().min(20, 'Webhook secret must be at least 20 characters'),
-  permissions: z.record(z.string(), z.string()).default({}),
-  events: z.array(z.string()).default([]),
 });
 
 githubRouter.post('/installations', bodyLimit({ maxSize: 1 * 1024 * 1024 }), async (c) => {
@@ -477,21 +477,49 @@ githubRouter.post('/installations', bodyLimit({ maxSize: 1 * 1024 * 1024 }), asy
   if (role !== 'admin') return c.json({ error: 'Admin role required' }, 403);
 
   const body = createInstallationSchema.parse(await c.req.json());
-  const db = getDb();
 
-  // Encrypt the webhook secret
-  const encryptedSecret = encrypt(body.webhookSecret);
+  // Fetch installation details from GitHub API
+  let details;
+  try {
+    details = await getInstallationDetails(body.installationId);
+  } catch (err) {
+    const reqLog = c.get('logger');
+    reqLog.error({ err }, 'Failed to fetch GitHub installation details');
+    return c.json({ error: 'Could not verify installation with GitHub API' }, 400);
+  }
+
+  // Use the app-level webhook secret from env
+  const webhookSecret = env().GITHUB_APP_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    return c.json({ error: 'GITHUB_APP_WEBHOOK_SECRET not configured' }, 500);
+  }
+  const db = getDb();
+  const encryptedSecret = encrypt(webhookSecret);
 
   const [installation] = await db.insert(githubInstallations).values({
     orgId,
-    installationId: BigInt(body.installationId),
-    appSlug: body.appSlug,
-    targetType: body.targetType,
-    targetLogin: body.targetLogin,
-    targetId: BigInt(body.targetId),
+    installationId: BigInt(details.id),
+    appSlug: details.app_slug,
+    targetType: details.target_type,
+    targetLogin: details.account.login,
+    targetId: BigInt(details.account.id),
     webhookSecretEncrypted: encryptedSecret,
-    permissions: body.permissions,
-    events: body.events,
+    permissions: details.permissions,
+    events: details.events,
+    status: 'active',
+  }).onConflictDoUpdate({
+    target: githubInstallations.installationId,
+    set: {
+      orgId,
+      appSlug: details.app_slug,
+      targetType: details.target_type,
+      targetLogin: details.account.login,
+      targetId: BigInt(details.account.id),
+      webhookSecretEncrypted: encryptedSecret,
+      permissions: details.permissions,
+      events: details.events,
+      status: 'active',
+    },
   }).returning();
 
   // Fix #14: Auto-trigger repo sync after manual installation creation
