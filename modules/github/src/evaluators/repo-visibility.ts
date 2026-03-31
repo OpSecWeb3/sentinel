@@ -24,12 +24,16 @@ export const repoVisibilityEvaluator: RuleEvaluator = {
     const config = configSchema.parse(rule.config);
     const payload = event.payload as {
       action: string;
-      repository: { full_name: string; visibility: string };
+      repository?: { full_name?: string; visibility?: string };
       sender: { login: string };
     };
 
+    const repoFullName = payload.repository?.full_name;
+    const visibility = payload.repository?.visibility;
+    if (!repoFullName || !visibility) return null;
+
     // Check repo exclusions
-    if (config.excludeRepos.some((pattern) => minimatch(payload.repository.full_name, pattern))) {
+    if (config.excludeRepos.some((pattern) => minimatch(repoFullName, pattern))) {
       return null;
     }
 
@@ -44,8 +48,8 @@ export const repoVisibilityEvaluator: RuleEvaluator = {
       ruleId: rule.id,
       eventId: event.id,
       severity: 'critical',
-      title: `Repository ${payload.repository.full_name} made ${payload.repository.visibility}`,
-      description: `${payload.sender.login} changed repository visibility to ${payload.repository.visibility}`,
+      title: `Repository ${repoFullName} made ${visibility}`,
+      description: `${payload.sender.login} changed repository visibility to ${visibility}`,
       triggerType: 'immediate',
       triggerData: payload,
     };

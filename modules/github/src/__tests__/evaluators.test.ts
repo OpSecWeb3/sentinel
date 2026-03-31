@@ -143,6 +143,20 @@ describe('repoVisibilityEvaluator', () => {
 
     expect(result).toBeNull();
   });
+
+  it('returns null when repository or visibility is missing', async () => {
+    const event = makeEvent({
+      eventType: 'github.repository.visibility_changed',
+      payload: {
+        action: 'publicized',
+        sender: { login: 'alice', id: 42 },
+      },
+    });
+    const rule = makeRule({ ruleType: 'github.repo_visibility', config: {} });
+    const result = await repoVisibilityEvaluator.evaluate(makeCtx(event, rule));
+
+    expect(result).toBeNull();
+  });
 });
 
 // ===========================================================================
@@ -194,6 +208,59 @@ describe('branchProtectionEvaluator', () => {
     const result = await branchProtectionEvaluator.evaluate(makeCtx(event, rule));
 
     expect(result).toBeNull();
+  });
+
+  it('empty alertOnActions means all actions including created', async () => {
+    const event = makeEvent({
+      eventType: 'github.branch_protection.created',
+      payload: { ...baseBPPayload, action: 'created' },
+    });
+    const rule = makeRule({
+      ruleType: 'github.branch_protection',
+      config: { alertOnActions: [], watchBranches: [] },
+    });
+    const result = await branchProtectionEvaluator.evaluate(makeCtx(event, rule));
+
+    expect(result).not.toBeNull();
+  });
+
+  it('branch_protection_configuration disabled matches alertOnActions deleted', async () => {
+    const event = makeEvent({
+      eventType: 'github.branch_protection_configuration.disabled',
+      payload: {
+        action: 'disabled',
+        repository: { full_name: 'acme/core' },
+        sender: { login: 'alice', id: 42 },
+      },
+    });
+    const rule = makeRule({
+      ruleType: 'github.branch_protection',
+      config: { alertOnActions: ['edited', 'deleted'], watchBranches: ['main'] },
+    });
+    const result = await branchProtectionEvaluator.evaluate(makeCtx(event, rule));
+
+    expect(result).not.toBeNull();
+    expect(result!.severity).toBe('critical');
+    expect(result!.title).toContain('disabled');
+  });
+
+  it('branch_protection_configuration enabled matches alertOnActions created', async () => {
+    const event = makeEvent({
+      eventType: 'github.branch_protection_configuration.enabled',
+      payload: {
+        action: 'enabled',
+        repository: { full_name: 'acme/core' },
+        sender: { login: 'alice', id: 42 },
+      },
+    });
+    const rule = makeRule({
+      ruleType: 'github.branch_protection',
+      config: { alertOnActions: ['created'], watchBranches: ['main'] },
+    });
+    const result = await branchProtectionEvaluator.evaluate(makeCtx(event, rule));
+
+    expect(result).not.toBeNull();
+    expect(result!.title).toContain('enabled');
   });
 
   it('filters by watchBranches', async () => {
@@ -328,6 +395,102 @@ describe('memberChangeEvaluator', () => {
     const result = await memberChangeEvaluator.evaluate(makeCtx(event, rule));
 
     expect(result).not.toBeNull();
+  });
+
+  it('repo collaborator added matches org-style alertOnActions member_added', async () => {
+    const event = makeEvent({
+      eventType: 'github.member.added',
+      payload: {
+        action: 'added',
+        member: { login: 'bob', id: 99 },
+        repository: { full_name: 'acme/core' },
+        sender: { login: 'alice', id: 42 },
+      },
+    });
+    const rule = makeRule({
+      ruleType: 'github.member_change',
+      config: { alertOnActions: ['member_added'], watchRoles: [] },
+    });
+    const result = await memberChangeEvaluator.evaluate(makeCtx(event, rule));
+
+    expect(result).not.toBeNull();
+  });
+
+  it('org member_added matches repo-style alertOnActions added', async () => {
+    const event = makeEvent({
+      eventType: 'github.organization.member_added',
+      payload: {
+        action: 'member_added',
+        organization: { login: 'acme' },
+        membership: { user: { login: 'bob' }, role: 'member' },
+        sender: { login: 'alice', id: 42 },
+      },
+    });
+    const rule = makeRule({
+      ruleType: 'github.member_change',
+      config: { alertOnActions: ['added'], watchRoles: [] },
+    });
+    const result = await memberChangeEvaluator.evaluate(makeCtx(event, rule));
+
+    expect(result).not.toBeNull();
+  });
+
+  it('team added_to_repository maps to added for member_change', async () => {
+    const event = makeEvent({
+      eventType: 'github.team.added_to_repository',
+      payload: {
+        action: 'added_to_repository',
+        team: { name: 'Engineering', slug: 'engineering', permission: 'push' },
+        repository: { full_name: 'acme/app' },
+        sender: { login: 'alice', id: 42 },
+      },
+    });
+    const rule = makeRule({
+      ruleType: 'github.member_change',
+      config: { alertOnActions: ['added'], watchRoles: [] },
+    });
+    const result = await memberChangeEvaluator.evaluate(makeCtx(event, rule));
+
+    expect(result).not.toBeNull();
+    expect(result!.title).toContain('Team');
+    expect(result!.title).toContain('engineering');
+  });
+
+  it('team added_to_repository respects watchRoles on team.permission', async () => {
+    const event = makeEvent({
+      eventType: 'github.team.added_to_repository',
+      payload: {
+        action: 'added_to_repository',
+        team: { slug: 'bots', permission: 'pull' },
+        repository: { full_name: 'acme/app' },
+        sender: { login: 'alice', id: 42 },
+      },
+    });
+    const rule = makeRule({
+      ruleType: 'github.member_change',
+      config: { alertOnActions: ['added'], watchRoles: ['admin'] },
+    });
+    const result = await memberChangeEvaluator.evaluate(makeCtx(event, rule));
+
+    expect(result).toBeNull();
+  });
+
+  it('team edited without repository is ignored by member_change', async () => {
+    const event = makeEvent({
+      eventType: 'github.team.edited',
+      payload: {
+        action: 'edited',
+        team: { name: 'Engineering', slug: 'engineering' },
+        sender: { login: 'alice', id: 42 },
+      },
+    });
+    const rule = makeRule({
+      ruleType: 'github.member_change',
+      config: { alertOnActions: ['edited'], watchRoles: [] },
+    });
+    const result = await memberChangeEvaluator.evaluate(makeCtx(event, rule));
+
+    expect(result).toBeNull();
   });
 });
 
@@ -504,6 +667,26 @@ describe('secretScanningEvaluator', () => {
     const result = await secretScanningEvaluator.evaluate(makeCtx(event, rule));
 
     expect(result).toBeNull();
+  });
+
+  it('triggers on publicly_leaked with critical severity', async () => {
+    const event = makeEvent({
+      eventType: 'github.secret_scanning.publicly_leaked',
+      payload: {
+        action: 'publicly_leaked',
+        alert: { number: 9, secret_type: 'github_personal_access_token', state: 'open' },
+        repository: { full_name: 'acme/core' },
+        sender: { login: 'alice', id: 42 },
+      },
+    });
+    const rule = makeRule({
+      ruleType: 'github.secret_scanning',
+      config: { alertOnActions: ['publicly_leaked'] },
+    });
+    const result = await secretScanningEvaluator.evaluate(makeCtx(event, rule));
+
+    expect(result).not.toBeNull();
+    expect(result!.severity).toBe('critical');
   });
 });
 

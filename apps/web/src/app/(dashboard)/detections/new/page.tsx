@@ -15,6 +15,8 @@ import { useToast } from "@/hooks/use-toast";
 import { ToastContainer } from "@/components/ui/toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { SlackChannelPicker } from "@/components/slack-channel-picker";
+import { TagInput, splitToTags, type TagInputHandle } from "@/components/ui/tag-input";
+import { TemplateFieldHeader } from "@/components/detections/template-field-header";
 
 /* ── types ──────────────────────────────────────────────────────── */
 
@@ -485,6 +487,8 @@ function ConfigureDetection({
 
   // Infra host scope
   const [hostScope, setHostScope] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const tagInputRefs = useRef<Record<string, TagInputHandle | null>>({});
 
   const hasNetworkInput = (template.inputs ?? []).some(
     (i) => i.type === "network",
@@ -559,6 +563,12 @@ function ConfigureDetection({
   }, [selectedArtifactId, artifacts, template.name]);
 
   function setInput(key: string, value: string) {
+    setFieldErrors((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
     setInputValues((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -589,23 +599,22 @@ function ConfigureDetection({
     if (input.showIf && !inputValues[input.showIf]) return null;
 
     const value = inputValues[input.key] ?? "";
-    const labelEl = (
-      <label className="text-xs text-muted-foreground">
-        {input.label}
-        {input.required && <span className="text-destructive"> *</span>}
-        {input.help && (
-          <span className="ml-2 text-muted-foreground/50 font-normal">
-            {input.help}
-          </span>
-        )}
-      </label>
+    const fid = `tpl-${input.key}`;
+    const err = fieldErrors[input.key];
+    const header = (
+      <TemplateFieldHeader
+        htmlFor={fid}
+        label={input.label}
+        required={input.required}
+        help={input.help}
+      />
     );
 
     switch (input.type) {
       case "network":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Select
               value={value}
               onValueChange={(v) => setInput(input.key, v)}
@@ -618,13 +627,16 @@ function ConfigureDetection({
               ]}
               className="w-full"
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
 
       case "contract": {
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Select
               value={value}
               onValueChange={(v) => handleContractSelect(v, input.key)}
@@ -647,14 +659,17 @@ function ConfigureDetection({
                 leave empty to monitor all contracts on the selected network
               </p>
             )}
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
       }
 
       case "select":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Select
               value={value}
               onValueChange={(v) => setInput(input.key, v)}
@@ -666,13 +681,16 @@ function ConfigureDetection({
               }
               className="w-full"
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
 
       case "boolean":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <div className="flex gap-3 text-xs">
               {(["true", "false"] as const).map((opt) => (
                 <button
@@ -690,44 +708,63 @@ function ConfigureDetection({
                 </button>
               ))}
             </div>
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
 
       case "string-array":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
-            <textarea
+          <div key={input.key} className="space-y-1.5">
+            {header}
+            <TagInput
+              ref={(el) => {
+                tagInputRefs.current[input.key] = el;
+              }}
+              id={fid}
               value={value}
-              onChange={(e) => setInput(input.key, e.target.value)}
-              placeholder={input.placeholder ?? "one value per line"}
-              rows={3}
-              className="w-full border-b border-input bg-transparent px-1 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary font-mono resize-none"
+              onChange={(v) => setInput(input.key, v)}
+              placeholder={input.placeholder ?? "type and press Enter"}
+              invalid={!!err}
+              aria-describedby={err ? `${fid}-err` : undefined}
+              aria-invalid={!!err}
             />
             <p className="text-[10px] text-muted-foreground/60">
-              one value per line (or comma-separated)
+              Enter or comma to add · paste multi-line or CSV · Backspace removes last
             </p>
+            {err && (
+              <p id={`${fid}-err`} className="text-[10px] font-mono text-destructive">
+                {err}
+              </p>
+            )}
           </div>
         );
 
       case "address":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Input
+              id={fid}
               value={value}
               onChange={(e) => setInput(input.key, e.target.value)}
               placeholder={input.placeholder ?? "0x..."}
               className="h-8 text-xs font-mono"
+              aria-invalid={!!err}
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
 
       case "number":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Input
+              id={fid}
               type="number"
               value={value}
               onChange={(e) => setInput(input.key, e.target.value)}
@@ -735,20 +772,29 @@ function ConfigureDetection({
               min={input.min}
               max={input.max}
               className="h-8 text-xs"
+              aria-invalid={!!err}
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
 
       default:
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Input
+              id={fid}
               value={value}
               onChange={(e) => setInput(input.key, e.target.value)}
               placeholder={input.placeholder ?? ""}
               className="h-8 text-xs"
+              aria-invalid={!!err}
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
     }
@@ -757,16 +803,44 @@ function ConfigureDetection({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    // Validate required inputs
+    const errors: Record<string, string> = {};
+    if (!name.trim()) {
+      errors.name = "Name is required";
+    }
     for (const inp of template.inputs ?? []) {
       if (!inp.required) continue;
-      if (inp.showIf && !inputValues[inp.showIf]) continue; // hidden
+      if (inp.showIf && !inputValues[inp.showIf]) continue;
       const raw = inputValues[inp.key] ?? "";
-      if (!raw.trim()) {
-        toast(`"${inp.label}" is required`);
-        return;
+      if (inp.type === "string-array") {
+        if (splitToTags(raw).length === 0) {
+          errors[inp.key] = "Add at least one value";
+        }
+      } else if (!raw.trim()) {
+        errors[inp.key] = "Required";
       }
     }
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      toast("Fix the highlighted fields");
+      requestAnimationFrame(() => {
+        if (errors.name) {
+          document.getElementById("detection-name")?.focus();
+          return;
+        }
+        const firstKey = template.inputs?.find(
+          (i) => errors[i.key] && !(i.showIf && !inputValues[i.showIf]),
+        )?.key;
+        if (firstKey) {
+          if (template.inputs?.find((x) => x.key === firstKey)?.type === "string-array") {
+            tagInputRefs.current[firstKey]?.focus();
+          } else {
+            document.getElementById(`tpl-${firstKey}`)?.focus();
+          }
+        }
+      });
+      return;
+    }
+    setFieldErrors({});
 
     setSubmitting(true);
     try {
@@ -783,7 +857,7 @@ function ConfigureDetection({
       // Build detection-level overrides (resource scoping)
       const overrides: Record<string, unknown> = {};
       if (moduleId === "infra") {
-        const patterns = hostScope.split(",").map((s) => s.trim()).filter(Boolean);
+        const patterns = splitToTags(hostScope);
         if (patterns.length > 0) overrides.hostScope = patterns;
       }
       if (moduleId === "registry" && selectedArtifactId) {
@@ -851,24 +925,44 @@ function ConfigureDetection({
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {/* Detection name */}
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">name</label>
+        <div className="space-y-1.5">
+          <TemplateFieldHeader
+            htmlFor="detection-name"
+            label="name"
+            required
+            help="Shown in the detections list and alert titles."
+          />
           <Input
+            id="detection-name"
             value={name}
             onChange={(e) => {
               userEditedName.current = true;
               setName(e.target.value);
+              setFieldErrors((prev) => {
+                if (!prev.name) return prev;
+                const next = { ...prev };
+                delete next.name;
+                return next;
+              });
             }}
             placeholder="Detection name"
             required
             autoFocus
+            aria-invalid={!!fieldErrors.name}
           />
+          {fieldErrors.name && (
+            <p className="text-[10px] font-mono text-destructive">{fieldErrors.name}</p>
+          )}
         </div>
 
         {/* Severity + Cooldown */}
         <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">severity</label>
+          <div className="space-y-1.5">
+            <TemplateFieldHeader
+              htmlFor="detection-severity"
+              label="severity"
+              help="Default alert severity for this detection."
+            />
             <Select
               value={severity}
               onValueChange={(v) => setSeverity(v as (typeof SEVERITIES)[number])}
@@ -876,11 +970,14 @@ function ConfigureDetection({
               className="w-full"
             />
           </div>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">
-              cooldown (min)
-            </label>
+          <div className="space-y-1.5">
+            <TemplateFieldHeader
+              htmlFor="detection-cooldown"
+              label="cooldown (min)"
+              help="Minimum minutes before the same rule can alert again for the same resource."
+            />
             <Input
+              id="detection-cooldown"
               type="number"
               min={0}
               max={1440}
@@ -900,23 +997,22 @@ function ConfigureDetection({
 
         {/* Infra: host scope */}
         {moduleId === "infra" && (
-          <div className="space-y-2 border-t border-border pt-4">
-            <label className="text-xs text-muted-foreground">
-              host scope{" "}
-              <span className="text-muted-foreground/50">
-                (optional — leave empty for org-wide)
-              </span>
-            </label>
-            <input
-              type="text"
-              value={hostScope}
-              onChange={(e) => setHostScope(e.target.value)}
-              placeholder="api.example.com, *.prod.example.com"
-              className="w-full rounded border border-border bg-background px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+          <div className="space-y-1.5 border-t border-border pt-4">
+            <TemplateFieldHeader
+              htmlFor="infra-host-scope"
+              label="host scope"
+              help="Optional. Limit this detection to these hosts (minimatch globs). Leave empty for org-wide."
             />
-            <p className="text-[10px] text-muted-foreground">
-              comma-separated hostnames or glob patterns — e.g.{" "}
-              <span className="text-primary/70">*.prod.com, api.example.com</span>
+            <TagInput
+              id="infra-host-scope"
+              value={hostScope}
+              onChange={setHostScope}
+              placeholder="*.prod.example.com"
+            />
+            <p className="text-[10px] text-muted-foreground/60">
+              e.g.{" "}
+              <span className="text-primary/70">[*.prod.com]</span>{" "}
+              <span className="text-primary/70">[api.example.com]</span>
             </p>
           </div>
         )}

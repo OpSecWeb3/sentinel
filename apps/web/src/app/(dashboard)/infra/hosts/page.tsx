@@ -166,6 +166,10 @@ export default function InfraHostsPage() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  const searchActive = debouncedSearch.trim().length > 0;
+  /** Search must match subdomains too; API only omits `isRoot` when `all=true`. */
+  const effectiveShowAll = showAll || searchActive;
+
   const fetchHosts = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -176,7 +180,7 @@ export default function InfraHostsPage() {
       params.set("sort", sortField);
       params.set("dir", sortDir);
       if (debouncedSearch) params.set("q", encodeURIComponent(debouncedSearch));
-      if (showAll) params.set("all", "true");
+      if (effectiveShowAll) params.set("all", "true");
       if (showRemoved) params.set("showRemoved", "true");
 
       const res = await apiFetch<HostsResponse>(
@@ -190,7 +194,7 @@ export default function InfraHostsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, debouncedSearch, sortField, sortDir, showAll, showRemoved]);
+  }, [page, debouncedSearch, sortField, sortDir, effectiveShowAll, showRemoved]);
 
   useEffect(() => {
     fetchHosts();
@@ -335,7 +339,7 @@ export default function InfraHostsPage() {
         <div>
           <h1 className="text-lg text-primary text-glow">
             $ infra hosts ls
-            {showAll && (
+            {effectiveShowAll && (
               <span className="text-muted-foreground"> --all</span>
             )}
             {debouncedSearch && (
@@ -344,7 +348,12 @@ export default function InfraHostsPage() {
             <span className="ml-1 animate-pulse">_</span>
           </h1>
           <p className="mt-1 text-xs text-muted-foreground">
-            {">"} {showAll ? "all hosts including subdomains" : "root hosts only"}
+            {">"}{" "}
+            {showAll
+              ? "all hosts including subdomains"
+              : searchActive
+                ? "search includes subdomains; list is roots only when search is empty"
+                : "root hosts only"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -533,7 +542,7 @@ export default function InfraHostsPage() {
                   <TableRow className="border-0 hover:bg-transparent">
                     <TableCell colSpan={7} className="border-0 py-2 text-xs text-muted-foreground">
                       {meta ? meta.total : hosts.length}{" "}
-                      {showAll ? "host" : "root host"}
+                      {effectiveShowAll ? "host" : "root host"}
                       {(meta ? meta.total : hosts.length) !== 1 ? "s" : ""}
                       {meta && meta.totalPages > 1
                         ? ` -- page ${meta.page} of ${meta.totalPages}`

@@ -1,6 +1,9 @@
 /**
  * Normalizes raw GitHub webhook payloads into platform events.
  * This module is a pure data transformation layer — no side effects.
+ *
+ * Action names and event keys are aligned with GitHub’s webhook reference:
+ * https://docs.github.com/en/webhooks/webhook-events-and-payloads
  */
 
 interface NormalizedEventInput {
@@ -105,6 +108,21 @@ const EVENT_MAP: Record<string, EventHandler> = {
         repository: pick(p.repository, ['full_name']),
         sender: pick(p.sender, ['login', 'id']),
         changes: p.changes,
+      },
+    };
+  },
+
+  // Repo-wide toggle (all rules off/on). See GitHub docs: branch_protection_configuration.
+  branch_protection_configuration: (p) => {
+    const action = validateAction(p.action);
+    if (!action) return null;
+    return {
+      eventType: `github.branch_protection_configuration.${action}`,
+      payload: {
+        resourceId: (p.repository as Record<string, unknown>)?.full_name,
+        action,
+        repository: pick(p.repository, ['full_name']),
+        sender: pick(p.sender, ['login', 'id']),
       },
     };
   },

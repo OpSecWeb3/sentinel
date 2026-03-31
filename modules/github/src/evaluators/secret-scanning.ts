@@ -2,8 +2,25 @@ import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
 import type { TemplateInput } from '@sentinel/shared/module';
 
+// https://docs.github.com/en/webhooks/webhook-events-and-payloads#secret_scanning_alert
+const ALL_SECRET_SCANNING_ACTIONS = [
+  'assigned',
+  'created',
+  'publicly_leaked',
+  'reopened',
+  'resolved',
+  'unassigned',
+  'validated',
+] as const;
+
+type SecretScanningAction = (typeof ALL_SECRET_SCANNING_ACTIONS)[number];
+
 const configSchema = z.object({
-  alertOnActions: z.array(z.enum(['created', 'resolved', 'reopened'])).default(['created']),
+  /** Empty = all actions documented for `secret_scanning_alert`. */
+  alertOnActions: z
+    .array(z.enum(ALL_SECRET_SCANNING_ACTIONS))
+    .default(['created'])
+    .transform((a) => (a.length > 0 ? a : [...ALL_SECRET_SCANNING_ACTIONS])),
   secretTypes: z.array(z.string()).default([]),  // empty = all types
 });
 
@@ -12,7 +29,7 @@ export const secretScanningEvaluator: RuleEvaluator = {
   ruleType: 'github.secret_scanning',
   configSchema,
   uiSchema: [
-    { key: 'alertOnActions', label: 'Alert on actions', type: 'string-array', required: false, placeholder: 'created\nresolved\nreopened', help: 'Leave empty for all actions.' },
+    { key: 'alertOnActions', label: 'Alert on actions', type: 'string-array', required: false, placeholder: 'created\npublicly_leaked\nresolved', help: 'Leave empty for all secret_scanning_alert actions (assigned, created, publicly_leaked, reopened, resolved, unassigned, validated).' },
     { key: 'secretTypes', label: 'Secret types to watch', type: 'string-array', required: false, placeholder: 'github_personal_access_token\naws_access_key_id', help: 'Leave empty to alert on all secret types.' },
   ] as TemplateInput[],
 
@@ -28,7 +45,7 @@ export const secretScanningEvaluator: RuleEvaluator = {
       sender: { login: string };
     };
 
-    if (!config.alertOnActions.includes(payload.action as 'created' | 'resolved' | 'reopened')) {
+    if (!config.alertOnActions.includes(payload.action as SecretScanningAction)) {
       return null;
     }
 
@@ -37,7 +54,13 @@ export const secretScanningEvaluator: RuleEvaluator = {
       return null;
     }
 
-    const severity = payload.action === 'created' ? 'critical' : 'medium';
+    const criticalActions: SecretScanningAction[] = ['created', 'publicly_leaked'];
+    const severity = criticalActions.includes(payload.action as SecretScanningAction) ? 'critical' : 'medium';
+
+    const lead =
+      payload.action === 'created' || payload.action === 'publicly_leaked'
+        ? `${payload.alert.secret_type} secret`
+        : `Secret scanning alert (${payload.alert.secret_type})`;
 
     return {
       orgId: event.orgId,
@@ -46,7 +69,7 @@ export const secretScanningEvaluator: RuleEvaluator = {
       eventId: event.id,
       severity,
       title: `Secret scanning alert ${payload.action} on ${payload.repository.full_name}`,
-      description: `${payload.alert.secret_type} secret detected (alert #${payload.alert.number}) — ${payload.action} by ${payload.sender.login}`,
+      description: `${lead} — alert #${payload.alert.number}, ${payload.action} by ${payload.sender.login}`,
       triggerType: 'immediate',
       triggerData: payload,
     };

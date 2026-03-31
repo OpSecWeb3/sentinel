@@ -2,8 +2,14 @@ import { z } from 'zod';
 import type { RuleEvaluator, EvalContext, AlertCandidate } from '@sentinel/shared/rules';
 import type { TemplateInput } from '@sentinel/shared/module';
 
+const ALL_DEPLOY_KEY_ACTIONS = ['created', 'deleted'] as const;
+
 const configSchema = z.object({
-  alertOnActions: z.array(z.enum(['created', 'deleted'])).default(['created']),
+  /** Empty = created + deleted. */
+  alertOnActions: z
+    .array(z.enum(ALL_DEPLOY_KEY_ACTIONS))
+    .default(['created'])
+    .transform((a) => (a.length > 0 ? a : [...ALL_DEPLOY_KEY_ACTIONS])),
   alertOnWriteKeys: z.boolean().default(true),  // only alert on write-access keys
 });
 
@@ -12,7 +18,7 @@ export const deployKeyEvaluator: RuleEvaluator = {
   ruleType: 'github.deploy_key',
   configSchema,
   uiSchema: [
-    { key: 'alertOnActions', label: 'Actions to alert on', type: 'string-array', required: false, placeholder: 'created\ndeleted', help: 'Leave empty for all actions.' },
+    { key: 'alertOnActions', label: 'Actions to alert on', type: 'string-array', required: false, placeholder: 'created\ndeleted', help: 'Leave empty to alert on both created and deleted.' },
     { key: 'alertOnWriteKeys', label: 'Alert only on write-access keys', type: 'boolean', required: false, default: true, help: 'When true, only alert on deploy keys with write access.' },
   ] as TemplateInput[],
 

@@ -82,6 +82,16 @@ export const eventTypes: EventTypeDefinition[] = [
     description: 'A branch protection rule was removed',
   },
   {
+    type: 'github.branch_protection_configuration.disabled',
+    label: 'Branch protection disabled (repo-wide)',
+    description: 'All branch protection was disabled for the repository',
+  },
+  {
+    type: 'github.branch_protection_configuration.enabled',
+    label: 'Branch protection enabled (repo-wide)',
+    description: 'Branch protection was enabled for the repository',
+  },
+  {
     type: 'github.deploy_key.created',
     label: 'Deploy key added',
     description: 'A deploy key was added to a repository',
@@ -93,8 +103,28 @@ export const eventTypes: EventTypeDefinition[] = [
   },
   {
     type: 'github.secret_scanning.created',
-    label: 'Secret scanning alert',
+    label: 'Secret scanning alert created',
     description: 'A new secret scanning alert was created',
+  },
+  {
+    type: 'github.secret_scanning.publicly_leaked',
+    label: 'Secret scanning — publicly leaked',
+    description: 'A secret was detected as publicly leaked',
+  },
+  {
+    type: 'github.secret_scanning.assigned',
+    label: 'Secret scanning alert assigned',
+    description: 'A secret scanning alert was assigned to a user',
+  },
+  {
+    type: 'github.secret_scanning.unassigned',
+    label: 'Secret scanning alert unassigned',
+    description: 'Assignee removed from a secret scanning alert',
+  },
+  {
+    type: 'github.secret_scanning.validated',
+    label: 'Secret scanning alert validated',
+    description: 'A secret scanning alert was validated',
   },
   {
     type: 'github.push',

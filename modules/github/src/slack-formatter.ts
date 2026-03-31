@@ -38,7 +38,7 @@ export function formatSlackBlocks(alert: SlackAlertPayload): object[] {
     if (visibility) lines.push(`*Visibility:* ${visibility}`);
     if (action) lines.push(`*Action:* ${action}`);
     if (lines.length) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') } });
-  } else if (et === 'github.secret_scanning.created') {
+  } else if (et.startsWith('github.secret_scanning.')) {
     const secretType = getField(alert.fields, 'alert.secret_type');
     const alertNumber = getField(alert.fields, 'alert.number');
     const state = getField(alert.fields, 'alert.state');
@@ -46,6 +46,7 @@ export function formatSlackBlocks(alert: SlackAlertPayload): object[] {
     if (secretType) lines.push(`*Secret type:* ${secretType}`);
     if (alertNumber) lines.push(`*Alert #:* ${alertNumber}`);
     if (state) lines.push(`*State:* ${state}`);
+    if (action) lines.push(`*Webhook action:* ${action}`);
     if (lines.length) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') } });
   } else if (et.includes('member') || et.includes('organization.member')) {
     const member = getField(alert.fields, 'member.login') ?? getField(alert.fields, 'membership.user.login');

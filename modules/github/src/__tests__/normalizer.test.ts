@@ -199,6 +199,25 @@ describe('normalizeGitHubEvent — branch_protection_rule', () => {
   });
 });
 
+describe('normalizeGitHubEvent — branch_protection_configuration', () => {
+  it('normalizes branch protection configuration disabled', () => {
+    const result = normalizeGitHubEvent(
+      'branch_protection_configuration',
+      {
+        action: 'disabled',
+        repository: baseRepo(),
+        sender: baseSender(),
+      },
+      DELIVERY,
+      ORG_ID,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.eventType).toBe('github.branch_protection_configuration.disabled');
+    expect(result!.payload.action).toBe('disabled');
+  });
+});
+
 // ===========================================================================
 // deploy_key events
 // ===========================================================================

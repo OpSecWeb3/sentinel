@@ -12,6 +12,8 @@ import { Select } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { ToastContainer } from "@/components/ui/toast";
 import { SlackChannelPicker } from "@/components/slack-channel-picker";
+import { TagInput, splitToTags, type TagInputHandle } from "@/components/ui/tag-input";
+import { TemplateFieldHeader } from "@/components/detections/template-field-header";
 
 /* ── types ────────────────────────────────────────────────────────── */
 
@@ -159,6 +161,8 @@ export default function EditDetectionPage() {
 
   // Infra host scope
   const [hostScope, setHostScope] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const tagInputRefs = useRef<Record<string, TagInputHandle | null>>({});
 
   // Slack
   const [slackChannelId, setSlackChannelId] = useState("");
@@ -242,7 +246,7 @@ export default function EditDetectionPage() {
 
           // Pre-fill resource scoping from config
           if (d.moduleId === "infra" && Array.isArray(d.config.hostScope)) {
-            setHostScope((d.config.hostScope as string[]).join(", "));
+            setHostScope((d.config.hostScope as string[]).join("\n"));
           }
           if (
             d.moduleId === "registry" &&
@@ -381,6 +385,12 @@ export default function EditDetectionPage() {
 
   /* input helpers */
   function setInput(key: string, value: string) {
+    setFieldErrors((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
     setInputValues((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -398,6 +408,13 @@ export default function EditDetectionPage() {
   }
 
   function setRuleInput(ruleIndex: number, key: string, value: string) {
+    const ck = `r${ruleIndex}-${key}`;
+    setFieldErrors((prev) => {
+      if (!(ck in prev)) return prev;
+      const next = { ...prev };
+      delete next[ck];
+      return next;
+    });
     setRuleInputValues((prev) => {
       const next = [...prev];
       next[ruleIndex] = { ...(next[ruleIndex] ?? {}), [key]: value };
@@ -433,23 +450,23 @@ export default function EditDetectionPage() {
       ? contracts.filter((c) => String(c.networkId) === selectedNet)
       : contracts;
 
-    const labelEl = (
-      <label className="text-xs text-muted-foreground">
-        {input.label}
-        {input.required && <span className="text-destructive"> *</span>}
-        {input.help && (
-          <span className="ml-2 text-muted-foreground/50 font-normal">
-            {input.help}
-          </span>
-        )}
-      </label>
+    const rk = `r${ruleIndex}-${input.key}`;
+    const fid = `rule-${ruleIndex}-${input.key}`;
+    const err = fieldErrors[rk];
+    const header = (
+      <TemplateFieldHeader
+        htmlFor={fid}
+        label={input.label}
+        required={input.required}
+        help={input.help}
+      />
     );
 
     switch (input.type) {
       case "network":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Select
               value={value}
               onValueChange={(v) => setRuleInput(ruleIndex, input.key, v)}
@@ -462,12 +479,15 @@ export default function EditDetectionPage() {
               ]}
               className="w-full"
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
       case "contract":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Select
               value={value}
               onValueChange={(v) =>
@@ -487,12 +507,15 @@ export default function EditDetectionPage() {
               ]}
               className="w-full"
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
       case "select":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Select
               value={value}
               onValueChange={(v) => setRuleInput(ruleIndex, input.key, v)}
@@ -504,12 +527,15 @@ export default function EditDetectionPage() {
               }
               className="w-full"
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
       case "boolean":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <div className="flex gap-3 text-xs">
               {(["true", "false"] as const).map((opt) => (
                 <button
@@ -527,41 +553,60 @@ export default function EditDetectionPage() {
                 </button>
               ))}
             </div>
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
       case "string-array":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
-            <textarea
+          <div key={input.key} className="space-y-1.5">
+            {header}
+            <TagInput
+              ref={(el) => {
+                tagInputRefs.current[rk] = el;
+              }}
+              id={fid}
               value={value}
-              onChange={(e) => setRuleInput(ruleIndex, input.key, e.target.value)}
-              placeholder={input.placeholder ?? "one value per line"}
-              rows={3}
-              className="w-full border-b border-input bg-transparent px-1 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary font-mono resize-none"
+              onChange={(v) => setRuleInput(ruleIndex, input.key, v)}
+              placeholder={input.placeholder ?? "type and press Enter"}
+              invalid={!!err}
+              aria-describedby={err ? `${fid}-err` : undefined}
+              aria-invalid={!!err}
             />
             <p className="text-[10px] text-muted-foreground/60">
-              one value per line (or comma-separated)
+              Enter or comma to add · paste multi-line or CSV
             </p>
+            {err && (
+              <p id={`${fid}-err`} className="text-[10px] font-mono text-destructive">
+                {err}
+              </p>
+            )}
           </div>
         );
       case "address":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Input
+              id={fid}
               value={value}
               onChange={(e) => setRuleInput(ruleIndex, input.key, e.target.value)}
               placeholder={input.placeholder ?? "0x..."}
               className="h-8 text-xs font-mono"
+              aria-invalid={!!err}
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
       case "number":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Input
+              id={fid}
               type="number"
               value={value}
               onChange={(e) => setRuleInput(ruleIndex, input.key, e.target.value)}
@@ -569,19 +614,28 @@ export default function EditDetectionPage() {
               min={input.min}
               max={input.max}
               className="h-8 text-xs"
+              aria-invalid={!!err}
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
       default:
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Input
+              id={fid}
               value={value}
               onChange={(e) => setRuleInput(ruleIndex, input.key, e.target.value)}
               placeholder={input.placeholder ?? ""}
               className="h-8 text-xs"
+              aria-invalid={!!err}
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
     }
@@ -600,23 +654,22 @@ export default function EditDetectionPage() {
     if (input.showIf && !inputValues[input.showIf]) return null;
 
     const value = inputValues[input.key] ?? "";
-    const labelEl = (
-      <label className="text-xs text-muted-foreground">
-        {input.label}
-        {input.required && <span className="text-destructive"> *</span>}
-        {input.help && (
-          <span className="ml-2 text-muted-foreground/50 font-normal">
-            {input.help}
-          </span>
-        )}
-      </label>
+    const fid = `tpl-${input.key}`;
+    const err = fieldErrors[input.key];
+    const header = (
+      <TemplateFieldHeader
+        htmlFor={fid}
+        label={input.label}
+        required={input.required}
+        help={input.help}
+      />
     );
 
     switch (input.type) {
       case "network":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Select
               value={value}
               onValueChange={(v) => setInput(input.key, v)}
@@ -629,13 +682,16 @@ export default function EditDetectionPage() {
               ]}
               className="w-full"
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
 
       case "contract":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Select
               value={value}
               onValueChange={(v) => handleContractSelect(v, input.key)}
@@ -658,13 +714,16 @@ export default function EditDetectionPage() {
                 leave empty to monitor all contracts on the selected network
               </p>
             )}
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
 
       case "select":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Select
               value={value}
               onValueChange={(v) => setInput(input.key, v)}
@@ -676,13 +735,16 @@ export default function EditDetectionPage() {
               }
               className="w-full"
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
 
       case "boolean":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <div className="flex gap-3 text-xs">
               {(["true", "false"] as const).map((opt) => (
                 <button
@@ -703,44 +765,63 @@ export default function EditDetectionPage() {
                 </button>
               ))}
             </div>
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
 
       case "string-array":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
-            <textarea
+          <div key={input.key} className="space-y-1.5">
+            {header}
+            <TagInput
+              ref={(el) => {
+                tagInputRefs.current[input.key] = el;
+              }}
+              id={fid}
               value={value}
-              onChange={(e) => setInput(input.key, e.target.value)}
-              placeholder={input.placeholder ?? "one value per line"}
-              rows={3}
-              className="w-full border-b border-input bg-transparent px-1 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary font-mono resize-none"
+              onChange={(v) => setInput(input.key, v)}
+              placeholder={input.placeholder ?? "type and press Enter"}
+              invalid={!!err}
+              aria-describedby={err ? `${fid}-err` : undefined}
+              aria-invalid={!!err}
             />
             <p className="text-[10px] text-muted-foreground/60">
-              one value per line (or comma-separated)
+              Enter or comma to add · paste multi-line or CSV · Backspace removes last
             </p>
+            {err && (
+              <p id={`${fid}-err`} className="text-[10px] font-mono text-destructive">
+                {err}
+              </p>
+            )}
           </div>
         );
 
       case "address":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Input
+              id={fid}
               value={value}
               onChange={(e) => setInput(input.key, e.target.value)}
               placeholder={input.placeholder ?? "0x..."}
               className="h-8 text-xs font-mono"
+              aria-invalid={!!err}
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
 
       case "number":
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Input
+              id={fid}
               type="number"
               value={value}
               onChange={(e) => setInput(input.key, e.target.value)}
@@ -748,38 +829,76 @@ export default function EditDetectionPage() {
               min={input.min}
               max={input.max}
               className="h-8 text-xs"
+              aria-invalid={!!err}
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
 
       default:
         return (
-          <div key={input.key} className="space-y-1">
-            {labelEl}
+          <div key={input.key} className="space-y-1.5">
+            {header}
             <Input
+              id={fid}
               value={value}
               onChange={(e) => setInput(input.key, e.target.value)}
               placeholder={input.placeholder ?? ""}
               className="h-8 text-xs"
+              aria-invalid={!!err}
             />
+            {err && (
+              <p className="text-[10px] font-mono text-destructive">{err}</p>
+            )}
           </div>
         );
     }
   }
 
-  /* submit: template-based */
   async function handleTemplateSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!detection || !template) return;
 
+    const errors: Record<string, string> = {};
+    if (!name.trim()) {
+      errors.name = "Name is required";
+    }
     for (const inp of template.inputs ?? []) {
       if (!inp.required) continue;
       if (inp.showIf && !inputValues[inp.showIf]) continue;
-      if (!(inputValues[inp.key] ?? "").trim()) {
-        toast(`"${inp.label}" is required`);
-        return;
+      const raw = inputValues[inp.key] ?? "";
+      if (inp.type === "string-array") {
+        if (splitToTags(raw).length === 0) {
+          errors[inp.key] = "Add at least one value";
+        }
+      } else if (!raw.trim()) {
+        errors[inp.key] = "Required";
       }
     }
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      toast("Fix the highlighted fields");
+      requestAnimationFrame(() => {
+        if (errors.name) {
+          document.getElementById("edit-detection-name")?.focus();
+          return;
+        }
+        const firstKey = template.inputs?.find(
+          (i) => errors[i.key] && !(i.showIf && !inputValues[i.showIf]),
+        )?.key;
+        if (firstKey) {
+          if (template.inputs?.find((x) => x.key === firstKey)?.type === "string-array") {
+            tagInputRefs.current[firstKey]?.focus();
+          } else {
+            document.getElementById(`tpl-${firstKey}`)?.focus();
+          }
+        }
+      });
+      return;
+    }
+    setFieldErrors({});
 
     setSaving(true);
     try {
@@ -794,7 +913,7 @@ export default function EditDetectionPage() {
 
       const overrides: Record<string, unknown> = {};
       if (detection.moduleId === "infra") {
-        const patterns = hostScope.split(",").map((s) => s.trim()).filter(Boolean);
+        const patterns = splitToTags(hostScope);
         if (patterns.length > 0) overrides.hostScope = patterns;
       }
       if (detection.moduleId === "registry" && selectedArtifactId) {
@@ -831,6 +950,46 @@ export default function EditDetectionPage() {
   /* submit: rule-schema-driven (or raw config) */
   async function handleLegacySubmit(e: React.FormEvent) {
     e.preventDefault();
+    const errors: Record<string, string> = {};
+    if (!name.trim()) errors.name = "Name is required";
+    for (let i = 0; i < legacyRules.length; i++) {
+      const schema = ruleSchemas.get(legacyRules[i].ruleType);
+      if (!schema?.length) continue;
+      for (const inp of schema) {
+        if (!inp.required) continue;
+        if (inp.showIf && !(ruleInputValues[i]?.[inp.showIf])) continue;
+        const raw = ruleInputValues[i]?.[inp.key] ?? "";
+        const rk = `r${i}-${inp.key}`;
+        if (inp.type === "string-array") {
+          if (splitToTags(raw).length === 0) errors[rk] = "Add at least one value";
+        } else if (!raw.trim()) {
+          errors[rk] = "Required";
+        }
+      }
+    }
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      toast("Fix the highlighted fields");
+      requestAnimationFrame(() => {
+        if (errors.name) {
+          document.getElementById("edit-detection-name")?.focus();
+          return;
+        }
+        const firstRk = Object.keys(errors).find((k) => k !== "name");
+        if (!firstRk) return;
+        const m = firstRk.match(/^r(\d+)-(.+)$/);
+        if (!m) return;
+        const ri = Number(m[1]);
+        const key = m[2];
+        const schema = ruleSchemas.get(legacyRules[ri]?.ruleType ?? "") ?? [];
+        const inp = schema.find((x) => x.key === key);
+        if (inp?.type === "string-array") tagInputRefs.current[firstRk]?.focus();
+        else document.getElementById(`rule-${ri}-${key}`)?.focus();
+      });
+      return;
+    }
+    setFieldErrors({});
+
     setSaving(true);
     try {
       const rulesPayload: Array<{
@@ -956,23 +1115,43 @@ export default function EditDetectionPage() {
 
           <form onSubmit={handleTemplateSubmit} className="space-y-5">
             {/* Name */}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">name</label>
+            <div className="space-y-1.5">
+              <TemplateFieldHeader
+                htmlFor="edit-detection-name"
+                label="name"
+                required
+                help="Shown in the detections list and alert titles."
+              />
               <Input
+                id="edit-detection-name"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setFieldErrors((prev) => {
+                    if (!prev.name) return prev;
+                    const next = { ...prev };
+                    delete next.name;
+                    return next;
+                  });
+                }}
                 required
                 autoFocus
+                aria-invalid={!!fieldErrors.name}
               />
+              {fieldErrors.name && (
+                <p className="text-[10px] font-mono text-destructive">{fieldErrors.name}</p>
+              )}
             </div>
 
             {/* Description */}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">
-                description{" "}
-                <span className="text-muted-foreground/50">(optional)</span>
-              </label>
+            <div className="space-y-1.5">
+              <TemplateFieldHeader
+                htmlFor="edit-detection-description"
+                label="description"
+                help="Optional context for your team."
+              />
               <Input
+                id="edit-detection-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="What does this detection monitor?"
@@ -981,8 +1160,12 @@ export default function EditDetectionPage() {
 
             {/* Severity + Cooldown */}
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">severity</label>
+              <div className="space-y-1.5">
+                <TemplateFieldHeader
+                  htmlFor="edit-detection-severity"
+                  label="severity"
+                  help="Default alert severity."
+                />
                 <Select
                   value={severity}
                   onValueChange={(v) => setSeverity(v as (typeof SEVERITIES)[number])}
@@ -990,9 +1173,14 @@ export default function EditDetectionPage() {
                   className="w-full"
                 />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">cooldown (min)</label>
+              <div className="space-y-1.5">
+                <TemplateFieldHeader
+                  htmlFor="edit-detection-cooldown"
+                  label="cooldown (min)"
+                  help="Minimum minutes before the same rule can re-alert for the same resource."
+                />
                 <Input
+                  id="edit-detection-cooldown"
                   type="number"
                   min={0}
                   max={1440}
@@ -1014,23 +1202,22 @@ export default function EditDetectionPage() {
 
             {/* Infra: host scope */}
             {detection.moduleId === "infra" && (
-              <div className="space-y-2 border-t border-border pt-4">
-                <p className="text-xs text-muted-foreground">
-                  host scope{" "}
-                  <span className="text-muted-foreground/50">
-                    (leave empty to apply to all hosts)
-                  </span>
-                </p>
-                <input
-                  type="text"
-                  value={hostScope}
-                  onChange={(e) => setHostScope(e.target.value)}
-                  placeholder="api.example.com, *.prod.example.com"
-                  className="w-full rounded border border-border bg-background px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+              <div className="space-y-1.5 border-t border-border pt-4">
+                <TemplateFieldHeader
+                  htmlFor="edit-infra-host-scope"
+                  label="host scope"
+                  help="Optional. Limit to these hosts (minimatch globs). Empty = all hosts."
                 />
-                <p className="text-[10px] text-muted-foreground">
-                  comma-separated hostnames or glob patterns — e.g.{" "}
-                  <span className="text-primary/70">*.prod.com, api.example.com</span>
+                <TagInput
+                  id="edit-infra-host-scope"
+                  value={hostScope}
+                  onChange={setHostScope}
+                  placeholder="*.prod.example.com"
+                />
+                <p className="text-[10px] text-muted-foreground/60">
+                  e.g.{" "}
+                  <span className="text-primary/70">[*.prod.com]</span>{" "}
+                  <span className="text-primary/70">[api.example.com]</span>
                 </p>
               </div>
             )}
@@ -1065,7 +1252,10 @@ export default function EditDetectionPage() {
 
             <div className="space-y-2 border-t border-border pt-4">
               <p className="text-xs text-muted-foreground">
-                slack channel{" "}
+                slack channel
+                {slackTeamName ? (
+                  <span className="text-muted-foreground/70"> · {slackTeamName}</span>
+                ) : null}{" "}
                 <span className="text-muted-foreground/50">(optional)</span>
               </p>
               {slackConnected ? (
@@ -1100,23 +1290,43 @@ export default function EditDetectionPage() {
         /* ── LEGACY JSON EDITOR (no templateId or template fetch failed) ── */
         <form onSubmit={handleLegacySubmit} className="space-y-6">
           {/* Name */}
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">name</label>
+          <div className="space-y-1.5">
+            <TemplateFieldHeader
+              htmlFor="edit-detection-name"
+              label="name"
+              required
+              help="Shown in the detections list and alert titles."
+            />
             <Input
+              id="edit-detection-name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                setFieldErrors((prev) => {
+                  if (!prev.name) return prev;
+                  const next = { ...prev };
+                  delete next.name;
+                  return next;
+                });
+              }}
               required
               autoFocus
+              aria-invalid={!!fieldErrors.name}
             />
+            {fieldErrors.name && (
+              <p className="text-[10px] font-mono text-destructive">{fieldErrors.name}</p>
+            )}
           </div>
 
           {/* Description */}
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">
-              description{" "}
-              <span className="text-muted-foreground/50">(optional)</span>
-            </label>
+          <div className="space-y-1.5">
+            <TemplateFieldHeader
+              htmlFor="edit-detection-description"
+              label="description"
+              help="Optional context for your team."
+            />
             <Input
+              id="edit-detection-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What does this detection monitor?"
@@ -1125,8 +1335,12 @@ export default function EditDetectionPage() {
 
           {/* Severity + Cooldown */}
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">severity</label>
+            <div className="space-y-1.5">
+              <TemplateFieldHeader
+                htmlFor="edit-detection-severity"
+                label="severity"
+                help="Default alert severity."
+              />
               <Select
                 value={severity}
                 onValueChange={(v) => setSeverity(v as (typeof SEVERITIES)[number])}
@@ -1134,11 +1348,14 @@ export default function EditDetectionPage() {
                 className="w-full"
               />
             </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">
-                cooldown (min)
-              </label>
+            <div className="space-y-1.5">
+              <TemplateFieldHeader
+                htmlFor="edit-detection-cooldown"
+                label="cooldown (min)"
+                help="Minimum minutes before the same rule can re-alert for the same resource."
+              />
               <Input
+                id="edit-detection-cooldown"
                 type="number"
                 min={0}
                 max={1440}
@@ -1219,7 +1436,10 @@ export default function EditDetectionPage() {
 
           <div className="space-y-2 border-t border-border pt-4">
             <p className="text-xs text-muted-foreground">
-              slack channel{" "}
+              slack channel
+              {slackTeamName ? (
+                <span className="text-muted-foreground/70"> · {slackTeamName}</span>
+              ) : null}{" "}
               <span className="text-muted-foreground/50">(optional)</span>
             </p>
             {slackConnected ? (
