@@ -387,10 +387,18 @@ function parseCloudTrailMessage(body: string): Record<string, unknown>[] {
     return [outer];
   }
 
-  // Native EventBridge event (e.g. Spot Instance Interruption Warning)
-  // These have 'detail-type', 'source', and 'detail' fields instead of
-  // CloudTrail's eventName/eventSource.
+  // EventBridge envelope — two sub-cases:
+  // 1. "AWS API Call via CloudTrail": the real CloudTrail record is in `detail`
+  // 2. Native EventBridge event (e.g. Spot Instance Interruption Warning):
+  //    keep the full envelope so normalizeEventBridgeEvent() handles it.
   if (outer['detail-type'] && outer.source && outer.detail) {
+    const detail = outer.detail as Record<string, unknown>;
+    if (outer['detail-type'] === 'AWS API Call via CloudTrail' && detail.eventName && detail.eventSource) {
+      return [detail];
+    }
+    if (outer['detail-type'] === 'AWS Console Sign In via CloudTrail' && detail.eventName && detail.eventSource) {
+      return [detail];
+    }
     return [outer];
   }
 
