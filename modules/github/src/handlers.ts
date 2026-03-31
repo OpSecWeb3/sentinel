@@ -2,9 +2,9 @@
  * GitHub module BullMQ job handlers.
  */
 import type { Job } from 'bullmq';
-import { getDb, eq } from '@sentinel/db';
+import { getDb, eq, and } from '@sentinel/db';
 import { events } from '@sentinel/db/schema/core';
-import { githubInstallations } from '@sentinel/db/schema/github';
+import { githubInstallations, githubRepositories } from '@sentinel/db/schema/github';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { logger as rootLogger } from '@sentinel/shared/logger';
 import { normalizeGitHubEvent } from './normalizer.js';
@@ -37,6 +37,22 @@ export const webhookProcessHandler: JobHandler = {
     await handleInstallationLifecycle(normalized.eventType, payload);
 
     const db = getDb();
+
+    // Update repo visibility in DB when it changes via webhook
+    if (normalized.eventType === 'github.repository.visibility_changed') {
+      const repo = payload.repository as { id?: number; visibility?: string } | undefined;
+      if (repo?.id && repo.visibility) {
+        await db
+          .update(githubRepositories)
+          .set({ visibility: repo.visibility })
+          .where(
+            and(
+              eq(githubRepositories.orgId, orgId),
+              eq(githubRepositories.repoId, BigInt(repo.id)),
+            ),
+          );
+      }
+    }
 
     // Store normalized event
     const [event] = await db.insert(events).values(normalized).returning();
