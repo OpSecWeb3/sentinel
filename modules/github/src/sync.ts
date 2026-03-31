@@ -8,8 +8,10 @@
 import { z } from 'zod';
 import { minimatch } from 'minimatch';
 import { getDb } from '@sentinel/db';
+import { events } from '@sentinel/db/schema/core';
 import { githubInstallations, githubRepositories } from '@sentinel/db/schema/github';
 import { eq, and, notInArray } from '@sentinel/db';
+import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
 import { logger as rootLogger } from '@sentinel/shared/logger';
 import { generateAppJwt, getInstallationAccessToken, githubApiFetch } from './github-api.js';
 
@@ -217,9 +219,10 @@ export async function syncRepositories(
       added++;
     } else {
       // Existing repo — check for changes
+      const visibilityChanged = existing.visibility !== repo.visibility;
       const changed =
         existing.fullName !== repo.full_name ||
-        existing.visibility !== repo.visibility ||
+        visibilityChanged ||
         existing.defaultBranch !== repo.default_branch ||
         existing.archived !== repo.archived ||
         existing.fork !== repo.fork ||
@@ -238,6 +241,32 @@ export async function syncRepositories(
             lastSyncedAt: now,
           })
           .where(eq(githubRepositories.id, existing.id));
+
+        // Emit event when visibility changes so the rule engine can fire alerts
+        if (visibilityChanged) {
+          const action = repo.visibility === 'public' ? 'publicized' : 'privatized';
+          const [event] = await db.insert(events).values({
+            orgId,
+            moduleId: 'github',
+            eventType: 'github.repository.visibility_changed',
+            externalId: `sync-${installationDbId}-${repo.id}-${now.getTime()}`,
+            payload: {
+              resourceId: repo.full_name,
+              action,
+              repository: { full_name: repo.full_name, visibility: repo.visibility, id: repo.id },
+              sender: { login: 'sync' },
+              source: 'sync',
+              previousVisibility: existing.visibility,
+            },
+            occurredAt: now,
+          }).returning();
+
+          const eventsQueue = getQueue(QUEUE_NAMES.EVENTS);
+          await eventsQueue.add('event.evaluate', { eventId: event.id });
+
+          log.info({ repoId: repo.id, repo: repo.full_name, from: existing.visibility, to: repo.visibility }, 'Visibility change detected during sync — event emitted');
+        }
+
         updated++;
       } else {
         // Touch lastSyncedAt even if nothing else changed

@@ -6,13 +6,14 @@ import { Hono } from 'hono';
 // Shared test state
 // ---------------------------------------------------------------------------
 const WEBHOOK_SECRET = 'test-webhook-secret-1234';
-const INSTALLATION_ID = 'inst_abc123';
+const INSTALLATION_DB_ID = 'inst_abc123';
+const GH_INSTALLATION_ID = 12345;
 
 // Mock DB rows
 const mockInstallation = {
-  id: INSTALLATION_ID,
+  id: INSTALLATION_DB_ID,
   orgId: 'org_1',
-  installationId: BigInt(12345),
+  installationId: BigInt(GH_INSTALLATION_ID),
   status: 'active',
   webhookSecretEncrypted: 'encrypted-secret-placeholder',
 };
@@ -33,6 +34,7 @@ vi.mock('@sentinel/shared/env', () => ({
   env: () => ({
     SESSION_SECRET: 'a'.repeat(32),
     GITHUB_APP_CLIENT_ID: 'Iv1.test',
+    GITHUB_APP_WEBHOOK_SECRET: WEBHOOK_SECRET,
     ALLOWED_ORIGINS: 'http://localhost:3000',
   }),
 }));
@@ -115,7 +117,7 @@ function webhookRequest(
   };
 
   return new Request(
-    `http://localhost/modules/github/webhooks/${INSTALLATION_ID}`,
+    'http://localhost/modules/github/webhooks',
     {
       method: 'POST',
       headers: defaultHeaders,
@@ -138,7 +140,7 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 describe('GitHub webhook HMAC verification', () => {
   it('valid HMAC signature passes verification and returns 202', async () => {
-    const body = JSON.stringify({ action: 'opened', ref: 'refs/heads/main' });
+    const body = JSON.stringify({ action: 'opened', ref: 'refs/heads/main', installation: { id: GH_INSTALLATION_ID } });
     const req = webhookRequest(body);
 
     const res = await app.request(req);
@@ -149,7 +151,7 @@ describe('GitHub webhook HMAC verification', () => {
   });
 
   it('invalid signature returns 401', async () => {
-    const body = JSON.stringify({ action: 'opened' });
+    const body = JSON.stringify({ action: 'opened', installation: { id: GH_INSTALLATION_ID } });
     const req = webhookRequest(body, {
       'X-Hub-Signature-256': 'sha256=' + '0'.repeat(64),
     });
@@ -162,7 +164,7 @@ describe('GitHub webhook HMAC verification', () => {
   });
 
   it('signature from wrong secret returns 401', async () => {
-    const body = JSON.stringify({ action: 'opened' });
+    const body = JSON.stringify({ action: 'opened', installation: { id: GH_INSTALLATION_ID } });
     const wrongSig = 'sha256=' + createHmac('sha256', 'wrong-secret').update(body).digest('hex');
     const req = webhookRequest(body, { 'X-Hub-Signature-256': wrongSig });
 
@@ -171,9 +173,9 @@ describe('GitHub webhook HMAC verification', () => {
   });
 
   it('missing X-Hub-Signature-256 header returns 400', async () => {
-    const body = JSON.stringify({ action: 'opened' });
+    const body = JSON.stringify({ action: 'opened', installation: { id: GH_INSTALLATION_ID } });
     const req = new Request(
-      `http://localhost/modules/github/webhooks/${INSTALLATION_ID}`,
+      'http://localhost/modules/github/webhooks',
       {
         method: 'POST',
         headers: {
@@ -193,9 +195,9 @@ describe('GitHub webhook HMAC verification', () => {
   });
 
   it('missing X-GitHub-Event header returns 400', async () => {
-    const body = JSON.stringify({ action: 'opened' });
+    const body = JSON.stringify({ action: 'opened', installation: { id: GH_INSTALLATION_ID } });
     const req = new Request(
-      `http://localhost/modules/github/webhooks/${INSTALLATION_ID}`,
+      'http://localhost/modules/github/webhooks',
       {
         method: 'POST',
         headers: {
@@ -212,9 +214,9 @@ describe('GitHub webhook HMAC verification', () => {
   });
 
   it('missing X-GitHub-Delivery header returns 400', async () => {
-    const body = JSON.stringify({ action: 'opened' });
+    const body = JSON.stringify({ action: 'opened', installation: { id: GH_INSTALLATION_ID } });
     const req = new Request(
-      `http://localhost/modules/github/webhooks/${INSTALLATION_ID}`,
+      'http://localhost/modules/github/webhooks',
       {
         method: 'POST',
         headers: {
@@ -231,9 +233,9 @@ describe('GitHub webhook HMAC verification', () => {
   });
 
   it('missing all webhook headers returns 400', async () => {
-    const body = JSON.stringify({ action: 'opened' });
+    const body = JSON.stringify({ action: 'opened', installation: { id: GH_INSTALLATION_ID } });
     const req = new Request(
-      `http://localhost/modules/github/webhooks/${INSTALLATION_ID}`,
+      'http://localhost/modules/github/webhooks',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -245,27 +247,27 @@ describe('GitHub webhook HMAC verification', () => {
     expect(res.status).toBe(400);
   });
 
-  it('unknown installation returns 401 (anti-enumeration)', async () => {
+  it('unknown installation returns 404', async () => {
     mockLimit.mockResolvedValueOnce([]); // no installation found
 
-    const body = JSON.stringify({ action: 'opened' });
+    const body = JSON.stringify({ action: 'opened', installation: { id: GH_INSTALLATION_ID } });
     const req = webhookRequest(body);
 
     const res = await app.request(req);
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(404);
 
     const json = await res.json();
-    expect(json.error).toMatch(/invalid signature/i);
+    expect(json.error).toMatch(/unknown installation/i);
   });
 
-  it('inactive installation returns 401 (anti-enumeration)', async () => {
+  it('inactive installation returns 404', async () => {
     mockLimit.mockResolvedValueOnce([{ ...mockInstallation, status: 'removed' }]);
 
-    const body = JSON.stringify({ action: 'opened' });
+    const body = JSON.stringify({ action: 'opened', installation: { id: GH_INSTALLATION_ID } });
     const req = webhookRequest(body);
 
     const res = await app.request(req);
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(404);
   });
 
   it('valid request enqueues job with correct data', async () => {
@@ -273,7 +275,7 @@ describe('GitHub webhook HMAC verification', () => {
     const addMock = vi.fn();
     vi.mocked(getQueue).mockReturnValue({ add: addMock } as any);
 
-    const payload = { action: 'opened', ref: 'refs/heads/main' };
+    const payload = { action: 'opened', ref: 'refs/heads/main', installation: { id: GH_INSTALLATION_ID } };
     const body = JSON.stringify(payload);
     const req = webhookRequest(body);
 
@@ -285,7 +287,7 @@ describe('GitHub webhook HMAC verification', () => {
       expect.objectContaining({
         deliveryId: 'delivery-123',
         eventType: 'push',
-        installationId: INSTALLATION_ID,
+        installationId: INSTALLATION_DB_ID,
         orgId: 'org_1',
       }),
       expect.objectContaining({ jobId: expect.any(String) }),

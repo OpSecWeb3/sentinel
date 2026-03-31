@@ -345,16 +345,14 @@ githubRouter.post('/app/setup', bodyLimit({ maxSize: 1 * 1024 * 1024 }), async (
 });
 
 // ---------------------------------------------------------------------------
-// POST /modules/github/webhooks/:installationId — receive GitHub webhooks
+// POST /modules/github/webhooks — receive GitHub App webhooks
+// Single endpoint for all installations. GitHub sends the installation ID
+// in the payload body; we look it up by the numeric GitHub installation ID.
+// Signature is verified using the app-level GITHUB_APP_WEBHOOK_SECRET.
 // ---------------------------------------------------------------------------
 
 githubRouter.post(
-  '/webhooks/:installationId',
-  // CRIT-11: Enforce a hard 5 MB body limit regardless of whether Content-Length
-  // is present. The previous guard (`if (contentLength && ...)`) was skipped when
-  // the header was absent, allowing unbounded body reads via c.req.text().
-  // bodyLimit streams the body and aborts if the byte count exceeds maxSize,
-  // covering both the header-present fast-path and the chunked/no-header path.
+  '/webhooks',
   bodyLimit({ maxSize: 5 * 1024 * 1024 }),
   async (c) => {
   const clientIp = getClientIp(c);
@@ -362,7 +360,6 @@ githubRouter.post(
     return c.json({ error: 'Too many requests' }, 429);
   }
 
-  const installationId = c.req.param('installationId');
   const signature = c.req.header('X-Hub-Signature-256');
   const eventType = c.req.header('X-GitHub-Event');
   const deliveryId = c.req.header('X-GitHub-Delivery');
@@ -371,27 +368,14 @@ githubRouter.post(
     return c.json({ error: 'Missing required GitHub webhook headers' }, 400);
   }
 
-  const db = getDb();
-
-  // Load installation
-  const [installation] = await db.select()
-    .from(githubInstallations)
-    .where(eq(githubInstallations.id, installationId))
-    .limit(1);
-
-  // Fix #7: Prevent installation ID enumeration.
-  // If installation not found, perform a dummy HMAC and return 401 (same as bad signature)
-  // so that attackers cannot distinguish "not found" from "bad signature".
-  if (!installation || installation.status !== 'active') {
-    const dummySecret = crypto.randomBytes(32).toString('hex');
-    createHmac('sha256', dummySecret).update('dummy').digest('hex');
-    return c.json({ error: 'Invalid signature' }, 401);
+  // Verify HMAC-SHA256 signature using the app-level webhook secret
+  const webhookSecret = env().GITHUB_APP_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    return c.json({ error: 'Webhook secret not configured' }, 500);
   }
 
-  // Verify HMAC-SHA256 signature
   const rawBody = await c.req.text();
-  const secret = decrypt(installation.webhookSecretEncrypted);
-  const expected = 'sha256=' + createHmac('sha256', secret).update(rawBody).digest('hex');
+  const expected = 'sha256=' + createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
 
   const sigBuffer = Buffer.from(signature, 'utf8');
   const expectedBuffer = Buffer.from(expected, 'utf8');
@@ -400,7 +384,7 @@ githubRouter.post(
     return c.json({ error: 'Invalid signature' }, 401);
   }
 
-  // Fix #17: Safely parse JSON body
+  // Parse payload
   let parsedPayload: Record<string, unknown>;
   try {
     parsedPayload = JSON.parse(rawBody) as Record<string, unknown>;
@@ -408,7 +392,26 @@ githubRouter.post(
     return c.json({ error: 'Invalid JSON body' }, 400);
   }
 
-  // Fix #9: Use deliveryId as BullMQ jobId to deduplicate retried webhooks
+  // Extract GitHub installation ID from the payload
+  const ghInstallation = parsedPayload.installation as Record<string, unknown> | undefined;
+  const ghInstallationId = ghInstallation?.id;
+  if (typeof ghInstallationId !== 'number') {
+    // Some events (e.g. ping) may not have an installation — acknowledge without processing
+    return c.json({ received: true, skipped: 'no_installation' }, 202);
+  }
+
+  // Look up the Sentinel installation by GitHub's numeric installation ID
+  const db = getDb();
+  const [installation] = await db.select()
+    .from(githubInstallations)
+    .where(eq(githubInstallations.installationId, BigInt(ghInstallationId)))
+    .limit(1);
+
+  if (!installation || installation.status !== 'active') {
+    return c.json({ error: 'Unknown installation' }, 404);
+  }
+
+  // Enqueue for processing (deduplicated by deliveryId)
   const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
   try {
     await queue.add('github.webhook.process', {
