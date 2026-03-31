@@ -13,6 +13,8 @@ const configSchema = z.object({
   excludeEventNames: z.array(z.string()).default([]),
   // Include events where errorCode is non-empty (failed root actions)
   includeFailedActions: z.boolean().default(true),
+  // AWS account IDs to watch (empty = all)
+  accountIds: z.array(z.string()).default([]),
 });
 
 export const rootActivityEvaluator: RuleEvaluator = {
@@ -36,6 +38,14 @@ export const rootActivityEvaluator: RuleEvaluator = {
       default: true,
       help: 'Include root account events that resulted in an error (e.g. access denied). These may indicate credential testing.',
     },
+    {
+      key: 'accountIds',
+      label: 'AWS account IDs',
+      type: 'string-array',
+      required: false,
+      placeholder: '123456789012',
+      help: 'Limit to specific AWS accounts. Leave empty for all accounts.',
+    },
   ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
@@ -53,6 +63,9 @@ export const rootActivityEvaluator: RuleEvaluator = {
     const awsRegion = payload.awsRegion as string ?? '';
     const sourceIp = payload.sourceIPAddress as string ?? '';
 
+    const accountId = identity?.accountId as string ?? '';
+
+    if (config.accountIds.length > 0 && !config.accountIds.includes(accountId)) return null;
     if (config.excludeEventNames.includes(eventName)) return null;
     if (errorCode && !config.includeFailedActions) return null;
 

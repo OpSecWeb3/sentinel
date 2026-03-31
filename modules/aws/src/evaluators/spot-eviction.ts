@@ -19,6 +19,8 @@ import type { TemplateInput } from '@sentinel/shared/module';
 const configSchema = z.object({
   // Specific instance IDs to watch (empty = all spot instances)
   watchInstanceIds: z.array(z.string()).default([]),
+  // AWS account IDs to watch (empty = all)
+  accountIds: z.array(z.string()).default([]),
   // AWS regions to watch (empty = all)
   regions: z.array(z.string()).default([]),
   // Severity to use for the alert
@@ -37,6 +39,14 @@ export const spotEvictionEvaluator: RuleEvaluator = {
       required: false,
       placeholder: 'i-0abc123def456\ni-0xyz789',
       help: 'Leave empty to alert on all spot evictions. One instance ID per line.',
+    },
+    {
+      key: 'accountIds',
+      label: 'AWS account IDs',
+      type: 'string-array',
+      required: false,
+      placeholder: '123456789012',
+      help: 'Limit to specific AWS accounts. Leave empty for all accounts.',
     },
     {
       key: 'regions',
@@ -75,6 +85,9 @@ export const spotEvictionEvaluator: RuleEvaluator = {
     const instanceId = detail?.['instance-id'] as string ?? '';
     const action = detail?.['instance-action'] as string ?? 'terminate';
 
+    const accountId = payload.accountId as string ?? payload.account as string ?? '';
+
+    if (config.accountIds.length > 0 && !config.accountIds.includes(accountId)) return null;
     if (config.regions.length > 0 && !config.regions.includes(awsRegion)) return null;
     if (config.watchInstanceIds.length > 0 && !config.watchInstanceIds.includes(instanceId)) return null;
 

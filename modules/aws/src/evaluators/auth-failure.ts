@@ -16,6 +16,8 @@ const configSchema = z.object({
   alertOnRootLogin: z.boolean().default(true),
   // Alert on login without MFA
   alertOnNoMfa: z.boolean().default(false),
+  // AWS account IDs to watch (empty = all)
+  accountIds: z.array(z.string()).default([]),
 });
 
 export const authFailureEvaluator: RuleEvaluator = {
@@ -47,6 +49,14 @@ export const authFailureEvaluator: RuleEvaluator = {
       default: false,
       help: 'Fire when any user logs in to the console without MFA.',
     },
+    {
+      key: 'accountIds',
+      label: 'AWS account IDs',
+      type: 'string-array',
+      required: false,
+      placeholder: '123456789012',
+      help: 'Limit to specific AWS accounts. Leave empty for all accounts.',
+    },
   ] as TemplateInput[],
 
   async evaluate(ctx: EvalContext): Promise<AlertCandidate | null> {
@@ -61,6 +71,8 @@ export const authFailureEvaluator: RuleEvaluator = {
     const userType = identity?.type as string ?? '';
     const userArn = identity?.arn as string ?? '';
     const accountId = identity?.accountId as string ?? '';
+
+    if (config.accountIds.length > 0 && !config.accountIds.includes(accountId)) return null;
     const sourceIp = payload.sourceIPAddress as string ?? '';
     const awsRegion = payload.awsRegion as string ?? '';
 

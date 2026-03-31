@@ -28,6 +28,8 @@ const configSchema = z.object({
   errorEventsOnly: z.boolean().default(false),
   // Match specific error codes
   errorCodes: z.array(z.string()).default([]),
+  // AWS account IDs to watch (empty = all)
+  accountIds: z.array(z.string()).default([]),
   // AWS regions to watch (empty = all)
   regions: z.array(z.string()).default([]),
   // Severity to use for the alert
@@ -95,6 +97,14 @@ export const eventMatchEvaluator: RuleEvaluator = {
       help: 'Match only specific CloudTrail error codes. Requires errorEventsOnly or can be used standalone.',
     },
     {
+      key: 'accountIds',
+      label: 'AWS account IDs',
+      type: 'string-array',
+      required: false,
+      placeholder: '123456789012\n987654321098',
+      help: 'Limit to specific AWS accounts. Leave empty for all accounts.',
+    },
+    {
       key: 'regions',
       label: 'AWS regions',
       type: 'string-array',
@@ -148,6 +158,7 @@ export const eventMatchEvaluator: RuleEvaluator = {
     if (config.eventSources.length > 0 && !matchesAny(eventSource, config.eventSources)) return null;
     if (config.userTypes.length > 0 && !config.userTypes.some((t) => t.toLowerCase() === userType.toLowerCase())) return null;
     if (config.principalArnPatterns.length > 0 && !matchesAny(userArn, config.principalArnPatterns)) return null;
+    if (config.accountIds.length > 0 && !config.accountIds.includes(accountId)) return null;
     if (config.regions.length > 0 && !config.regions.includes(awsRegion)) return null;
     if (config.errorEventsOnly && !errorCode) return null;
     if (config.errorCodes.length > 0 && (!errorCode || !config.errorCodes.includes(errorCode))) return null;

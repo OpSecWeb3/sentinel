@@ -1,6 +1,26 @@
-import type { DetectionTemplate } from '@sentinel/shared/module';
+import type { DetectionTemplate, TemplateInput } from '@sentinel/shared/module';
 
-export const templates: DetectionTemplate[] = [
+/** Shared optional scoping inputs added to all AWS templates. */
+const SCOPING_INPUTS: TemplateInput[] = [
+  {
+    key: 'accountIds',
+    label: 'Limit to AWS accounts',
+    type: 'string-array',
+    required: false,
+    placeholder: '123456789012',
+    help: 'Only fire for events from these account IDs. Leave empty for all accounts.',
+  },
+  {
+    key: 'regions',
+    label: 'Limit to AWS regions',
+    type: 'string-array',
+    required: false,
+    placeholder: 'us-east-1\neu-west-2',
+    help: 'Only fire for events from these regions. Leave empty for all regions.',
+  },
+];
+
+const _templates: DetectionTemplate[] = [
   // ── Identity & Access ────────────────────────────────────────────────
   {
     slug: 'aws-root-account-usage',
@@ -554,3 +574,16 @@ export const templates: DetectionTemplate[] = [
     ],
   },
 ];
+
+// Append account and region scoping inputs to every template so users can
+// narrow detections without creating custom rules.
+export const templates: DetectionTemplate[] = _templates.map((t) => {
+  const existing = t.inputs ?? [];
+  // Skip adding regions if the template already defines a 'regions' input
+  // (e.g. spot eviction, unusual EC2 launch) to avoid duplicates.
+  const hasRegions = existing.some((i) => i.key === 'regions');
+  const extra = hasRegions
+    ? SCOPING_INPUTS.filter((i) => i.key !== 'regions')
+    : SCOPING_INPUTS;
+  return { ...t, inputs: [...existing, ...extra] };
+});

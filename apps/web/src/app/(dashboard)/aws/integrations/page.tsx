@@ -234,6 +234,10 @@ export default function AwsIntegrationsPage() {
   const [rotatingId, setRotatingId] = useState<string | null>(null);
   const [rotationResult, setRotationResult] = useState<{ externalId: string; status: string } | null>(null);
 
+  // Inline edit state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ regions: [] as string[], pollIntervalSeconds: "" });
+
   const fetchIntegrations = useCallback(async () => {
     try {
       setLoading(true);
@@ -380,6 +384,35 @@ export default function AwsIntegrationsPage() {
       toast("Integration deleted", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to delete integration");
+    }
+  }
+
+  function startEditing(integration: Integration) {
+    setEditingId(integration.id);
+    setEditForm({
+      regions: [...integration.regions],
+      pollIntervalSeconds: String(integration.pollIntervalSeconds),
+    });
+  }
+
+  async function handleSaveEdit(id: string) {
+    const poll = parseInt(editForm.pollIntervalSeconds, 10);
+    if (isNaN(poll) || poll < 30 || poll > 3600) {
+      toast("Poll interval must be between 30 and 3600 seconds");
+      return;
+    }
+    try {
+      await apiPatch(`/modules/aws/integrations/${id}`, {
+        regions: editForm.regions,
+        pollIntervalSeconds: poll,
+      });
+      setIntegrations((prev) =>
+        prev.map((i) => i.id === id ? { ...i, regions: editForm.regions, pollIntervalSeconds: String(poll) } : i)
+      );
+      setEditingId(null);
+      toast("Integration updated", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to update integration");
     }
   }
 
@@ -791,6 +824,35 @@ export default function AwsIntegrationsPage() {
                     {integration.errorMessage && (
                       <p className="text-xs text-destructive">[ERR] {integration.errorMessage}</p>
                     )}
+
+                    {editingId === integration.id && (
+                      <div className="mt-3 space-y-3 border-t border-border pt-3">
+                        <div>
+                          <label className="text-xs text-muted-foreground block mb-1">Watch regions (empty = all)</label>
+                          <RegionPicker
+                            value={editForm.regions}
+                            onChange={(regions) => setEditForm((f) => ({ ...f, regions }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground block mb-1">Poll interval (seconds)</label>
+                          <input
+                            type="number"
+                            min={30}
+                            max={3600}
+                            value={editForm.pollIntervalSeconds}
+                            onChange={(e) => setEditForm((f) => ({ ...f, pollIntervalSeconds: e.target.value }))}
+                            className="h-8 w-32 rounded border border-border bg-background px-2 text-xs font-mono text-foreground"
+                          />
+                        </div>
+                        <button
+                          onClick={() => handleSaveEdit(integration.id)}
+                          className="text-xs text-primary hover:text-primary/80 transition-colors"
+                        >
+                          [save]
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-3 text-xs shrink-0">
@@ -821,6 +883,12 @@ export default function AwsIntegrationsPage() {
                     )}
                     {integration.status !== "setup" && (
                       <>
+                        <button
+                          onClick={() => editingId === integration.id ? setEditingId(null) : startEditing(integration)}
+                          className="text-muted-foreground hover:text-primary transition-colors"
+                        >
+                          {editingId === integration.id ? "[cancel]" : "[edit]"}
+                        </button>
                         <button
                           onClick={() => handlePoll(integration.id)}
                           disabled={polling[integration.id]}
