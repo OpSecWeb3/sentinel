@@ -15,6 +15,7 @@ import { eq, isNull, or, and, inArray } from '@sentinel/db';
 import { rcArtifacts, rcArtifactVersions } from '@sentinel/db/schema/registry';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { createLogger } from '@sentinel/shared/logger';
+import { captureException } from '@sentinel/shared/sentry';
 
 const log = createLogger({ service: 'sentinel-worker' }).child({ component: 'poll-sweep' });
 
@@ -108,6 +109,7 @@ export const pollSweepHandler: JobHandler = {
         log.debug({ artifactId: artifact.id, name: artifact.name }, 'Enqueued poll job');
       } catch (err) {
         log.error({ err, artifactId: artifact.id, name: artifact.name }, 'Failed to enqueue poll job');
+        captureException(err, { artifactId: artifact.id, phase: 'registry.poll-sweep.enqueue' });
         failedIds.push(artifact.id);
       }
     }

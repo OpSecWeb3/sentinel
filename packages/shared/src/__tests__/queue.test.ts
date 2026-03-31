@@ -25,6 +25,10 @@ vi.mock('../metrics.js', () => ({
   jobDuration: { observe: vi.fn() },
 }));
 
+vi.mock('../sentry.js', () => ({
+  captureException: vi.fn(),
+}));
+
 import {
   QUEUE_NAMES,
   setSharedConnection,

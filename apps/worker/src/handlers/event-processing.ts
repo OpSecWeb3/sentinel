@@ -13,6 +13,7 @@ import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { RuleEngine } from '@sentinel/shared/rule-engine';
 import type { RuleEvaluator, NormalizedEvent } from '@sentinel/shared/rules';
 import { logger as rootLogger, type Logger } from '@sentinel/shared/logger';
+import { captureException } from '@sentinel/shared/sentry';
 import { catalogEventFields, catalogAlertFields, type CatalogDeps } from '@sentinel/shared/payload-catalog';
 import { sql } from '@sentinel/db';
 import type { Redis } from 'ioredis';
@@ -150,6 +151,7 @@ export function createEventProcessingHandler(
             await alertsQueue.add('alert.dispatch', { alertId: String(created.id) });
           } catch (err) {
             _log.error({ err, alertId: String(created.id) }, 'Failed to enqueue alert dispatch');
+            captureException(err, { alertId: String(created.id), phase: 'event-processing.dispatch-enqueue' });
             failedDispatchIds.push(String(created.id));
           }
         }

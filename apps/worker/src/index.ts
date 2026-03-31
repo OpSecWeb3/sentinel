@@ -167,12 +167,7 @@ async function main() {
       log.error({ queue: queueName, jobName, jobId: job?.id, attemptsMade, err }, 'Job failed');
       jobsProcessedTotal.inc({ queue: queueName, jobName, status: 'failed' });
 
-      captureException(err, {
-        queue: queueName,
-        jobName,
-        jobId: String(job?.id ?? ''),
-        attemptsMade,
-      });
+      // Sentry: captureException runs in createWorker (shared/queue) on processor throw
 
       // Move to dead-letter queue after exhausting all retries
       if (attemptsMade >= maxAttempts) {

@@ -10,6 +10,7 @@ import { getDb, eq, sql, and, lte, or, isNull } from '@sentinel/db';
 import { events } from '@sentinel/db/schema/core';
 import { awsIntegrations, awsRawEvents } from '@sentinel/db/schema/aws';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
+import { captureException } from '@sentinel/shared/sentry';
 import { decrypt } from '@sentinel/shared/crypto';
 import { logger as rootLogger } from '@sentinel/shared/logger';
 import { createHash } from 'node:crypto';
@@ -192,6 +193,7 @@ export const pollSweepHandler: JobHandler = {
         });
       } catch (err) {
         log.error({ err, integrationId: row.id }, 'Failed to enqueue SQS poll job');
+        captureException(err, { integrationId: row.id, phase: 'aws.poll-sweep.enqueue' });
         failedIds.push(row.id);
       }
     }
@@ -239,6 +241,7 @@ export const sqsPollHandler: JobHandler = {
       });
     } catch (err) {
       log.error({ err, integrationId }, 'Failed to build SQS client');
+      captureException(err, { integrationId, phase: 'aws.sqs.poll.build-client' });
       await db.update(awsIntegrations)
         .set({ status: 'error', errorMessage: String(err) })
         .where(eq(awsIntegrations.id, integrationId));
@@ -275,7 +278,8 @@ export const sqsPollHandler: JobHandler = {
             await storeRawEvent(db, integrationId, orgId, record);
             const rawId = await getRawEventId(db, integrationId, record.eventID as string);
             if (rawId) {
-              await queue.add('aws.event.process', { rawEventId: rawId, orgId }, {
+              // BullMQ JSON-serializes job data; bigint is not JSON-serializable.
+              await queue.add('aws.event.process', { rawEventId: rawId.toString(), orgId }, {
                 removeOnComplete: { age: 3600 },
                 removeOnFail: { age: 86400 },
               });
@@ -290,6 +294,11 @@ export const sqsPollHandler: JobHandler = {
           }));
         } catch (err) {
           log.warn({ err, messageId: msg.MessageId }, 'Failed to process SQS message');
+          captureException(err, {
+            integrationId,
+            messageId: msg.MessageId ?? undefined,
+            phase: 'aws.sqs.poll.message',
+          });
         }
       }
 

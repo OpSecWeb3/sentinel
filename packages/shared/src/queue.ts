@@ -1,6 +1,7 @@
 import { Queue, Worker, FlowProducer, type Processor, type WorkerOptions, type Job } from 'bullmq';
 import type { Redis } from 'ioredis';
 import { jobDuration } from './metrics.js';
+import { captureException } from './sentry.js';
 
 // ---------------------------------------------------------------------------
 // Queue names — single source of truth
@@ -120,12 +121,24 @@ export function createWorker(
   }
 
   const processor: Processor = async (job) => {
-    const handler = handlerMap.get(job.name);
-    if (!handler) throw new Error(`No handler for job "${job.name}" on queue "${queueName}"`);
-
     const start = performance.now();
     try {
+      const handler = handlerMap.get(job.name);
+      if (!handler) {
+        throw new Error(`No handler for job "${job.name}" on queue "${queueName}"`);
+      }
       return await handler.process(job);
+    } catch (err) {
+      const maxAttempts =
+        job.opts?.attempts !== undefined ? Number(job.opts.attempts) : undefined;
+      captureException(err, {
+        queue: queueName,
+        jobName: job.name,
+        jobId: String(job.id ?? ''),
+        attemptsMade: job.attemptsMade,
+        ...(maxAttempts !== undefined ? { maxAttempts } : {}),
+      });
+      throw err;
     } finally {
       const durationSec = (performance.now() - start) / 1000;
       jobDuration.observe({ queue: queueName, jobName: job.name }, durationSec);

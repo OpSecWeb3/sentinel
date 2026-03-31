@@ -16,6 +16,7 @@ import {
 } from '@sentinel/db/schema/registry';
 import { eq, and, desc } from '@sentinel/db';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
+import { captureException } from '@sentinel/shared/sentry';
 import { getChildResults } from '@sentinel/shared/fan-out';
 import {
   normalizeDockerWebhook,
@@ -49,6 +50,7 @@ async function safeEnqueue(
     return true;
   } catch (err) {
     log.error({ err, jobName, queueName }, 'Failed to enqueue job');
+    captureException(err, { jobName, queueName, phase: 'registry.safeEnqueue' });
     return false;
   }
 }

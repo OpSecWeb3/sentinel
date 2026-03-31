@@ -24,6 +24,7 @@ import { fetchContractAbi } from './etherscan.js';
 import { WELL_KNOWN_SLOTS } from './well-known-slots.js';
 import { flushCounters } from './rpc-usage.js';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
+import { captureException } from '@sentinel/shared/sentry';
 import {
   createRpcClient,
   getTokenBalance,
@@ -1539,6 +1540,7 @@ async function ensureBlockPollerScheduled(networkSlug: string): Promise<void> {
     log.debug({ networkSlug, pollInterval }, 'ensured block poller schedule');
   } catch (err) {
     log.error({ err, networkSlug }, 'failed to schedule block poller');
+    captureException(err, { networkSlug, phase: 'chain.block-poller.schedule' });
   }
 }
 

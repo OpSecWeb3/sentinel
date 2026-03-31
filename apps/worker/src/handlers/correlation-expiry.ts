@@ -13,6 +13,7 @@ import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import type { CorrelationRuleConfig, CorrelationInstance } from '@sentinel/shared/correlation-types';
 import { ABSENCE_INDEX_KEY } from '@sentinel/shared/correlation-engine';
 import { logger as rootLogger, type Logger } from '@sentinel/shared/logger';
+import { captureException } from '@sentinel/shared/sentry';
 import { randomBytes } from 'node:crypto';
 import type { Redis } from 'ioredis';
 
@@ -266,6 +267,7 @@ async function processAbsenceKey(
 
       if (retryCount >= MAX_RETRY_ALERT_THRESHOLD) {
         _log.error({ err: insertErr, redisKey: key, retryCount }, 'Absence key repeatedly failing DB insert — possible data issue');
+        captureException(insertErr, { redisKey: key, retryCount, phase: 'correlation.expiry.insert' });
       } else {
         _log.warn({ err: insertErr, redisKey: key, retryCount }, 'DB insert failed for absence key — will retry on next sweep');
       }
@@ -273,6 +275,7 @@ async function processAbsenceKey(
     }
   } catch (err) {
     _log.error({ err, redisKey: key }, 'Failed to process expiry key');
+    captureException(err, { redisKey: key, phase: 'correlation.expiry.key' });
     return 'skipped';
   }
 }
