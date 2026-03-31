@@ -21,6 +21,7 @@ interface Event {
   payload: Record<string, unknown>;
   receivedAt: string;
   createdAt: string;
+  alertCount: number;
 }
 
 interface EventsMeta {
@@ -103,6 +104,8 @@ function EventsPageInner() {
   const currentEventType = searchParams.get("eventType") ?? null;
   const currentSearch = searchParams.get("search") ?? null;
   const currentTimeRange = searchParams.get("range") ?? null;
+  // Default to showing only triggered events (ones that generated alerts)
+  const currentTriggered = searchParams.get("triggered") !== "false";
 
   // Data state
   const [data, setData] = useState<Event[]>([]);
@@ -112,13 +115,26 @@ function EventsPageInner() {
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Dynamic event type options (populated from data)
+  // Dynamic event type options (fetched once from /events/filters)
   const [eventTypes, setEventTypes] = useState<string[]>([]);
   const [modules, setModules] = useState<string[]>([]);
 
   // Local search input (debounced)
   const [searchInput, setSearchInput] = useState(currentSearch ?? "");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fetch filter options once on mount
+  useEffect(() => {
+    apiFetch<{ modules: string[]; eventTypes: string[] }>(
+      "/api/events/filters",
+      { credentials: "include" },
+    ).then((res) => {
+      setModules(res.modules);
+      setEventTypes(res.eventTypes);
+    }).catch(() => {
+      // non-critical — filters will just be empty
+    });
+  }, []);
 
   const buildQs = useCallback(
     (overrides: Record<string, string | null>) => {
@@ -129,6 +145,7 @@ function EventsPageInner() {
         eventType: currentEventType,
         search: currentSearch,
         range: currentTimeRange,
+        triggered: currentTriggered ? null : "false",
         ...overrides,
       };
       for (const [k, v] of Object.entries(merged)) {
@@ -136,7 +153,7 @@ function EventsPageInner() {
       }
       return params.toString();
     },
-    [currentPage, currentModule, currentEventType, currentSearch, currentTimeRange],
+    [currentPage, currentModule, currentEventType, currentSearch, currentTimeRange, currentTriggered],
   );
 
   const fetchEvents = useCallback(async () => {
@@ -149,6 +166,7 @@ function EventsPageInner() {
       if (currentModule) qs.set("moduleId", currentModule);
       if (currentEventType) qs.set("eventType", currentEventType);
       if (currentSearch) qs.set("search", currentSearch);
+      if (currentTriggered) qs.set("triggered", "true");
       if (currentTimeRange) {
         const preset = DATE_PRESETS.find((p) => p.value === currentTimeRange);
         if (preset) {
@@ -162,24 +180,12 @@ function EventsPageInner() {
       );
       setData(res.data);
       setMeta(res.meta);
-
-      // Populate dynamic filter options from first page of results
-      const types = [...new Set(res.data.map((e) => e.eventType))].sort();
-      setEventTypes((prev) => {
-        const merged = [...new Set([...prev, ...types])].sort();
-        return merged;
-      });
-      const mods = [...new Set(res.data.map((e) => e.moduleId))].sort();
-      setModules((prev) => {
-        const merged = [...new Set([...prev, ...mods])].sort();
-        return merged;
-      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
-  }, [currentPage, currentModule, currentEventType, currentSearch, currentTimeRange]);
+  }, [currentPage, currentModule, currentEventType, currentSearch, currentTimeRange, currentTriggered]);
 
   useEffect(() => {
     fetchEvents();
@@ -205,10 +211,11 @@ function EventsPageInner() {
     setSearchInput(currentSearch ?? "");
   }, [currentSearch]);
 
-  const activeFilterCount = [currentModule, currentEventType, currentTimeRange].filter(Boolean).length;
+  const activeFilterCount = [currentModule, currentEventType, currentTimeRange, !currentTriggered ? true : null].filter(Boolean).length;
 
   // Dynamic command
   const cmdParts = ["$  events ls"];
+  if (currentTriggered) cmdParts.push("--triggered");
   if (currentSearch) cmdParts.push(`--search "${currentSearch}"`);
   if (currentModule) cmdParts.push(`--module ${currentModule}`);
   if (currentEventType) cmdParts.push(`--type ${currentEventType}`);
@@ -223,7 +230,7 @@ function EventsPageInner() {
           <span className="ml-1 animate-pulse">_</span>
         </h1>
         <p className="mt-1 text-xs text-muted-foreground">
-          {">"} raw events received from modules
+          {">"} {currentTriggered ? "events that triggered alerts" : "raw events received from modules"}
           {meta && !loading && (
             <span className="text-foreground/70 ml-2">
               [{meta.total} total{activeFilterCount > 0 ? `, ${activeFilterCount} filter${activeFilterCount > 1 ? "s" : ""} active` : ""}]
@@ -240,6 +247,19 @@ function EventsPageInner() {
           placeholder="search events..."
           className="sm:w-72"
         />
+        <button
+          onClick={() =>
+            navigate(buildQs({ triggered: currentTriggered ? "false" : null, page: "1" }))
+          }
+          className={cn(
+            "shrink-0 h-8 px-3 text-xs font-mono border transition-colors",
+            currentTriggered
+              ? "border-primary/50 bg-primary/10 text-primary"
+              : "border-border text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {currentTriggered ? "[x] triggered only" : "[ ] triggered only"}
+        </button>
         <div className="flex-1">
           <FilterBar
             filters={[
@@ -273,7 +293,7 @@ function EventsPageInner() {
               },
             ]}
             onClearAll={() =>
-              navigate(buildQs({ moduleId: null, eventType: null, range: null, search: null, page: "1" }))
+              navigate(buildQs({ moduleId: null, eventType: null, range: null, search: null, triggered: null, page: "1" }))
             }
           />
         </div>
@@ -332,10 +352,11 @@ function EventsPageInner() {
         {!showLoading && !loading && !error && data.length > 0 && (
           <div className="animate-content-ready">
             {/* Header */}
-            <div className="grid grid-cols-[80px_140px_minmax(100px,1fr)_100px] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            <div className="grid grid-cols-[80px_140px_minmax(100px,1fr)_60px_100px] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               <span>Module</span>
               <span>Type</span>
               <span>Summary</span>
+              <span>Alerts</span>
               <span>Received</span>
             </div>
 
@@ -347,7 +368,7 @@ function EventsPageInner() {
                     onClick={() =>
                       setExpandedId(expandedId === event.id ? null : event.id)
                     }
-                    className="group grid w-full grid-cols-[80px_140px_minmax(100px,1fr)_100px] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30 text-left"
+                    className="group grid w-full grid-cols-[80px_140px_minmax(100px,1fr)_60px_100px] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30 text-left"
                   >
                     <span className={cn("text-xs font-mono", MODULE_COLORS[event.moduleId] ?? "text-primary")}>
                       [{event.moduleId}]
@@ -357,6 +378,13 @@ function EventsPageInner() {
                     </span>
                     <span className="truncate text-muted-foreground text-xs">
                       {payloadSummary(event)}
+                    </span>
+                    <span className="text-xs">
+                      {event.alertCount > 0 ? (
+                        <span className="text-destructive font-mono">{event.alertCount}</span>
+                      ) : (
+                        <span className="text-muted-foreground/40">--</span>
+                      )}
                     </span>
                     <span className="text-muted-foreground text-xs" title={new Date(event.receivedAt).toLocaleString()}>
                       {timeAgo(event.receivedAt)}

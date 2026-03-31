@@ -5,8 +5,8 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '@sentinel/db';
-import { events } from '@sentinel/db/schema/core';
-import { eq, and, gte, lte, count, desc, sql, ilike } from '@sentinel/db';
+import { events, alerts } from '@sentinel/db/schema/core';
+import { eq, and, gte, lte, count, desc, sql, notInArray } from '@sentinel/db';
 import type { AppEnv } from '@sentinel/shared/hono-types';
 import { requireAuth, requireOrg } from '../middleware/rbac.js';
 import { requireScope } from '../middleware/scope.js';
@@ -21,6 +21,7 @@ const listQuerySchema = z.object({
   search: z.string().max(255).optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
+  triggered: z.enum(['true', 'false']).optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
 });
@@ -35,8 +36,12 @@ router.get('/', requireScope('api:read'), validate('query', listQuerySchema), as
   const query = getValidated<z.infer<typeof listQuerySchema>>(c, 'query');
   const orgId = c.get('orgId');
   const db = getDb();
+  const triggered = query.triggered === 'true';
 
-  const conditions = [eq(events.orgId, orgId)];
+  // Telemetry-only event types that no rule ever matches — hide from UI
+  const HIDDEN_EVENT_TYPES = ['infra.scan.completed', 'infra.probe.completed'];
+
+  const conditions = [eq(events.orgId, orgId), notInArray(events.eventType, HIDDEN_EVENT_TYPES)];
   if (query.moduleId) conditions.push(eq(events.moduleId, query.moduleId));
   if (query.eventType) conditions.push(eq(events.eventType, query.eventType));
   if (query.search) {
@@ -47,27 +52,92 @@ router.get('/', requireScope('api:read'), validate('query', listQuerySchema), as
   if (query.from) conditions.push(gte(events.receivedAt, new Date(query.from)));
   if (query.to) conditions.push(lte(events.receivedAt, new Date(query.to)));
 
-  const where = and(...conditions);
+  const alertCount = sql<number>`count(${alerts.id})`.as('alert_count');
   const offset = (query.page - 1) * query.limit;
 
+  // Base query: left-join alerts to compute alertCount per event
+  const baseQuery = db
+    .select({
+      id: events.id,
+      orgId: events.orgId,
+      moduleId: events.moduleId,
+      eventType: events.eventType,
+      externalId: events.externalId,
+      payload: events.payload,
+      occurredAt: events.occurredAt,
+      receivedAt: events.receivedAt,
+      alertCount,
+    })
+    .from(events)
+    .leftJoin(alerts, eq(alerts.eventId, events.id))
+    .where(and(...conditions))
+    .groupBy(events.id);
+
+  if (triggered) {
+    // Only events that generated at least one alert
+    const rows = await baseQuery
+      .having(sql`count(${alerts.id}) > 0`)
+      .orderBy(desc(events.receivedAt))
+      .limit(query.limit)
+      .offset(offset);
+
+    const [{ total }] = await db
+      .select({ total: count() })
+      .from(
+        db.select({ id: events.id })
+          .from(events)
+          .innerJoin(alerts, eq(alerts.eventId, events.id))
+          .where(and(...conditions))
+          .groupBy(events.id)
+          .as('triggered_events'),
+      );
+
+    return c.json({
+      data: rows,
+      meta: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) },
+    });
+  }
+
+  // Unfiltered: return all events with alertCount
   const [rows, [{ total }]] = await Promise.all([
-    db.select()
-      .from(events)
-      .where(where)
+    baseQuery
       .orderBy(desc(events.receivedAt))
       .limit(query.limit)
       .offset(offset),
-    db.select({ total: count() }).from(events).where(where),
+    db.select({ total: count() }).from(events).where(and(...conditions)),
   ]);
 
   return c.json({
     data: rows,
-    meta: {
-      page: query.page,
-      limit: query.limit,
-      total,
-      totalPages: Math.ceil(total / query.limit),
-    },
+    meta: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) },
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /events/filters — distinct moduleId + eventType values for filter dropdowns
+// ---------------------------------------------------------------------------
+
+router.get('/filters', requireScope('api:read'), async (c) => {
+  const orgId = c.get('orgId');
+  const db = getDb();
+
+  const HIDDEN_EVENT_TYPES = ['infra.scan.completed', 'infra.probe.completed'];
+  const baseWhere = and(eq(events.orgId, orgId), notInArray(events.eventType, HIDDEN_EVENT_TYPES));
+
+  const [moduleRows, typeRows] = await Promise.all([
+    db.selectDistinct({ moduleId: events.moduleId })
+      .from(events)
+      .where(baseWhere)
+      .orderBy(events.moduleId),
+    db.selectDistinct({ eventType: events.eventType })
+      .from(events)
+      .where(baseWhere)
+      .orderBy(events.eventType),
+  ]);
+
+  return c.json({
+    modules: moduleRows.map((r) => r.moduleId),
+    eventTypes: typeRows.map((r) => r.eventType),
   });
 });
 

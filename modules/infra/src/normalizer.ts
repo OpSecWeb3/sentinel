@@ -31,20 +31,6 @@ export function normalizeScanResult(
     stepMap.set(step.step, step);
   }
 
-  // Always emit scan.completed
-  out.push({
-    eventType: 'infra.scan.completed',
-    payload: {
-      resourceId: hostname,
-      hostname,
-      hostId: result.hostId,
-      scanType: result.scanType,
-      score: result.score,
-      grade: result.grade,
-      status: result.status,
-    },
-  });
-
   // ── Certificate events ──────────────────────────────────────────────
   const certStep = stepMap.get('certificate');
   if (certStep?.status === 'success' && certStep.data) {
@@ -283,19 +269,6 @@ export async function normalizeProbeResult(
 ): Promise<NormalizedEventInput[]> {
   const out: NormalizedEventInput[] = [];
   const hostname = result.hostName;
-
-  // Always emit probe.completed
-  out.push({
-    eventType: 'infra.probe.completed',
-    payload: {
-      resourceId: hostname,
-      hostname,
-      hostId: result.hostId,
-      isReachable: result.isReachable,
-      responseTimeMs: result.responseTimeMs,
-      httpStatus: result.httpStatus,
-    },
-  });
 
   // Host unreachable — look up actual consecutive failures from DB
   if (!result.isReachable) {

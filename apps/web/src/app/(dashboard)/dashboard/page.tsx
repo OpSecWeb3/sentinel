@@ -103,7 +103,7 @@ export default function DashboardPage() {
     setEventsLoading(true);
     try {
       const res = await apiFetch<EventsResponse>(
-        "/api/events?page=1&limit=10",
+        "/api/events?page=1&limit=10&triggered=true",
         { credentials: "include" },
       );
       setRecentEvents(res.data);
@@ -274,7 +274,7 @@ export default function DashboardPage() {
           <section>
             <div className="mb-3 flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
-                $ events summarise
+                $ events summarise --triggered
               </p>
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
                 {eventsTotal > 0 && (
