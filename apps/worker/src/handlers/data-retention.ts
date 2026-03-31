@@ -128,7 +128,7 @@ export const dataRetentionHandler: JobHandler = {
         continue;
       }
 
-      const cutoff = new Date(Date.now() - policy.retentionDays * 86_400_000);
+      const cutoff = new Date(Date.now() - policy.retentionDays * 86_400_000).toISOString();
       let totalDeleted = 0;
       let batchDeleted: number;
       // Tables with composite primary keys (no `id` column) use ctid for batching.
