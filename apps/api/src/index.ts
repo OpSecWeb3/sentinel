@@ -129,7 +129,7 @@ app.use('*', async (c, next) => {
   // Use segment-boundary matching to prevent substring bypass (e.g. a path
   // containing "callback" in a parameter name).
   const path = c.req.path;
-  if (path.includes('/webhooks/') || path.endsWith('/callback') || path.includes('/ci/notify')) {
+  if (path.includes('/webhooks/') || path.endsWith('/webhooks') || path.endsWith('/callback') || path.includes('/ci/notify')) {
     return next();
   }
   // If the request uses a Bearer token (API key / notify key), skip CSRF header check
@@ -226,7 +226,7 @@ app.route('/api/field-catalog', fieldCatalogRouter);
 app.use('/modules/*', async (c, next) => {
   const path = c.req.path;
   // Skip auth for webhook and OAuth callback endpoints
-  if (path.includes('/webhooks/') || path.endsWith('/callback') || path.includes('/ci/notify')) {
+  if (path.includes('/webhooks/') || path.endsWith('/webhooks') || path.endsWith('/callback') || path.includes('/ci/notify')) {
     return next();
   }
   if (!c.get('userId')) {
