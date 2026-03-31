@@ -775,18 +775,28 @@ function applyTemplateInputs(
 /**
  * Scan all rule configs for remaining {{key}} tokens left after interpolation.
  * Returns a deduplicated list of unresolved token names.
+ *
+ * Keys in RUNTIME_PLACEHOLDER_FIELDS contain {{tokens}} that are resolved at
+ * alert time from event data (e.g. alertTitle uses {{eventName}}), not from
+ * user-supplied template inputs. Skip them so they don't trigger false
+ * "missing required inputs" validation errors.
  */
+const RUNTIME_PLACEHOLDER_FIELDS = new Set(['alertTitle']);
+
 function findUnresolvedPlaceholders(configs: Record<string, unknown>[]): string[] {
   const found: string[] = [];
-  function scan(val: unknown) {
+  function scan(val: unknown, key?: string) {
+    if (key && RUNTIME_PLACEHOLDER_FIELDS.has(key)) return;
     if (typeof val === 'string') {
       let m: RegExpExecArray | null;
       const re = /\{\{(\w+)\}\}/g;
       while ((m = re.exec(val)) !== null) found.push(m[1]);
     } else if (Array.isArray(val)) {
-      val.forEach(scan);
+      val.forEach((v) => scan(v));
     } else if (val && typeof val === 'object') {
-      Object.values(val as object).forEach(scan);
+      for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+        scan(v, k);
+      }
     }
   }
   configs.forEach((c) => scan(c));
