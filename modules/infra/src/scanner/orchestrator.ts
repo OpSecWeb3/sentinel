@@ -257,7 +257,27 @@ export async function runScan(data: ScanJobData, callbacks: ScanCallbacks): Prom
 
   try {
     // -- SSRF validation: ensure target does not resolve to private IPs ----
-    await validateResolvedIps(targetName);
+    try {
+      await validateResolvedIps(targetName);
+    } catch (dnsErr) {
+      const msg = dnsErr instanceof Error ? dnsErr.message : String(dnsErr);
+      log.warn({ hostId, targetName, err: msg }, 'DNS validation failed — recording error scan');
+      const errorResult: ScanResult = {
+        hostId,
+        hostName: targetName,
+        scanType,
+        status: 'error',
+        details: { reason: 'dns_resolution_failed', errorMessage: msg },
+        stepResults: [],
+        errors: [msg],
+        startedAt,
+        completedAt: new Date(),
+      };
+      try { await callbacks.saveScanResult(errorResult); } catch (saveErr) {
+        log.error({ saveErr, targetName }, 'failed to save DNS-error scan result');
+      }
+      return errorResult;
+    }
 
     // -- Prepare stored data for change detection ---------------------------
     const [storedDnsRecords, storedWhoisData, proxyStatus] = await Promise.all([

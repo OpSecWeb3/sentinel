@@ -38,6 +38,38 @@ import { normalizeScanResult, normalizeProbeResult } from './normalizer.js';
 const log = rootLogger.child({ component: 'infra' });
 
 // ---------------------------------------------------------------------------
+// Auto-deactivation — disable hosts after repeated scan failures
+// ---------------------------------------------------------------------------
+
+/** Number of consecutive error scans before a host is auto-deactivated. */
+const AUTO_DEACTIVATE_THRESHOLD = 5;
+
+/**
+ * Check the last N scan events for a host. If all are errors, deactivate the
+ * host so it stops consuming scan cycles.
+ */
+async function maybeDeactivateHost(hostId: string): Promise<boolean> {
+  const db = getDb();
+  const recent = await db
+    .select({ status: infraScanEvents.status })
+    .from(infraScanEvents)
+    .where(eq(infraScanEvents.hostId, hostId))
+    .orderBy(desc(infraScanEvents.completedAt))
+    .limit(AUTO_DEACTIVATE_THRESHOLD);
+
+  if (recent.length < AUTO_DEACTIVATE_THRESHOLD) return false;
+  if (!recent.every((r) => r.status === 'error')) return false;
+
+  await db
+    .update(infraHosts)
+    .set({ isActive: false })
+    .where(eq(infraHosts.id, hostId));
+
+  log.warn({ hostId, consecutiveErrors: AUTO_DEACTIVATE_THRESHOLD }, 'auto-deactivated host after repeated scan failures');
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Event deduplication helpers
 // ---------------------------------------------------------------------------
 
@@ -255,13 +287,14 @@ function createScanCallbacks(redis?: import('ioredis').Redis): ScanCallbacks {
         });
       }
 
-      // Update host denormalized state
-      if (result.score !== undefined) {
-        await db
-          .update(infraHosts)
-          .set({ currentScore: result.score, lastScannedAt: result.completedAt })
-          .where(eq(infraHosts.id, result.hostId));
-      }
+      // Update host denormalized state — always update lastScannedAt so that
+      // failed scans (e.g. DNS resolution errors) move hosts out of "pending".
+      const hostUpdate: Record<string, unknown> = { lastScannedAt: result.completedAt };
+      if (result.score !== undefined) hostUpdate.currentScore = result.score;
+      await db
+        .update(infraHosts)
+        .set(hostUpdate)
+        .where(eq(infraHosts.id, result.hostId));
 
       // -----------------------------------------------------------------
       // Persist step-specific data to entity tables
@@ -502,6 +535,11 @@ export const scanHandler: JobHandler = {
         .returning();
 
       await eventsQueue.add('event.evaluate', { eventId: inserted.id });
+    }
+
+    // Auto-deactivate hosts that keep failing (e.g. decommissioned domains)
+    if (result.status === 'error') {
+      await maybeDeactivateHost(hostId);
     }
 
     log.info(
@@ -781,6 +819,10 @@ export const scanAggregateHandler: JobHandler = {
         .returning();
 
       await eventsQueue.add('event.evaluate', { eventId: inserted.id });
+    }
+
+    if (status === 'error') {
+      await maybeDeactivateHost(hostId);
     }
 
     log.info(

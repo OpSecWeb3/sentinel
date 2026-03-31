@@ -114,6 +114,7 @@ infraRouter.get('/hosts', async (c) => {
   const sortDir = c.req.query('dir') ?? 'asc';
   const q = c.req.query('q')?.toLowerCase() ?? '';
   const showAll = c.req.query('all') === 'true';
+  const showRemoved = c.req.query('showRemoved') === 'true';
 
   const db = getDb();
 
@@ -136,7 +137,7 @@ infraRouter.get('/hosts', async (c) => {
   /** Build base WHERE conditions common to both paths. */
   const baseConditions = [
     eq(infraHosts.orgId, orgId),
-    eq(infraHosts.isActive, true),
+    ...(showRemoved ? [] : [eq(infraHosts.isActive, true)]),
     ...(showAll ? [] : [eq(infraHosts.isRoot, true)]),
     ...(q ? [ilike(infraHosts.hostname, `%${q}%`)] : []),
   ];

@@ -116,6 +116,7 @@ export default function InfraHostsPage() {
   const [sortField, setSortField] = useState<SortField>("score");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [showAll, setShowAll] = useState(false);
+  const [showRemoved, setShowRemoved] = useState(false);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
   const { toast, toasts, dismiss } = useToast();
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -168,6 +169,7 @@ export default function InfraHostsPage() {
       params.set("dir", sortDir);
       if (debouncedSearch) params.set("q", encodeURIComponent(debouncedSearch));
       if (showAll) params.set("all", "true");
+      if (showRemoved) params.set("showRemoved", "true");
 
       const res = await apiFetch<HostsResponse>(
         `/modules/infra/hosts?${params.toString()}`,
@@ -180,7 +182,7 @@ export default function InfraHostsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, debouncedSearch, sortField, sortDir, showAll]);
+  }, [page, debouncedSearch, sortField, sortDir, showAll, showRemoved]);
 
   useEffect(() => {
     fetchHosts();
@@ -351,6 +353,14 @@ export default function InfraHostsPage() {
             className={cn(showAll ? "border-primary text-primary" : "")}
           >
             {showAll ? "[root only]" : "[show all]"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { setShowRemoved((v) => !v); setPage(1); }}
+            className={cn(showRemoved ? "border-primary text-primary" : "")}
+          >
+            {showRemoved ? "[hide removed]" : "[show removed]"}
           </Button>
           <Button onClick={() => setShowAdd(!showAdd)}>
             {showAdd ? "[cancel]" : "+ Add Host"}
