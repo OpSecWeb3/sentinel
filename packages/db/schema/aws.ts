@@ -30,6 +30,8 @@ export const awsIntegrations = pgTable('aws_integrations', {
   roleArn: text('role_arn'),
   credentialsEncrypted: text('credentials_encrypted'),
   externalId: text('external_id'),
+  externalIdGeneratedAt: timestamp('external_id_generated_at', { withTimezone: true }),
+  externalIdEnforced: boolean('external_id_enforced').notNull().default(true),
 
   // CloudTrail ingestion: SQS queue URL where CloudTrail S3 notifications or
   // EventBridge rules deliver events
@@ -40,7 +42,7 @@ export const awsIntegrations = pgTable('aws_integrations', {
   regions: text('regions').array().notNull().default(sql`'{}'::text[]`),
 
   enabled: boolean('enabled').notNull().default(true),
-  status: text('status').notNull().default('active'),  // active | error | disabled
+  status: text('status').notNull().default('active'),  // setup | active | error | disabled | needs_update
   errorMessage: text('error_message'),
   lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
   nextPollAt: timestamp('next_poll_at', { withTimezone: true }),

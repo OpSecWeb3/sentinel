@@ -1,0 +1,2 @@
+ALTER TABLE "aws_integrations" ADD COLUMN "external_id_generated_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "aws_integrations" ADD COLUMN "external_id_enforced" boolean DEFAULT true NOT NULL;

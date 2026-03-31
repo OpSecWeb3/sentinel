@@ -141,6 +141,14 @@ export function hashInviteSecret(raw: string): string {
 }
 
 /**
+ * Generate a unique external ID for AWS cross-account assume-role trust policies.
+ * Format: sentinel:{orgId}:{48 hex chars from 24 random bytes}
+ */
+export function generateExternalId(orgId: string): string {
+  return `sentinel:${orgId}:${crypto.randomBytes(24).toString('hex')}`;
+}
+
+/**
  * HMAC-SHA256 sign a payload.
  */
 export function hmacSign(payload: string, secret: string): string {

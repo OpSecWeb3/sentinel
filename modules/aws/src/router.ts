@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { getDb, eq, and, desc, count, sql } from '@sentinel/db';
 import { awsIntegrations, awsRawEvents } from '@sentinel/db/schema/aws';
 import { detections } from '@sentinel/db/schema/core';
-import { encrypt } from '@sentinel/shared/crypto';
+import { encrypt, generateExternalId } from '@sentinel/shared/crypto';
 import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
 import { logger as rootLogger } from '@sentinel/shared/logger';
 import type { AppEnv } from '@sentinel/shared/hono-types';
@@ -43,6 +43,7 @@ awsRouter.get('/integrations', async (c) => {
       pollIntervalSeconds: awsIntegrations.pollIntervalSeconds,
       hasRoleArn: sql<boolean>`(role_arn IS NOT NULL)`,
       hasCredentials: sql<boolean>`(credentials_encrypted IS NOT NULL)`,
+      hasExternalId: sql<boolean>`(external_id IS NOT NULL)`,
       createdAt: awsIntegrations.createdAt,
     })
     .from(awsIntegrations)
@@ -76,7 +77,53 @@ awsRouter.get('/integrations', async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /modules/aws/integrations
+// POST /modules/aws/integrations/init — two-step setup: step 1
+// ---------------------------------------------------------------------------
+
+const initIntegrationSchema = z.object({
+  name: z.string().min(1).max(128),
+  accountId: z.string().regex(/^\d{12}$/, 'AWS account ID must be 12 digits'),
+  isOrgIntegration: z.boolean().default(false),
+  awsOrgId: z.string().regex(/^o-[a-z0-9]{10,32}$/, 'AWS Org ID format: o-xxxxxxxxxx').optional(),
+});
+
+awsRouter.post('/integrations/init', async (c) => {
+  const orgId = c.get('orgId');
+  const role = c.get('role');
+  if (role !== 'admin') return c.json({ error: 'Admin role required' }, 403);
+  const body = await c.req.json();
+  const parsed = initIntegrationSchema.safeParse(body);
+  if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+
+  const data = parsed.data;
+  const externalId = generateExternalId(orgId);
+  const db = getDb();
+
+  const [row] = await db.insert(awsIntegrations).values({
+    orgId,
+    name: data.name,
+    accountId: data.accountId,
+    isOrgIntegration: data.isOrgIntegration,
+    awsOrgId: data.awsOrgId ?? null,
+    externalId,
+    externalIdGeneratedAt: new Date(),
+    externalIdEnforced: true,
+    enabled: false,
+    status: 'setup',
+  }).returning({
+    id: awsIntegrations.id,
+    name: awsIntegrations.name,
+    accountId: awsIntegrations.accountId,
+    externalId: awsIntegrations.externalId,
+    status: awsIntegrations.status,
+    createdAt: awsIntegrations.createdAt,
+  });
+
+  return c.json({ data: row }, 201);
+});
+
+// ---------------------------------------------------------------------------
+// POST /modules/aws/integrations — direct creation (auto-generates external ID)
 // ---------------------------------------------------------------------------
 
 const createIntegrationSchema = z.object({
@@ -85,7 +132,6 @@ const createIntegrationSchema = z.object({
   isOrgIntegration: z.boolean().default(false),
   awsOrgId: z.string().regex(/^o-[a-z0-9]{10,32}$/, 'AWS Org ID format: o-xxxxxxxxxx').optional(),
   roleArn: z.string().startsWith('arn:aws:iam::').optional(),
-  externalId: z.string().optional(),
   accessKeyId: z.string().optional(),
   secretAccessKey: z.string().optional(),
   sqsQueueUrl: z.string().url().optional(),
@@ -127,7 +173,9 @@ awsRouter.post('/integrations', async (c) => {
     isOrgIntegration: data.isOrgIntegration,
     awsOrgId: data.awsOrgId ?? null,
     roleArn: data.roleArn ?? null,
-    externalId: data.externalId ?? null,
+    externalId: generateExternalId(orgId),
+    externalIdGeneratedAt: new Date(),
+    externalIdEnforced: true,
     credentialsEncrypted,
     sqsQueueUrl: data.sqsQueueUrl ?? null,
     sqsRegion: data.sqsRegion,
@@ -169,7 +217,8 @@ awsRouter.get('/integrations/:id', async (c) => {
       isOrgIntegration: awsIntegrations.isOrgIntegration,
       awsOrgId: awsIntegrations.awsOrgId,
       hasRoleArn: sql<boolean>`(role_arn IS NOT NULL)`,
-      hasExternalId: sql<boolean>`(external_id IS NOT NULL)`,
+      externalId: awsIntegrations.externalId,
+      externalIdEnforced: awsIntegrations.externalIdEnforced,
       sqsQueueUrl: awsIntegrations.sqsQueueUrl,
       sqsRegion: awsIntegrations.sqsRegion,
       regions: awsIntegrations.regions,
@@ -205,7 +254,6 @@ const patchIntegrationSchema = z.object({
   enabled: z.boolean().optional(),
   pollIntervalSeconds: z.number().int().min(30).max(3600).optional(),
   roleArn: z.string().startsWith('arn:aws:iam::').nullable().optional(),
-  externalId: z.string().nullable().optional(),
   accessKeyId: z.string().optional(),
   secretAccessKey: z.string().optional(),
 });
@@ -221,7 +269,7 @@ awsRouter.patch('/integrations/:id', async (c) => {
 
   const db = getDb();
   const [existing] = await db
-    .select({ id: awsIntegrations.id })
+    .select({ id: awsIntegrations.id, status: awsIntegrations.status })
     .from(awsIntegrations)
     .where(and(eq(awsIntegrations.id, id), eq(awsIntegrations.orgId, orgId)))
     .limit(1);
@@ -240,7 +288,12 @@ awsRouter.patch('/integrations/:id', async (c) => {
   if (d.enabled !== undefined) updates.enabled = d.enabled;
   if (d.pollIntervalSeconds !== undefined) updates.pollIntervalSeconds = d.pollIntervalSeconds;
   if (d.roleArn !== undefined) updates.roleArn = d.roleArn;
-  if (d.externalId !== undefined) updates.externalId = d.externalId;
+
+  // Finalize: transition from setup → active when configuration is provided
+  if (existing.status === 'setup') {
+    updates.status = 'active';
+    updates.enabled = true;
+  }
 
   const hasAccessKeyId = d.accessKeyId !== undefined;
   const hasSecretAccessKey = d.secretAccessKey !== undefined;
@@ -312,6 +365,78 @@ awsRouter.delete('/integrations/:id', async (c) => {
       log.warn({ orgId, pausedCount: paused.length }, 'Last active AWS integration deleted — paused all AWS detections');
     }
   }
+
+  return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// POST /modules/aws/integrations/:id/regenerate-external-id
+// ---------------------------------------------------------------------------
+
+const regenerateSchema = z.object({
+  confirm: z.literal(true, { errorMap: () => ({ message: 'confirm must be true' }) }),
+});
+
+awsRouter.post('/integrations/:id/regenerate-external-id', async (c) => {
+  const orgId = c.get('orgId');
+  const role = c.get('role');
+  if (role !== 'admin') return c.json({ error: 'Admin role required' }, 403);
+  const { id } = c.req.param();
+  const body = await c.req.json();
+  const parsed = regenerateSchema.safeParse(body);
+  if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+
+  const db = getDb();
+  const [existing] = await db
+    .select({ id: awsIntegrations.id, status: awsIntegrations.status })
+    .from(awsIntegrations)
+    .where(and(eq(awsIntegrations.id, id), eq(awsIntegrations.orgId, orgId)))
+    .limit(1);
+
+  if (!existing) throw new HTTPException(404, { message: 'Integration not found' });
+
+  const newExternalId = generateExternalId(orgId);
+  const newStatus = existing.status === 'setup' ? 'setup' : 'needs_update';
+
+  await db.update(awsIntegrations).set({
+    externalId: newExternalId,
+    externalIdGeneratedAt: new Date(),
+    externalIdEnforced: true,
+    status: newStatus,
+  }).where(and(eq(awsIntegrations.id, id), eq(awsIntegrations.orgId, orgId)));
+
+  const warning = newStatus === 'needs_update'
+    ? 'External ID rotated — update your AWS trust policy with the new value, then acknowledge the rotation.'
+    : undefined;
+
+  return c.json({ data: { externalId: newExternalId, status: newStatus }, ...(warning ? { warning } : {}) });
+});
+
+// ---------------------------------------------------------------------------
+// POST /modules/aws/integrations/:id/acknowledge-rotation
+// ---------------------------------------------------------------------------
+
+awsRouter.post('/integrations/:id/acknowledge-rotation', async (c) => {
+  const orgId = c.get('orgId');
+  const role = c.get('role');
+  if (role !== 'admin') return c.json({ error: 'Admin role required' }, 403);
+  const { id } = c.req.param();
+
+  const db = getDb();
+  const [existing] = await db
+    .select({ id: awsIntegrations.id, status: awsIntegrations.status })
+    .from(awsIntegrations)
+    .where(and(eq(awsIntegrations.id, id), eq(awsIntegrations.orgId, orgId)))
+    .limit(1);
+
+  if (!existing) throw new HTTPException(404, { message: 'Integration not found' });
+  if (existing.status !== 'needs_update') {
+    throw new HTTPException(400, { message: 'Integration is not in needs_update status' });
+  }
+
+  await db.update(awsIntegrations).set({
+    status: 'active',
+  }).where(and(eq(awsIntegrations.id, id), eq(awsIntegrations.orgId, orgId)));
 
   return c.json({ ok: true });
 });

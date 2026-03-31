@@ -25,6 +25,7 @@ interface IntegrationAuth {
   roleArn: string | null;
   credentialsEncrypted: string | null;
   externalId: string | null;
+  externalIdEnforced: boolean;
   sqsRegion: string;
 }
 
@@ -103,7 +104,7 @@ async function buildSqsClient(integration: IntegrationAuth) {
       RoleArn: integration.roleArn,
       RoleSessionName: 'sentinel-aws-module',
       DurationSeconds: 3600,
-      ...(integration.externalId ? { ExternalId: integration.externalId } : {}),
+      ...(integration.externalIdEnforced && integration.externalId ? { ExternalId: integration.externalId } : {}),
     }), { abortSignal: AbortSignal.timeout(AWS_STS_TIMEOUT_MS) });
     const creds = assumed.Credentials;
     if (!creds) throw new Error('Failed to assume customer IAM role — no credentials returned');
@@ -146,6 +147,20 @@ export const pollSweepHandler: JobHandler = {
   async process(_job: Job) {
     const db = getDb();
     const now = new Date().toISOString();
+
+    // Clean up abandoned setup integrations older than 24 hours
+    const stale = await db.delete(awsIntegrations)
+      .where(
+        and(
+          eq(awsIntegrations.status, 'setup'),
+          lte(awsIntegrations.createdAt, sql`NOW() - interval '24 hours'`),
+        ),
+      )
+      .returning({ id: awsIntegrations.id });
+
+    if (stale.length > 0) {
+      log.info({ count: stale.length }, 'Cleaned up stale setup integrations');
+    }
 
     const due = await db
       .select({ id: awsIntegrations.id, orgId: awsIntegrations.orgId })
@@ -219,6 +234,7 @@ export const sqsPollHandler: JobHandler = {
         roleArn: integration.roleArn,
         credentialsEncrypted: integration.credentialsEncrypted,
         externalId: integration.externalId,
+        externalIdEnforced: integration.externalIdEnforced,
         sqsRegion: integration.sqsRegion,
       });
     } catch (err) {
