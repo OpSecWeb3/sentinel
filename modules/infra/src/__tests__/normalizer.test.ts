@@ -53,23 +53,15 @@ function baseProbeResult(overrides?: Partial<ProbeResult>): ProbeResult {
 }
 
 // ===========================================================================
-// normalizeScanResult — always emits scan.completed
+// normalizeScanResult — no telemetry events
 // ===========================================================================
 
-describe('normalizeScanResult — scan.completed baseline', () => {
-  it('always emits infra.scan.completed even with no issues', () => {
+describe('normalizeScanResult — no telemetry events', () => {
+  it('does not emit infra.scan.completed (telemetry noise)', () => {
     const result = normalizeScanResult(baseScanResult({ score: 95, grade: 'A' }), ORG_ID);
 
-    expect(result.length).toBe(1);
-    expect(result[0].eventType).toBe('infra.scan.completed');
-    expect(result[0].payload).toMatchObject({
-      hostname: 'example.com',
-      hostId: 'host-1',
-      scanType: 'full',
-      score: 95,
-      grade: 'A',
-      status: 'success',
-    });
+    expect(result).toHaveLength(0);
+    expect(result.find((e) => e.eventType === 'infra.scan.completed')).toBeUndefined();
   });
 });
 
@@ -531,7 +523,7 @@ describe('normalizeScanResult — score degradation', () => {
 // ===========================================================================
 
 describe('normalizeScanResult — clean scan', () => {
-  it('returns only infra.scan.completed when there are no issues', () => {
+  it('returns no events when there are no issues', () => {
     const scan = baseScanResult({
       score: 95,
       grade: 'A',
@@ -560,8 +552,7 @@ describe('normalizeScanResult — clean scan', () => {
 
     const events = normalizeScanResult(scan, ORG_ID);
 
-    expect(events).toHaveLength(1);
-    expect(events[0].eventType).toBe('infra.scan.completed');
+    expect(events).toHaveLength(0);
   });
 });
 
@@ -580,9 +571,8 @@ describe('normalizeProbeResult — host unreachable', () => {
 
     const events = await normalizeProbeResult(probe, ORG_ID);
 
-    const probeCompleted = events.find((e) => e.eventType === 'infra.probe.completed');
-    expect(probeCompleted).toBeDefined();
-    expect(probeCompleted!.payload.isReachable).toBe(false);
+    // probe.completed telemetry is no longer emitted
+    expect(events.find((e) => e.eventType === 'infra.probe.completed')).toBeUndefined();
 
     const unreachable = events.find((e) => e.eventType === 'infra.host.unreachable');
     expect(unreachable).toBeDefined();
