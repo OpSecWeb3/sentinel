@@ -86,6 +86,7 @@ interface WebhookConfig {
 
 interface RpcNetwork {
   id: number;
+  slug: string;
   name: string;
   chainId: number;
 }
@@ -123,7 +124,7 @@ export default function SettingsPage() {
   const showRpcLoading = useDelayedLoading(rpcLoading);
   const [rpcError, setRpcError] = useState<string | null>(null);
   const [showAddRpcForm, setShowAddRpcForm] = useState(false);
-  const [addRpcNetworkId, setAddRpcNetworkId] = useState("");
+  const [addRpcNetworkSlug, setAddRpcNetworkSlug] = useState("");
   const [addRpcUrl, setAddRpcUrl] = useState("");
   const [addingRpc, setAddingRpc] = useState(false);
 
@@ -787,17 +788,17 @@ export default function SettingsPage() {
 
   async function handleAddRpcConfig(e: React.FormEvent) {
     e.preventDefault();
-    if (!addRpcNetworkId || !addRpcUrl) return;
+    if (!addRpcNetworkSlug || !addRpcUrl) return;
     setAddingRpc(true);
     try {
       await apiFetch("/modules/chain/rpc-configs", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ networkId: Number(addRpcNetworkId), customUrl: addRpcUrl }),
+        body: JSON.stringify({ networkSlug: addRpcNetworkSlug, rpcUrl: addRpcUrl }),
       });
       toast("RPC config saved", "success");
-      setAddRpcNetworkId("");
+      setAddRpcNetworkSlug("");
       setAddRpcUrl("");
       setShowAddRpcForm(false);
       fetchRpcConfigs();
@@ -1526,12 +1527,12 @@ export default function SettingsPage() {
                     <div>
                       <label className="text-xs text-muted-foreground block mb-1">--network</label>
                       <Select
-                        value={addRpcNetworkId}
-                        onValueChange={setAddRpcNetworkId}
+                        value={addRpcNetworkSlug}
+                        onValueChange={setAddRpcNetworkSlug}
                         options={[
                           { value: "", label: "select network..." },
                           ...rpcNetworks.map((n) => ({
-                            value: String(n.id),
+                            value: n.slug,
                             label: `${n.name} (${n.chainId})`,
                           })),
                         ]}

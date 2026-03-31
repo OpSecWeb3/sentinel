@@ -21,7 +21,7 @@ router.use('*', requireAuth, requireOrg);
 
 const addressActivitySchema = z.object({
   address: z.string().min(1),
-  networkId: z.coerce.number().int().optional(),
+  networkSlug: z.string().optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
   limit: z.coerce.number().int().positive().max(200).default(50),
@@ -39,7 +39,7 @@ router.get('/address-activity', requireScope('api:read'), validate('query', addr
   ];
   if (query.from) conditions.push(gte(events.occurredAt, new Date(query.from)));
   if (query.to) conditions.push(lte(events.occurredAt, new Date(query.to)));
-  if (query.networkId) conditions.push(sql`(${events.payload}->>'networkId')::int = ${query.networkId}`);
+  if (query.networkSlug) conditions.push(sql`${events.payload}->>'networkSlug' = ${query.networkSlug}`);
 
   const rows = await db.select()
     .from(events)
@@ -57,7 +57,7 @@ router.get('/address-activity', requireScope('api:read'), validate('query', addr
 const balanceHistorySchema = z.object({
   ruleId: z.string().uuid().optional(),
   address: z.string().optional(),
-  networkId: z.coerce.number().int().optional(),
+  networkSlug: z.string().optional(),
   limit: z.coerce.number().int().positive().max(500).default(100),
 });
 
@@ -69,7 +69,10 @@ router.get('/balance-history', requireScope('api:read'), validate('query', balan
   const conditions = [eq(chainStateSnapshots.snapshotType, 'balance')];
   if (query.ruleId) conditions.push(eq(chainStateSnapshots.ruleId, query.ruleId));
   if (query.address) conditions.push(eq(chainStateSnapshots.address, query.address));
-  if (query.networkId) conditions.push(eq(chainStateSnapshots.networkId, query.networkId));
+  if (query.networkSlug) {
+    const [net] = await db.select({ id: chainNetworks.id }).from(chainNetworks).where(eq(chainNetworks.slug, query.networkSlug)).limit(1);
+    if (net) conditions.push(eq(chainStateSnapshots.networkId, net.id));
+  }
 
   // Scope to org via rules join — rules.org_id = orgId
   conditions.push(sql`EXISTS (SELECT 1 FROM rules WHERE rules.id = ${chainStateSnapshots.ruleId} AND rules.org_id = ${orgId})`);
@@ -152,7 +155,7 @@ router.get('/network-status', requireScope('api:read'), requireRole('admin'), as
 // ---------------------------------------------------------------------------
 
 const rpcUsageSchema = z.object({
-  networkId: z.coerce.number().int().optional(),
+  networkSlug: z.string().optional(),
   since: z.string().datetime().optional(),
 });
 
@@ -163,13 +166,8 @@ router.get('/rpc-usage', requireScope('api:read'), validate('query', rpcUsageSch
 
   const conditions = [eq(chainRpcUsageHourly.orgId, orgId)];
   if (query.since) conditions.push(gte(chainRpcUsageHourly.bucket, new Date(query.since)));
-  if (query.networkId !== undefined) {
-    // Join to get networkSlug
-    const [network] = await db.select({ slug: chainNetworks.slug })
-      .from(chainNetworks)
-      .where(eq(chainNetworks.id, query.networkId))
-      .limit(1);
-    if (network) conditions.push(eq(chainRpcUsageHourly.networkSlug, network.slug));
+  if (query.networkSlug) {
+    conditions.push(eq(chainRpcUsageHourly.networkSlug, query.networkSlug));
   }
 
   const rows = await db.select()

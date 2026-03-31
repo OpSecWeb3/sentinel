@@ -339,11 +339,10 @@ chainRouter.get('/contracts', async (c) => {
 
 // ---------------------------------------------------------------------------
 // POST /modules/chain/contracts -- add contract
-// Fix 3: accept networkId instead of networkSlug
 // ---------------------------------------------------------------------------
 
 const addContractSchema = z.object({
-  networkId: z.coerce.number().int().positive(),
+  networkSlug: z.string().min(1),
   address: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
   label: z.string().min(1),
   tags: z.array(z.string()).default([]),
@@ -361,15 +360,15 @@ chainRouter.post('/contracts', async (c) => {
   const body = addContractSchema.parse(await c.req.json());
   const db = getDb();
 
-  // Resolve network by ID
+  // Resolve network by slug
   const [network] = await db
     .select()
     .from(chainNetworks)
-    .where(eq(chainNetworks.id, body.networkId))
+    .where(eq(chainNetworks.slug, body.networkSlug))
     .limit(1);
 
   if (!network) {
-    return c.json({ error: `Unknown network: ${body.networkId}` }, 400);
+    return c.json({ error: `Unknown network: ${body.networkSlug}` }, 400);
   }
 
   const normalizedAddress = body.address.toLowerCase();

@@ -17,6 +17,7 @@ import { ToastContainer } from "@/components/ui/toast";
 
 interface Network {
   id: number;
+  slug: string;
   name: string;
   chainId: number;
   explorerUrl: string | null;
@@ -89,7 +90,7 @@ export default function ChainContractsPage() {
 
   // Add contract form
   const [showAddForm, setShowAddForm] = useState(false);
-  const [addNetworkId, setAddNetworkId] = useState("");
+  const [addNetworkSlug, setAddNetworkSlug] = useState("");
   const [addAddress, setAddAddress] = useState("");
   const [addLabel, setAddLabel] = useState("");
   const [addTags, setAddTags] = useState("");
@@ -153,7 +154,7 @@ export default function ChainContractsPage() {
 
   async function handleAddContract(e: React.FormEvent) {
     e.preventDefault();
-    if (!addNetworkId || !addAddress) return;
+    if (!addNetworkSlug || !addAddress) return;
     setAdding(true);
     try {
       await apiFetch("/modules/chain/contracts", {
@@ -161,7 +162,7 @@ export default function ChainContractsPage() {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          networkId: Number(addNetworkId),
+          networkSlug: addNetworkSlug,
           address: addAddress,
           label: addLabel || undefined,
           tags: addTags
@@ -171,7 +172,7 @@ export default function ChainContractsPage() {
         }),
       });
       toast("Contract added successfully", "success");
-      setAddNetworkId("");
+      setAddNetworkSlug("");
       setAddAddress("");
       setAddLabel("");
       setAddTags("");
@@ -226,7 +227,7 @@ export default function ChainContractsPage() {
   const networkOptions = [
     { value: "", label: "select network..." },
     ...networks.map((n) => ({
-      value: String(n.id),
+      value: n.slug,
       label: `${n.name} (${n.chainId})`,
     })),
   ];
@@ -265,8 +266,8 @@ export default function ChainContractsPage() {
                     --network
                   </label>
                   <Select
-                    value={addNetworkId}
-                    onValueChange={setAddNetworkId}
+                    value={addNetworkSlug}
+                    onValueChange={setAddNetworkSlug}
                     options={networkOptions}
                     className="w-full"
                   />
