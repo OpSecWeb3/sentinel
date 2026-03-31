@@ -113,7 +113,9 @@ set -a; source .env; set +a
 # Skipped when there are no pending migration files to avoid slowing every deploy.
 if [ "$HAS_MIGRATIONS" = true ]; then
   echo "==> Taking pre-migration database backup..."
-  BACKUP_DIR="${APP_DIR}/backups" BACKUP_SINGLE=true bash ./scripts/backup-db.sh || { echo "ERROR: Pre-migration backup failed — aborting deploy"; exit 1; }
+  # Unset DATABASE_URL so backup-db.sh uses docker exec (pg_dump is inside the
+  # Postgres container, not on the host).
+  DATABASE_URL= BACKUP_DIR="${APP_DIR}/backups" BACKUP_SINGLE=true bash ./scripts/backup-db.sh || { echo "ERROR: Pre-migration backup failed — aborting deploy"; exit 1; }
 fi
 
 docker compose -f "$COMPOSE_FILE" --profile migrate run --rm --no-deps migrate
