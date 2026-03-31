@@ -103,13 +103,13 @@ githubRouter.get('/app/callback', async (c) => {
   const setupAction = c.req.query('setup_action'); // 'install' | 'update'
 
   if (!installationIdParam || !stateParam) {
-    return c.redirect(`${webUrl}/settings/github?status=error&reason=missing_params`);
+    return c.redirect(`${webUrl}/github/installations?status=error&reason=missing_params`);
   }
 
   // Parse and verify state (base64url payload + '.' + HMAC hex signature)
   const dotIdx = stateParam.lastIndexOf('.');
   if (dotIdx === -1) {
-    return c.redirect(`${webUrl}/settings/github?status=error&reason=invalid_state`);
+    return c.redirect(`${webUrl}/github/installations?status=error&reason=invalid_state`);
   }
 
   const stateB64 = stateParam.slice(0, dotIdx);
@@ -119,11 +119,11 @@ githubRouter.get('/app/callback', async (c) => {
   try {
     statePayload = Buffer.from(stateB64, 'base64url').toString();
   } catch {
-    return c.redirect(`${webUrl}/settings/github?status=error&reason=invalid_state`);
+    return c.redirect(`${webUrl}/github/installations?status=error&reason=invalid_state`);
   }
 
   if (!verifyState(statePayload, stateSig)) {
-    return c.redirect(`${webUrl}/settings/github?status=error&reason=invalid_signature`);
+    return c.redirect(`${webUrl}/github/installations?status=error&reason=invalid_signature`);
   }
 
   const oauthStateSchema = z.object({
@@ -136,13 +136,13 @@ githubRouter.get('/app/callback', async (c) => {
   try {
     parsedState = oauthStateSchema.parse(JSON.parse(statePayload));
   } catch {
-    return c.redirect(`${webUrl}/settings/github?status=error&reason=invalid_state`);
+    return c.redirect(`${webUrl}/github/installations?status=error&reason=invalid_state`);
   }
 
   const { orgId, userId, ts } = parsedState;
 
   if (Date.now() - ts > MAX_STATE_AGE_MS) {
-    return c.redirect(`${webUrl}/settings/github?status=error&reason=expired_state`);
+    return c.redirect(`${webUrl}/github/installations?status=error&reason=expired_state`);
   }
 
   // Cross-check session user against the HMAC-signed state if a session exists.
@@ -154,7 +154,7 @@ githubRouter.get('/app/callback', async (c) => {
   //   - GitHub Marketplace installs may arrive without an active session.
   const sessionUserId = c.get('userId');
   if (sessionUserId && sessionUserId !== userId) {
-    return c.redirect(`${webUrl}/settings/github?status=error&reason=user_mismatch`);
+    return c.redirect(`${webUrl}/github/installations?status=error&reason=user_mismatch`);
   }
   if (!sessionUserId) {
     const reqLog = c.get('logger');
@@ -164,7 +164,7 @@ githubRouter.get('/app/callback', async (c) => {
   // Fetch installation details from GitHub API
   const installationIdNum = Number(installationIdParam);
   if (!Number.isFinite(installationIdNum) || installationIdNum <= 0) {
-    return c.redirect(`${webUrl}/settings/github?status=error&reason=invalid_installation_id`);
+    return c.redirect(`${webUrl}/github/installations?status=error&reason=invalid_installation_id`);
   }
 
   let details;
@@ -173,7 +173,7 @@ githubRouter.get('/app/callback', async (c) => {
   } catch (err) {
     const reqLog = c.get('logger');
     reqLog.error({ err }, 'Failed to fetch GitHub installation details');
-    return c.redirect(`${webUrl}/settings/github?status=error&reason=github_api_error`);
+    return c.redirect(`${webUrl}/github/installations?status=error&reason=github_api_error`);
   }
 
   // Generate a unique webhook secret for this installation and encrypt it
@@ -219,11 +219,11 @@ githubRouter.get('/app/callback', async (c) => {
   } catch (err) {
     const reqLog = c.get('logger');
     reqLog.error({ err, installationId: installation.id }, 'Failed to enqueue GitHub repo sync job');
-    return c.redirect(`${webUrl}/settings/github?status=error&reason=queue_unavailable`);
+    return c.redirect(`${webUrl}/github/installations?status=error&reason=queue_unavailable`);
   }
 
   return c.redirect(
-    `${webUrl}/settings/github?status=success&installation_id=${installation.id}&action=${setupAction ?? 'install'}`,
+    `${webUrl}/github/installations?status=success&installation_id=${installation.id}&action=${setupAction ?? 'install'}`,
   );
 });
 
