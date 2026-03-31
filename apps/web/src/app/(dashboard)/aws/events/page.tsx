@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
@@ -60,6 +60,80 @@ function formatTimestamp(iso: string): string {
 
 function serviceFromSource(source: string): string {
   return source.replace(".amazonaws.com", "");
+}
+
+function TreeLine({ last = false }: { last?: boolean }) {
+  return (
+    <span className="text-muted-foreground/50 select-none">
+      {last ? "└── " : "├── "}
+    </span>
+  );
+}
+
+function TreeValue({
+  label,
+  value,
+  last = false,
+  valueClassName,
+}: {
+  label: string;
+  value: ReactNode;
+  last?: boolean;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="flex">
+      <TreeLine last={last} />
+      <span className="text-muted-foreground">{label}:</span>
+      <span
+        className={cn(
+          "ml-1 min-w-0 break-all",
+          valueClassName ?? "text-foreground",
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function awsEventDetailRows(event: RawEvent) {
+  const rows: { label: string; value: ReactNode; valueClassName?: string }[] = [
+    { label: "event_id", value: event.cloudTrailEventId },
+    { label: "service", value: event.eventSource },
+    { label: "region", value: event.awsRegion },
+  ];
+  if (event.principalId) {
+    rows.push({ label: "principal_id", value: event.principalId });
+  }
+  if (event.userArn) {
+    rows.push({ label: "arn", value: event.userArn });
+  }
+  if (event.userType) {
+    rows.push({ label: "user_type", value: event.userType });
+  }
+  if (event.sourceIpAddress) {
+    rows.push({ label: "source_ip", value: event.sourceIpAddress });
+  }
+  rows.push(
+    { label: "event_time", value: new Date(event.eventTime).toISOString() },
+    { label: "received_at", value: new Date(event.receivedAt).toISOString() },
+  );
+  if (event.errorCode) {
+    rows.push({
+      label: "error",
+      value: event.errorCode,
+      valueClassName: "text-warning",
+    });
+  }
+  if (event.promoted && event.platformEventId) {
+    rows.push({
+      label: "platform_event_id",
+      value: event.platformEventId,
+      valueClassName: "text-primary",
+    });
+  }
+  return rows;
 }
 
 /* -- page ---------------------------------------------------------- */
@@ -213,58 +287,21 @@ export default function AwsEventsPage() {
                   </button>
 
                   {expanded && (
-                    <div className="border-t border-border px-4 py-3 space-y-2 text-xs font-mono">
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
-                        <div>
-                          <span className="text-muted-foreground">event-id:</span>{" "}
-                          <span className="text-foreground">{event.cloudTrailEventId}</span>
+                    <div className="border-t border-border px-4 py-3">
+                      <div className="rounded-md border border-border bg-card p-4 font-mono text-xs leading-relaxed">
+                        <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-primary">
+                          CloudTrail event
                         </div>
-                        <div>
-                          <span className="text-muted-foreground">service:</span>{" "}
-                          <span className="text-foreground">{event.eventSource}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">region:</span>{" "}
-                          <span className="text-foreground">{event.awsRegion}</span>
-                        </div>
-                        {event.userArn && (
-                          <div className="col-span-2">
-                            <span className="text-muted-foreground">arn:</span>{" "}
-                            <span className="text-foreground break-all">{event.userArn}</span>
-                          </div>
-                        )}
-                        {event.userType && (
-                          <div>
-                            <span className="text-muted-foreground">type:</span>{" "}
-                            <span className="text-foreground">{event.userType}</span>
-                          </div>
-                        )}
-                        {event.sourceIpAddress && (
-                          <div>
-                            <span className="text-muted-foreground">src-ip:</span>{" "}
-                            <span className="text-foreground">{event.sourceIpAddress}</span>
-                          </div>
-                        )}
-                        <div>
-                          <span className="text-muted-foreground">event-time:</span>{" "}
-                          <span className="text-foreground">{new Date(event.eventTime).toISOString()}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">received:</span>{" "}
-                          <span className="text-foreground">{new Date(event.receivedAt).toISOString()}</span>
-                        </div>
-                        {event.errorCode && (
-                          <div>
-                            <span className="text-muted-foreground">error:</span>{" "}
-                            <span className="text-warning">{event.errorCode}</span>
-                          </div>
-                        )}
-                        {event.promoted && event.platformEventId && (
-                          <div>
-                            <span className="text-muted-foreground">platform-event:</span>{" "}
-                            <span className="text-primary">{event.platformEventId}</span>
-                          </div>
-                        )}
+                        <div className="mb-1 font-bold text-foreground">event/</div>
+                        {awsEventDetailRows(event).map((row, i, arr) => (
+                          <TreeValue
+                            key={`${row.label}-${i}`}
+                            label={row.label}
+                            value={row.value}
+                            last={i === arr.length - 1}
+                            valueClassName={row.valueClassName}
+                          />
+                        ))}
                       </div>
                     </div>
                   )}

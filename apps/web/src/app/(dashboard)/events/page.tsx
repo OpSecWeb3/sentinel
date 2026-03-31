@@ -360,10 +360,11 @@ function EventsPageInner() {
         {/* Event list */}
         {!showLoading && !loading && !error && data.length > 0 && (
           <div className="animate-content-ready overflow-x-auto">
+            {/* Fixed: Module 80 + Alerts 60 + Received 100 = 240px; Type & Summary split the rest equally (table-layout: fixed). */}
             <Table className="min-w-[640px]">
               <colgroup>
                 <col className="w-[80px]" />
-                <col className="w-[140px]" />
+                <col />
                 <col />
                 <col className="w-[60px]" />
                 <col className="w-[100px]" />
@@ -400,11 +401,19 @@ function EventsPageInner() {
                         >
                           [{event.moduleId}]
                         </TableCell>
-                        <TableCell className="text-xs font-medium text-foreground">
-                          {event.eventType}
+                        <TableCell className="max-w-0 min-w-0">
+                          <span
+                            className="block truncate text-xs font-medium text-foreground"
+                            title={event.eventType}
+                          >
+                            {event.eventType}
+                          </span>
                         </TableCell>
-                        <TableCell className="max-w-0">
-                          <span className="block truncate text-xs text-muted-foreground">
+                        <TableCell className="max-w-0 min-w-0">
+                          <span
+                            className="block truncate text-xs text-muted-foreground"
+                            title={payloadSummary(event)}
+                          >
                             {payloadSummary(event)}
                           </span>
                         </TableCell>

@@ -280,122 +280,6 @@ export default function DashboardPage() {
             </div>
           </section>
 
-
-          {/* Events summary */}
-          <section>
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                $ events summarise --triggered
-              </p>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                {eventsTotal > 0 && (
-                  <span>{eventsTotal} total</span>
-                )}
-                <Link href="/events" className="text-primary hover:underline">
-                  all events {">"}
-                </Link>
-              </div>
-            </div>
-            <div className="min-h-[80px]">
-              {showEventsLoading ? (
-                <Card>
-                  <CardContent className="p-0">
-                    <div className="animate-pulse divide-y divide-border">
-                      {[0, 1, 2, 3].map((i) => (
-                        <div key={i} className="flex gap-3 px-4 py-2">
-                          <div className="h-3 w-16 rounded bg-muted-foreground/20" />
-                          <div className="h-3 w-20 rounded bg-muted-foreground/20" />
-                          <div className="h-3 w-32 rounded bg-muted-foreground/20" />
-                          <div className="ml-auto h-3 w-28 rounded bg-muted-foreground/20" />
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              ) : recentEvents.length > 0 ? (
-                <Card className="animate-content-ready">
-                  <CardContent className="p-0">
-                    <Table>
-                      <colgroup>
-                        <col className="w-20" />
-                        <col className="w-[110px]" />
-                        <col />
-                        <col className="w-[160px]" />
-                      </colgroup>
-                      <TableHeader>
-                        <TableRow className="border-b border-border hover:bg-transparent">
-                          <TableHead
-                            scope="col"
-                            className="px-4 py-1.5 text-muted-foreground/60"
-                          >
-                            module
-                          </TableHead>
-                          <TableHead
-                            scope="col"
-                            className="px-4 py-1.5 text-muted-foreground/60"
-                          >
-                            type
-                          </TableHead>
-                          <TableHead
-                            scope="col"
-                            className="px-4 py-1.5 text-muted-foreground/60"
-                          >
-                            ref
-                          </TableHead>
-                          <TableHead
-                            scope="col"
-                            className="px-4 py-1.5 text-muted-foreground/60"
-                          >
-                            received
-                          </TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody className="animate-stagger">
-                        {recentEvents.map((event) => {
-                          const go = () => {
-                            router.push("/events");
-                          };
-                          return (
-                            <TableRow
-                              key={event.id}
-                              role="link"
-                              tabIndex={0}
-                              aria-label="View events"
-                              onClick={go}
-                              onKeyDown={(e) => tableRowLinkKeyDown(e, go)}
-                              className="cursor-pointer border-b border-border text-xs transition-colors last:border-b-0 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                            >
-                              <TableCell className="px-4 py-2 font-mono text-primary">
-                                [{event.moduleId}]
-                              </TableCell>
-                              <TableCell className="max-w-0 px-4 py-2 text-foreground">
-                                <span className="block truncate">{event.eventType}</span>
-                              </TableCell>
-                              <TableCell className="max-w-0 px-4 py-2 text-muted-foreground">
-                                <span className="block truncate">
-                                  {event.externalId ?? "--"}
-                                </span>
-                              </TableCell>
-                              <TableCell className="px-4 py-2 text-muted-foreground">
-                                {new Date(event.receivedAt).toLocaleString()}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </CardContent>
-                </Card>
-              ) : (
-                !eventsLoading && (
-                  <p className="text-xs text-muted-foreground">
-                    {">"} /var/log/events: empty. no events captured yet.
-                  </p>
-                )
-              )}
-            </div>
-          </section>
-
           {/* Recent alerts feed */}
           <section>
             <p className="mb-3 text-xs text-muted-foreground">
@@ -446,6 +330,134 @@ export default function DashboardPage() {
                   {">"} /var/log/alerts: empty. no alerts to display.
                 </p>
               ) : null}
+            </div>
+          </section>
+
+          {/* Events summary */}
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                $ events summarise --triggered
+              </p>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                {eventsTotal > 0 && (
+                  <span>{eventsTotal} total</span>
+                )}
+                <Link href="/events" className="text-primary hover:underline">
+                  all events {">"}
+                </Link>
+              </div>
+            </div>
+            <div className="min-h-[80px]">
+              {showEventsLoading ? (
+                <Card>
+                  <CardContent className="p-0">
+                    <div className="animate-pulse divide-y divide-border">
+                      {[0, 1, 2, 3].map((i) => (
+                        <div key={i} className="flex gap-3 px-4 py-2">
+                          <div className="h-3 w-16 rounded bg-muted-foreground/20" />
+                          <div className="h-3 w-20 rounded bg-muted-foreground/20" />
+                          <div className="h-3 w-32 rounded bg-muted-foreground/20" />
+                          <div className="ml-auto h-3 w-28 rounded bg-muted-foreground/20" />
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : recentEvents.length > 0 ? (
+                <Card className="animate-content-ready overflow-x-auto">
+                  <CardContent className="p-0">
+                    {/* Fixed: Module 80 + Received 100 = 180px; type & ref split the rest equally (table-layout: fixed). */}
+                    <Table className="min-w-[640px]">
+                      <colgroup>
+                        <col className="w-[80px]" />
+                        <col />
+                        <col />
+                        <col className="w-[100px]" />
+                      </colgroup>
+                      <TableHeader>
+                        <TableRow className="border-b border-border hover:bg-transparent">
+                          <TableHead
+                            scope="col"
+                            className="px-4 py-1.5 text-muted-foreground/60"
+                          >
+                            module
+                          </TableHead>
+                          <TableHead
+                            scope="col"
+                            className="px-4 py-1.5 text-muted-foreground/60"
+                          >
+                            type
+                          </TableHead>
+                          <TableHead
+                            scope="col"
+                            className="px-4 py-1.5 text-muted-foreground/60"
+                          >
+                            ref
+                          </TableHead>
+                          <TableHead
+                            scope="col"
+                            className="px-4 py-1.5 text-muted-foreground/60"
+                          >
+                            received
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody className="animate-stagger">
+                        {recentEvents.map((event) => {
+                          const go = () => {
+                            router.push("/events");
+                          };
+                          const refLabel = event.externalId ?? "--";
+                          return (
+                            <TableRow
+                              key={event.id}
+                              role="link"
+                              tabIndex={0}
+                              aria-label="View events"
+                              onClick={go}
+                              onKeyDown={(e) => tableRowLinkKeyDown(e, go)}
+                              className="cursor-pointer border-b border-border text-xs transition-colors last:border-b-0 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            >
+                              <TableCell className="px-4 py-2 font-mono text-primary">
+                                [{event.moduleId}]
+                              </TableCell>
+                              <TableCell className="max-w-0 min-w-0 px-4 py-2">
+                                <span
+                                  className="block truncate text-foreground"
+                                  title={event.eventType}
+                                >
+                                  {event.eventType}
+                                </span>
+                              </TableCell>
+                              <TableCell className="max-w-0 min-w-0 px-4 py-2">
+                                <span
+                                  className="block truncate text-muted-foreground"
+                                  title={refLabel}
+                                >
+                                  {refLabel}
+                                </span>
+                              </TableCell>
+                              <TableCell
+                                className="px-4 py-2 text-muted-foreground"
+                                title={new Date(event.receivedAt).toLocaleString()}
+                              >
+                                {new Date(event.receivedAt).toLocaleString()}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              ) : (
+                !eventsLoading && (
+                  <p className="text-xs text-muted-foreground">
+                    {">"} /var/log/events: empty. no events captured yet.
+                  </p>
+                )
+              )}
             </div>
           </section>
         </>
