@@ -11,6 +11,14 @@ import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { cn } from "@/lib/utils";
 import { apiGet, apiPost, apiDelete, apiFetch } from "@/lib/api";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* -- types --------------------------------------------------------- */
 
@@ -256,81 +264,96 @@ export default function GitHubInstallationsPage() {
         ) : (
           <div className="overflow-x-auto animate-content-ready">
             <div className="min-w-[700px]">
-              {/* Header */}
-              <div className="grid grid-cols-[minmax(140px,1.5fr)_100px_80px_100px_1fr] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <span>Target</span>
-                <span>Type</span>
-                <span>Status</span>
-                <span>Created</span>
-                <span className="text-right">Actions</span>
-              </div>
+              <Table>
+                <colgroup>
+                  <col />
+                  <col className="w-[100px]" />
+                  <col className="w-[80px]" />
+                  <col className="w-[100px]" />
+                  <col />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead scope="col">Target</TableHead>
+                    <TableHead scope="col">Type</TableHead>
+                    <TableHead scope="col">Status</TableHead>
+                    <TableHead scope="col">Created</TableHead>
+                    <TableHead scope="col" className="text-right">
+                      Actions
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow className="border-0 hover:bg-transparent">
+                    <TableCell colSpan={5} className="border-0 py-2 text-xs text-muted-foreground">
+                      {installations.length} installation
+                      {installations.length !== 1 ? "s" : ""}
+                    </TableCell>
+                  </TableRow>
+                  {installations.map((installation) => {
+                    const syncBusy = actionLoading[`sync-${installation.id}`] ?? false;
+                    const rmBusy = actionLoading[`rm-${installation.id}`] ?? false;
 
-              <p className="px-3 pt-2 text-xs text-muted-foreground">
-                {installations.length} installation
-                {installations.length !== 1 ? "s" : ""}
-              </p>
-
-              {/* Rows */}
-              {installations.map((installation) => {
-                const syncBusy = actionLoading[`sync-${installation.id}`] ?? false;
-                const rmBusy = actionLoading[`rm-${installation.id}`] ?? false;
-
-                return (
-                  <div
-                    key={installation.id}
-                    className="group grid grid-cols-[minmax(140px,1.5fr)_100px_80px_100px_1fr] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30"
-                  >
-                    <span className="truncate text-foreground group-hover:text-primary font-medium font-mono transition-colors">
-                      {installation.targetLogin}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground font-mono">
-                      [{installation.targetType === "Organization" ? "org" : "user"}]
-                    </span>
-
-                    <span
-                      className={cn(
-                        "font-mono text-xs",
-                        installation.status === "active"
-                          ? "text-primary"
-                          : installation.status === "removed"
-                            ? "text-destructive"
-                            : "text-muted-foreground",
-                      )}
-                    >
-                      [{installation.status}]
-                    </span>
-
-                    <span className="text-xs text-muted-foreground">
-                      {formatDate(installation.createdAt)}
-                    </span>
-
-                    <span className="flex items-center justify-end gap-2 text-xs">
-                      {installation.status === "active" && (
-                        <>
-                          <button
-                            disabled={syncBusy}
-                            onClick={() => handleSync(installation)}
-                            className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
-                          >
-                            {syncBusy ? "..." : "[sync repos]"}
-                          </button>
-                          <button
-                            disabled={rmBusy}
-                            onClick={() => handleRemove(installation)}
-                            className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                          >
-                            {rmBusy ? "..." : "[remove]"}
-                          </button>
-                        </>
-                      )}
-                      {installation.status === "removed" && (
-                        <span className="text-muted-foreground/60">removed</span>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
+                    return (
+                      <TableRow
+                        key={installation.id}
+                        className="group border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30"
+                      >
+                        <TableCell className="max-w-0 font-mono font-medium text-foreground">
+                          <span className="block truncate transition-colors group-hover:text-primary">
+                            {installation.targetLogin}
+                          </span>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          [{installation.targetType === "Organization" ? "org" : "user"}]
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "font-mono text-xs",
+                            installation.status === "active"
+                              ? "text-primary"
+                              : installation.status === "removed"
+                                ? "text-destructive"
+                                : "text-muted-foreground",
+                          )}
+                        >
+                          [{installation.status}]
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {formatDate(installation.createdAt)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="flex items-center justify-end gap-2 text-xs">
+                            {installation.status === "active" && (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={syncBusy}
+                                  onClick={() => handleSync(installation)}
+                                  className="text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
+                                >
+                                  {syncBusy ? "..." : "[sync repos]"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={rmBusy}
+                                  onClick={() => handleRemove(installation)}
+                                  className="text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+                                >
+                                  {rmBusy ? "..." : "[remove]"}
+                                </button>
+                              </>
+                            )}
+                            {installation.status === "removed" && (
+                              <span className="text-muted-foreground/60">removed</span>
+                            )}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}

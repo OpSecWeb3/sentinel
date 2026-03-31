@@ -11,6 +11,14 @@ import { FilterBar } from "@/components/ui/filter-bar";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { cn } from "@/lib/utils";
 import { apiGet } from "@/lib/api";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* -- types --------------------------------------------------------- */
 
@@ -195,61 +203,70 @@ export default function GitHubRepositoriesPage() {
         ) : (
           <div className="overflow-x-auto animate-content-ready">
             <div className="min-w-[700px]">
-              {/* Header */}
-              <div className="grid grid-cols-[minmax(200px,2fr)_80px_70px_100px_100px] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <span>Repository</span>
-                <span>Visibility</span>
-                <span>Status</span>
-                <span>Branch</span>
-                <span className="text-right">Last Synced</span>
-              </div>
+              <Table>
+                <colgroup>
+                  <col />
+                  <col className="w-20" />
+                  <col className="w-[70px]" />
+                  <col className="w-[100px]" />
+                  <col className="w-[100px]" />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead scope="col">Repository</TableHead>
+                    <TableHead scope="col">Visibility</TableHead>
+                    <TableHead scope="col">Status</TableHead>
+                    <TableHead scope="col">Branch</TableHead>
+                    <TableHead scope="col" className="text-right">
+                      Last Synced
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className="animate-stagger">
+                  <TableRow className="border-0 hover:bg-transparent">
+                    <TableCell colSpan={5} className="border-0 py-2 text-xs text-muted-foreground">
+                      {filteredRepos.length} repositor{filteredRepos.length !== 1 ? "ies" : "y"}
+                      {filteredRepos.length !== repos.length && ` of ${repos.length} total`}
+                    </TableCell>
+                  </TableRow>
+                  {filteredRepos.map((repo) => {
+                    const vis = visibilityBadge[repo.visibility] ?? {
+                      label: repo.visibility,
+                      variant: "secondary" as const,
+                    };
 
-              <p className="px-3 pt-2 text-xs text-muted-foreground">
-                {filteredRepos.length} repositor{filteredRepos.length !== 1 ? "ies" : "y"}
-                {filteredRepos.length !== repos.length && ` of ${repos.length} total`}
-              </p>
-
-              {/* Rows */}
-              <div className="animate-stagger">
-              {filteredRepos.map((repo) => {
-                const vis = visibilityBadge[repo.visibility] ?? {
-                  label: repo.visibility,
-                  variant: "secondary" as const,
-                };
-
-                return (
-                  <div
-                    key={repo.id}
-                    className="group grid grid-cols-[minmax(200px,2fr)_80px_70px_100px_100px] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30"
-                  >
-                    <span className="truncate text-foreground group-hover:text-primary font-medium font-mono transition-colors">
-                      {repo.fullName}
-                    </span>
-
-                    <Badge variant={vis.variant}>
-                      [{vis.label}]
-                    </Badge>
-
-                    <span
-                      className={cn(
-                        "font-mono text-xs",
-                        repo.archived ? "text-muted-foreground" : "text-primary",
-                      )}
-                    >
-                      {repo.archived ? "[archived]" : "[active]"}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {repo.defaultBranch}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground text-right">
-                      {formatDate(repo.syncedAt)}
-                    </span>
-                  </div>
-                );
-              })}
-              </div>
+                    return (
+                      <TableRow
+                        key={repo.id}
+                        className="group border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30"
+                      >
+                        <TableCell className="max-w-0 font-mono font-medium text-foreground">
+                          <span className="block truncate transition-colors group-hover:text-primary">
+                            {repo.fullName}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={vis.variant}>[{vis.label}]</Badge>
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "font-mono text-xs",
+                            repo.archived ? "text-muted-foreground" : "text-primary",
+                          )}
+                        >
+                          {repo.archived ? "[archived]" : "[active]"}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {repo.defaultBranch}
+                        </TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          {formatDate(repo.syncedAt)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}

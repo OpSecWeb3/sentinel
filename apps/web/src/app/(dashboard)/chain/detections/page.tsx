@@ -13,6 +13,14 @@ import { NavTabs, type NavTab } from "@/components/ui/nav-tabs";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { useToast } from "@/hooks/use-toast";
 import { ToastContainer } from "@/components/ui/toast";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* ── types ─────────────────────────────────────────────────────── */
 
@@ -803,108 +811,126 @@ export default function ChainDetectionsPage() {
         ) : (
           <div className="overflow-x-auto animate-content-ready">
             <div className="min-w-[700px]">
-              {/* Table header */}
-              <div className="grid grid-cols-[minmax(140px,2fr)_80px_80px_60px_120px_100px_120px] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <span>Name</span>
-                <span>Severity</span>
-                <span>Status</span>
-                <span>Rules</span>
-                <span>Last Triggered</span>
-                <span>Created</span>
-                <span className="text-right">Actions</span>
-              </div>
-
-              <p className="px-3 pt-2 text-xs text-muted-foreground">
-                {detections.length} detection
-                {detections.length !== 1 ? "s" : ""}
-              </p>
-
-              {/* Rows */}
-              {detections.map((detection) => (
-                <div key={detection.id}>
-                  <div className="grid grid-cols-[minmax(140px,2fr)_80px_80px_60px_120px_100px_120px] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30">
-                    <Link
-                      href={`/chain/detections/${detection.id}`}
-                      className="truncate text-foreground hover:text-primary font-medium"
+              <Table>
+                <colgroup>
+                  <col />
+                  <col className="w-20" />
+                  <col className="w-20" />
+                  <col className="w-[60px]" />
+                  <col className="w-[120px]" />
+                  <col className="w-[100px]" />
+                  <col className="w-[120px]" />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead scope="col">Name</TableHead>
+                    <TableHead scope="col">Severity</TableHead>
+                    <TableHead scope="col">Status</TableHead>
+                    <TableHead scope="col">Rules</TableHead>
+                    <TableHead scope="col">Last Triggered</TableHead>
+                    <TableHead scope="col">Created</TableHead>
+                    <TableHead scope="col" className="text-right">
+                      Actions
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow className="border-0 hover:bg-transparent">
+                    <TableCell colSpan={7} className="border-0 py-2 text-xs text-muted-foreground">
+                      {detections.length} detection
+                      {detections.length !== 1 ? "s" : ""}
+                    </TableCell>
+                  </TableRow>
+                  {detections.map((detection) => (
+                    <TableRow
+                      key={detection.id}
+                      className="border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30"
                     >
-                      {detection.name}
-                    </Link>
-
-                    <span
-                      className={cn(
-                        "text-xs font-mono",
-                        severityColor[detection.severity] ??
-                          "text-muted-foreground",
-                      )}
-                    >
-                      {severityTag[detection.severity] ??
-                        `[${detection.severity}]`}
-                    </span>
-
-                    <span
-                      className={cn(
-                        "text-xs font-mono",
-                        detection.status === "active"
-                          ? "text-primary"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      {detection.status === "active"
-                        ? "[active]"
-                        : "[paused]"}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground">
-                      {detection.ruleCount}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground">
-                      {detection.lastTriggeredAt
-                        ? formatDate(detection.lastTriggeredAt)
-                        : "--"}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground">
-                      {formatDate(detection.createdAt)}
-                    </span>
-
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => handleToggleStatus(detection)}
-                        className="text-xs text-muted-foreground hover:text-primary transition-colors"
+                      <TableCell className="max-w-0 font-medium">
+                        <Link
+                          href={`/chain/detections/${detection.id}`}
+                          className="block truncate text-foreground hover:text-primary"
+                        >
+                          {detection.name}
+                        </Link>
+                      </TableCell>
+                      <TableCell
+                        className={cn(
+                          "font-mono text-xs",
+                          severityColor[detection.severity] ??
+                            "text-muted-foreground",
+                        )}
+                      >
+                        {severityTag[detection.severity] ??
+                          `[${detection.severity}]`}
+                      </TableCell>
+                      <TableCell
+                        className={cn(
+                          "font-mono text-xs",
+                          detection.status === "active"
+                            ? "text-primary"
+                            : "text-muted-foreground",
+                        )}
                       >
                         {detection.status === "active"
-                          ? "[pause]"
-                          : "[enable]"}
-                      </button>
+                          ? "[active]"
+                          : "[paused]"}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {detection.ruleCount}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {detection.lastTriggeredAt
+                          ? formatDate(detection.lastTriggeredAt)
+                          : "--"}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {formatDate(detection.createdAt)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleStatus(detection)}
+                            className="text-xs text-muted-foreground transition-colors hover:text-primary"
+                          >
+                            {detection.status === "active"
+                              ? "[pause]"
+                              : "[enable]"}
+                          </button>
 
-                      {deletingId === detection.id ? (
-                        <span className="flex items-center gap-1">
-                          <button
-                            onClick={() => handleDelete(detection.id)}
-                            className="text-xs text-destructive hover:underline"
-                          >
-                            [confirm]
-                          </button>
-                          <button
-                            onClick={() => setDeletingId(null)}
-                            className="text-xs text-muted-foreground hover:text-foreground"
-                          >
-                            [cancel]
-                          </button>
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => setDeletingId(detection.id)}
-                          className="text-xs text-muted-foreground hover:text-destructive transition-colors"
-                        >
-                          [delete]
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
+                          {deletingId === detection.id ? (
+                            <span className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(detection.id)}
+                                className="text-xs text-destructive hover:underline"
+                              >
+                                [confirm]
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeletingId(null)}
+                                className="text-xs text-muted-foreground hover:text-foreground"
+                              >
+                                [cancel]
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setDeletingId(detection.id)}
+                              className="text-xs text-muted-foreground transition-colors hover:text-destructive"
+                            >
+                              [delete]
+                            </button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}

@@ -13,6 +13,14 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* -- types --------------------------------------------------------- */
 
@@ -997,50 +1005,91 @@ export default function HostDetailPage() {
                 {">"} no deductions -- perfect score
               </p>
             ) : (
-              <div className="space-y-1">
-                <div className="grid grid-cols-[100px_minmax(120px,1fr)_50px_minmax(150px,2fr)_80px] gap-x-3 border-b border-border px-2 py-1.5 text-xs text-muted-foreground uppercase tracking-wider">
-                  <span>Category</span>
-                  <span>Item</span>
-                  <span>Pts</span>
-                  <span>Description</span>
-                  <span className="text-right">Action</span>
-                </div>
-                {(host.scoreDeductions ?? []).map((d) => {
-                  const key = `${d.category}:${d.item}`;
-                  const busy = suppressLoading[key] ?? false;
-                  return (
-                    <div
-                      key={key}
-                      className={cn(
-                        "grid grid-cols-[100px_minmax(120px,1fr)_50px_minmax(150px,2fr)_80px] gap-x-3 px-2 py-1.5 text-xs border border-transparent hover:border-border hover:bg-muted/30 transition-colors",
-                        d.suppressed && "opacity-50",
-                      )}
+              <Table>
+                <colgroup>
+                  <col className="w-[100px]" />
+                  <col />
+                  <col className="w-[50px]" />
+                  <col />
+                  <col className="w-[80px]" />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
                     >
-                      <span className="text-primary">[{categoryLabel[d.category] ?? d.category}]</span>
-                      <span className="text-foreground truncate">{d.item}</span>
-                      <span className="text-destructive font-mono">
-                        -{d.points}
-                      </span>
-                      <span className="text-muted-foreground truncate">
-                        {d.description}
-                      </span>
-                      <span className="text-right">
-                        <button
-                          disabled={busy}
-                          onClick={() => toggleSuppression(d)}
-                          className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
-                        >
-                          {busy
-                            ? "..."
-                            : d.suppressed
-                              ? "[unsuppress]"
-                              : "[suppress]"}
-                        </button>
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+                      Category
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Item
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Pts
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Description
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-right text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Action
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(host.scoreDeductions ?? []).map((d) => {
+                    const key = `${d.category}:${d.item}`;
+                    const busy = suppressLoading[key] ?? false;
+                    return (
+                      <TableRow
+                        key={key}
+                        className={cn(
+                          "border border-transparent text-xs transition-colors hover:border-border hover:bg-muted/30",
+                          d.suppressed && "opacity-50",
+                        )}
+                      >
+                        <TableCell className="px-2 py-1.5 text-primary">
+                          [{categoryLabel[d.category] ?? d.category}]
+                        </TableCell>
+                        <TableCell className="max-w-0 px-2 py-1.5 text-foreground">
+                          <span className="block truncate">{d.item}</span>
+                        </TableCell>
+                        <TableCell className="px-2 py-1.5 font-mono text-destructive">
+                          -{d.points}
+                        </TableCell>
+                        <TableCell className="max-w-0 px-2 py-1.5 text-muted-foreground">
+                          <span className="block truncate">{d.description}</span>
+                        </TableCell>
+                        <TableCell className="px-2 py-1.5 text-right">
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => toggleSuppression(d)}
+                            className="text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
+                          >
+                            {busy
+                              ? "..."
+                              : d.suppressed
+                                ? "[unsuppress]"
+                                : "[suppress]"}
+                          </button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         )}
@@ -1366,29 +1415,63 @@ export default function HostDetailPage() {
         {expandedSections.has("dns") && (
           <CardContent className="pt-3">
             {(host.dnsRecords ?? []).length > 0 ? (
-              <div>
-                <div className="grid grid-cols-[60px_minmax(150px,1fr)_80px_60px] gap-x-3 border-b border-border px-2 py-1.5 text-xs text-muted-foreground uppercase tracking-wider">
-                  <span>Type</span>
-                  <span>Value</span>
-                  <span>TTL</span>
-                  <span>Priority</span>
-                </div>
-                {(host.dnsRecords ?? []).map((r, i) => (
-                  <div
-                    key={i}
-                    className="grid grid-cols-[60px_minmax(150px,1fr)_80px_60px] gap-x-3 px-2 py-1.5 text-xs border border-transparent hover:border-border hover:bg-muted/30 transition-colors"
-                  >
-                    <span className="text-primary font-mono">{r.type}</span>
-                    <span className="text-foreground font-mono truncate">
-                      {r.value}
-                    </span>
-                    <span className="text-muted-foreground">{r.ttl}s</span>
-                    <span className="text-muted-foreground">
-                      {r.priority ?? "--"}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <Table>
+                <colgroup>
+                  <col className="w-[60px]" />
+                  <col />
+                  <col className="w-20" />
+                  <col className="w-[60px]" />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Type
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Value
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      TTL
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Priority
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(host.dnsRecords ?? []).map((r, i) => (
+                    <TableRow
+                      key={i}
+                      className="border border-transparent text-xs transition-colors hover:border-border hover:bg-muted/30"
+                    >
+                      <TableCell className="px-2 py-1.5 font-mono text-primary">
+                        {r.type}
+                      </TableCell>
+                      <TableCell className="max-w-0 px-2 py-1.5 font-mono text-foreground">
+                        <span className="block truncate">{r.value}</span>
+                      </TableCell>
+                      <TableCell className="px-2 py-1.5 text-muted-foreground">
+                        {r.ttl}s
+                      </TableCell>
+                      <TableCell className="px-2 py-1.5 text-muted-foreground">
+                        {r.priority ?? "--"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             ) : (
               <p className="text-xs text-muted-foreground">
                 {">"} no DNS records found
@@ -1412,42 +1495,53 @@ export default function HostDetailPage() {
         {expandedSections.has("dns-changes") && (
           <CardContent className="pt-3">
             {(host.dnsChanges ?? []).length > 0 ? (
-              <div>
-                <div className="grid grid-cols-[70px_60px_minmax(100px,1fr)_minmax(100px,1fr)_120px] gap-x-3 border-b border-border px-2 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  <span>Severity</span>
-                  <span>Type</span>
-                  <span>Old Value</span>
-                  <span>New Value</span>
-                  <span>Detected</span>
-                </div>
-                {(host.dnsChanges ?? []).map((change) => (
-                  <div
-                    key={change.id}
-                    className="grid grid-cols-[70px_60px_minmax(100px,1fr)_minmax(100px,1fr)_120px] items-center gap-x-3 border border-transparent px-2 py-1.5 text-xs transition-colors hover:border-border hover:bg-muted/30"
-                  >
-                    <span
-                      className={cn(
-                        "font-mono",
-                        severityColor[change.severity] ?? "text-muted-foreground",
-                      )}
+              <Table>
+                <colgroup>
+                  <col className="w-[70px]" />
+                  <col className="w-[60px]" />
+                  <col />
+                  <col />
+                  <col className="w-[120px]" />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead scope="col">Severity</TableHead>
+                    <TableHead scope="col">Type</TableHead>
+                    <TableHead scope="col">Old Value</TableHead>
+                    <TableHead scope="col">New Value</TableHead>
+                    <TableHead scope="col">Detected</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(host.dnsChanges ?? []).map((change) => (
+                    <TableRow
+                      key={change.id}
+                      className="border border-transparent text-xs transition-colors hover:border-border hover:bg-muted/30"
                     >
-                      [{change.severity}]
-                    </span>
-                    <span className="text-primary font-mono">
-                      {change.recordType}
-                    </span>
-                    <span className="text-muted-foreground font-mono truncate line-through">
-                      {change.oldValue || "(none)"}
-                    </span>
-                    <span className="text-foreground font-mono truncate">
-                      {change.newValue || "(removed)"}
-                    </span>
-                    <span className="text-muted-foreground">
-                      {formatDate(change.detectedAt)}
-                    </span>
-                  </div>
-                ))}
-              </div>
+                      <TableCell
+                        className={cn(
+                          "font-mono",
+                          severityColor[change.severity] ?? "text-muted-foreground",
+                        )}
+                      >
+                        [{change.severity}]
+                      </TableCell>
+                      <TableCell className="font-mono text-primary">
+                        {change.recordType}
+                      </TableCell>
+                      <TableCell className="max-w-0 font-mono text-muted-foreground line-through">
+                        <span className="block truncate">{change.oldValue || "(none)"}</span>
+                      </TableCell>
+                      <TableCell className="max-w-0 font-mono text-foreground">
+                        <span className="block truncate">{change.newValue || "(removed)"}</span>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatDate(change.detectedAt)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             ) : (
               <p className="text-xs text-muted-foreground">
                 {">"} no DNS changes detected
@@ -1883,98 +1977,162 @@ export default function HostDetailPage() {
                 </button>
               </p>
             ) : (
-              <div className="space-y-0">
-                <div className="grid grid-cols-[minmax(160px,2fr)_50px_60px_90px_90px_1fr] gap-x-3 border-b border-border px-2 py-1.5 text-xs text-muted-foreground uppercase tracking-wider">
-                  <span>Hostname</span>
-                  <span>Grade</span>
-                  <span>Status</span>
-                  <span>Last Scan</span>
-                  <span>Cert</span>
-                  <span className="text-right">Actions</span>
-                </div>
-                <p className="px-2 pt-1.5 text-xs text-muted-foreground">
-                  {subdomains.length} subdomain{subdomains.length !== 1 ? "s" : ""}
-                </p>
-                {subdomains.map((child) => {
-                  const cert = formatCertExpiry(child.certExpiry);
-                  const scanBusy = subdomainActionLoading[`scan-${child.id}`] ?? false;
-                  const removeBusy = subdomainActionLoading[`remove-${child.id}`] ?? false;
-                  return (
-                    <div
-                      key={child.id}
-                      className="group grid grid-cols-[minmax(160px,2fr)_50px_60px_90px_90px_1fr] items-center gap-x-3 border border-transparent px-2 py-1.5 text-xs transition-colors hover:border-border hover:bg-muted/30"
+              <Table>
+                <colgroup>
+                  <col className="w-[160px]" />
+                  <col className="w-[50px]" />
+                  <col className="w-[60px]" />
+                  <col className="w-[90px]" />
+                  <col className="w-[90px]" />
+                  <col />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
                     >
-                      <Link
-                        href={`/infra/hosts/${child.id}`}
-                        className="truncate text-foreground group-hover:text-primary font-mono transition-colors"
+                      Hostname
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Grade
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Status
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Last Scan
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Cert
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-2 py-1.5 text-right text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Actions
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow className="border-0 hover:bg-transparent">
+                    <TableCell colSpan={6} className="border-0 px-2 py-1.5 pt-1.5 text-xs text-muted-foreground">
+                      {subdomains.length} subdomain{subdomains.length !== 1 ? "s" : ""}
+                    </TableCell>
+                  </TableRow>
+                  {subdomains.map((child) => {
+                    const cert = formatCertExpiry(child.certExpiry);
+                    const scanBusy = subdomainActionLoading[`scan-${child.id}`] ?? false;
+                    const removeBusy = subdomainActionLoading[`remove-${child.id}`] ?? false;
+                    return (
+                      <TableRow
+                        key={child.id}
+                        className="group border border-transparent text-xs transition-colors hover:border-border hover:bg-muted/30"
                       >
-                        └ {child.hostname}
-                      </Link>
-                      <span>
-                        {child.grade ? (
-                          <span
-                            className={cn(
-                              "inline-flex items-center justify-center w-6 h-6 text-xs font-bold border",
-                              child.grade === "A" ? "bg-primary/10 border-primary/30 text-primary" :
-                              child.grade === "B" ? "bg-primary/5 border-primary/20 text-primary/80" :
-                              child.grade === "C" ? "bg-warning/10 border-warning/30 text-warning" :
-                              child.grade === "D" ? "bg-warning/5 border-warning/20 text-warning/80" :
-                              "bg-destructive/10 border-destructive/30 text-destructive",
-                            )}
+                        <TableCell className="max-w-0 px-2 py-1.5 font-mono">
+                          <Link
+                            href={`/infra/hosts/${child.id}`}
+                            className="block truncate text-foreground transition-colors group-hover:text-primary"
                           >
-                            {child.grade}
+                            └ {child.hostname}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="px-2 py-1.5">
+                          {child.grade ? (
+                            <span
+                              className={cn(
+                                "inline-flex h-6 w-6 items-center justify-center border text-xs font-bold",
+                                child.grade === "A"
+                                  ? "border-primary/30 bg-primary/10 text-primary"
+                                  : child.grade === "B"
+                                    ? "border-primary/20 bg-primary/5 text-primary/80"
+                                    : child.grade === "C"
+                                      ? "border-warning/30 bg-warning/10 text-warning"
+                                      : child.grade === "D"
+                                        ? "border-warning/20 bg-warning/5 text-warning/80"
+                                        : "border-destructive/30 bg-destructive/10 text-destructive",
+                              )}
+                            >
+                              {child.grade}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">--</span>
+                          )}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "px-2 py-1.5 font-mono",
+                            child.status === "active"
+                              ? "text-primary"
+                              : child.status === "scanning"
+                                ? "text-warning"
+                                : child.status === "error"
+                                  ? "text-destructive"
+                                  : "text-muted-foreground",
+                          )}
+                        >
+                          [{child.status}]
+                        </TableCell>
+                        <TableCell className="px-2 py-1.5 text-muted-foreground">
+                          {child.lastScanAt
+                            ? (() => {
+                                const diffMins = Math.floor(
+                                  (Date.now() - new Date(child.lastScanAt).getTime()) / 60_000,
+                                );
+                                if (diffMins < 1) return "just now";
+                                if (diffMins < 60) return `${diffMins}m ago`;
+                                const h = Math.floor(diffMins / 60);
+                                if (h < 24) return `${h}h ago`;
+                                return `${Math.floor(h / 24)}d ago`;
+                              })()
+                            : "never"}
+                        </TableCell>
+                        <TableCell className={cn("px-2 py-1.5", cert.color)}>
+                          {cert.text}
+                        </TableCell>
+                        <TableCell className="px-2 py-1.5 text-right">
+                          <span className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              disabled={scanBusy || child.status === "scanning"}
+                              onClick={() => scanSubdomain(child)}
+                              className="text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
+                            >
+                              {scanBusy ? "..." : "[scan]"}
+                            </button>
+                            <Link
+                              href={`/infra/hosts/${child.id}`}
+                              className="text-muted-foreground transition-colors hover:text-primary"
+                            >
+                              [view]
+                            </Link>
+                            <button
+                              type="button"
+                              disabled={removeBusy}
+                              onClick={() => removeSubdomain(child)}
+                              className="text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+                            >
+                              {removeBusy ? "..." : "[remove]"}
+                            </button>
                           </span>
-                        ) : (
-                          <span className="text-muted-foreground">--</span>
-                        )}
-                      </span>
-                      <span className={cn(
-                        "font-mono",
-                        child.status === "active" ? "text-primary" :
-                        child.status === "scanning" ? "text-warning" :
-                        child.status === "error" ? "text-destructive" : "text-muted-foreground",
-                      )}>
-                        [{child.status}]
-                      </span>
-                      <span className="text-muted-foreground">
-                        {child.lastScanAt
-                          ? (() => {
-                              const diffMins = Math.floor((Date.now() - new Date(child.lastScanAt).getTime()) / 60_000);
-                              if (diffMins < 1) return "just now";
-                              if (diffMins < 60) return `${diffMins}m ago`;
-                              const h = Math.floor(diffMins / 60);
-                              if (h < 24) return `${h}h ago`;
-                              return `${Math.floor(h / 24)}d ago`;
-                            })()
-                          : "never"}
-                      </span>
-                      <span className={cn("", cert.color)}>{cert.text}</span>
-                      <span className="flex items-center justify-end gap-2">
-                        <button
-                          disabled={scanBusy || child.status === "scanning"}
-                          onClick={() => scanSubdomain(child)}
-                          className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
-                        >
-                          {scanBusy ? "..." : "[scan]"}
-                        </button>
-                        <Link
-                          href={`/infra/hosts/${child.id}`}
-                          className="text-muted-foreground hover:text-primary transition-colors"
-                        >
-                          [view]
-                        </Link>
-                        <button
-                          disabled={removeBusy}
-                          onClick={() => removeSubdomain(child)}
-                          className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                        >
-                          {removeBusy ? "..." : "[remove]"}
-                        </button>
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         )}

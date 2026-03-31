@@ -13,6 +13,14 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* ── types ───────────────────────────────────────────────────── */
 
@@ -1580,45 +1588,96 @@ export default function SettingsPage() {
             {!showRpcLoading && !rpcLoading && !rpcError && rpcConfigs.length > 0 && (
               <div className="overflow-x-auto animate-content-ready">
                 <div className="min-w-[700px]">
-                  <div className="grid grid-cols-[minmax(100px,1fr)_minmax(200px,2fr)_80px_80px_80px_80px_1fr] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    <span>Network</span>
-                    <span>Custom URL</span>
-                    <span>Status</span>
-                    <span>Calls</span>
-                    <span>Errors</span>
-                    <span>Latency</span>
-                    <span className="text-right">Actions</span>
-                  </div>
-                  <p className="px-3 pt-2 text-xs text-muted-foreground">
-                    {rpcConfigs.length} config{rpcConfigs.length !== 1 ? "s" : ""}
-                  </p>
-                  {rpcConfigs.map((config) => (
-                    <div
-                      key={config.id}
-                      className="group grid grid-cols-[minmax(100px,1fr)_minmax(200px,2fr)_80px_80px_80px_80px_1fr] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30"
-                    >
-                      <span className="text-foreground font-medium text-xs">{config.networkName}</span>
-                      <span className="text-muted-foreground text-xs truncate">{config.customUrl}</span>
-                      <span className={cn("font-mono text-xs", config.status === "active" ? "text-primary" : config.status === "error" ? "text-destructive" : "text-muted-foreground")}>
-                        [{config.status}]
-                      </span>
-                      <span className="text-primary text-xs">{config.callCount.toLocaleString()}</span>
-                      <span className={cn("text-xs", config.errorCount > 0 ? "text-destructive" : "text-muted-foreground")}>
-                        {config.errorCount.toLocaleString()}
-                      </span>
-                      <span className="text-muted-foreground text-xs">
-                        {config.avgLatencyMs !== null ? `${config.avgLatencyMs}ms` : "--"}
-                      </span>
-                      <span className="flex items-center justify-end gap-2 text-xs">
-                        <button onClick={() => toggleRpcConfig(config)} className="text-muted-foreground hover:text-primary transition-colors">
-                          {config.status === "active" ? "[disable]" : "[enable]"}
-                        </button>
-                        <button onClick={() => deleteRpcConfig(config.id)} className="text-muted-foreground hover:text-destructive transition-colors">
-                          [remove]
-                        </button>
-                      </span>
-                    </div>
-                  ))}
+                  <Table>
+                    <colgroup>
+                      <col />
+                      <col />
+                      <col className="w-20" />
+                      <col className="w-20" />
+                      <col className="w-20" />
+                      <col className="w-20" />
+                      <col />
+                    </colgroup>
+                    <TableHeader>
+                      <TableRow className="border-b border-border hover:bg-transparent">
+                        <TableHead scope="col">Network</TableHead>
+                        <TableHead scope="col">Custom URL</TableHead>
+                        <TableHead scope="col">Status</TableHead>
+                        <TableHead scope="col">Calls</TableHead>
+                        <TableHead scope="col">Errors</TableHead>
+                        <TableHead scope="col">Latency</TableHead>
+                        <TableHead scope="col" className="text-right">
+                          Actions
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow className="border-0 hover:bg-transparent">
+                        <TableCell colSpan={7} className="border-0 py-2 text-xs text-muted-foreground">
+                          {rpcConfigs.length} config{rpcConfigs.length !== 1 ? "s" : ""}
+                        </TableCell>
+                      </TableRow>
+                      {rpcConfigs.map((config) => (
+                        <TableRow
+                          key={config.id}
+                          className="group border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30"
+                        >
+                          <TableCell className="text-xs font-medium text-foreground">
+                            {config.networkName}
+                          </TableCell>
+                          <TableCell className="max-w-0 text-xs text-muted-foreground">
+                            <span className="block truncate">{config.customUrl}</span>
+                          </TableCell>
+                          <TableCell
+                            className={cn(
+                              "font-mono text-xs",
+                              config.status === "active"
+                                ? "text-primary"
+                                : config.status === "error"
+                                  ? "text-destructive"
+                                  : "text-muted-foreground",
+                            )}
+                          >
+                            [{config.status}]
+                          </TableCell>
+                          <TableCell className="text-xs text-primary">
+                            {config.callCount.toLocaleString()}
+                          </TableCell>
+                          <TableCell
+                            className={cn(
+                              "text-xs",
+                              config.errorCount > 0
+                                ? "text-destructive"
+                                : "text-muted-foreground",
+                            )}
+                          >
+                            {config.errorCount.toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {config.avgLatencyMs !== null ? `${config.avgLatencyMs}ms` : "--"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <span className="flex items-center justify-end gap-2 text-xs">
+                              <button
+                                type="button"
+                                onClick={() => toggleRpcConfig(config)}
+                                className="text-muted-foreground transition-colors hover:text-primary"
+                              >
+                                {config.status === "active" ? "[disable]" : "[enable]"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteRpcConfig(config.id)}
+                                className="text-muted-foreground transition-colors hover:text-destructive"
+                              >
+                                [remove]
+                              </button>
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               </div>
             )}
@@ -1841,18 +1900,87 @@ export default function SettingsPage() {
                       <p className="text-xs text-muted-foreground mb-2">results:</p>
                       <div className="overflow-x-auto">
                         <div className="min-w-[600px]">
-                          <div className="grid grid-cols-[minmax(150px,2fr)_70px_100px_120px_80px] gap-x-3 border-b border-border px-2 py-1.5 text-xs text-muted-foreground uppercase tracking-wider">
-                            <span>Hostname</span><span>Proxied</span><span>Provider</span><span>Method</span><span>Config</span>
-                          </div>
-                          {proxyResults.map((result) => (
-                            <div key={result.hostId} className="grid grid-cols-[minmax(150px,2fr)_70px_100px_120px_80px] gap-x-3 px-2 py-1.5 text-xs border border-transparent hover:border-border hover:bg-muted/30 transition-colors">
-                              <span className="text-foreground font-mono truncate">{result.hostname}</span>
-                              <span className={cn("font-mono", result.isProxied ? "text-primary" : "text-muted-foreground")}>{result.isProxied ? "[OK]" : "[--]"}</span>
-                              <span className="text-foreground">{result.provider || "--"}</span>
-                              <span className="text-muted-foreground truncate">{result.detectionMethod || "--"}</span>
-                              <span className={cn("font-mono", result.hasProviderConfig ? "text-primary" : "text-muted-foreground")}>{result.hasProviderConfig ? "[OK]" : "[--]"}</span>
-                            </div>
-                          ))}
+                          <Table>
+                            <colgroup>
+                              <col />
+                              <col className="w-[70px]" />
+                              <col className="w-[100px]" />
+                              <col className="w-[120px]" />
+                              <col className="w-20" />
+                            </colgroup>
+                            <TableHeader>
+                              <TableRow className="border-b border-border hover:bg-transparent">
+                                <TableHead
+                                  scope="col"
+                                  className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                                >
+                                  Hostname
+                                </TableHead>
+                                <TableHead
+                                  scope="col"
+                                  className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                                >
+                                  Proxied
+                                </TableHead>
+                                <TableHead
+                                  scope="col"
+                                  className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                                >
+                                  Provider
+                                </TableHead>
+                                <TableHead
+                                  scope="col"
+                                  className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                                >
+                                  Method
+                                </TableHead>
+                                <TableHead
+                                  scope="col"
+                                  className="px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground"
+                                >
+                                  Config
+                                </TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {proxyResults.map((result) => (
+                                <TableRow
+                                  key={result.hostId}
+                                  className="border border-transparent text-xs transition-colors hover:border-border hover:bg-muted/30"
+                                >
+                                  <TableCell className="max-w-0 px-2 py-1.5 font-mono text-foreground">
+                                    <span className="block truncate">{result.hostname}</span>
+                                  </TableCell>
+                                  <TableCell
+                                    className={cn(
+                                      "px-2 py-1.5 font-mono",
+                                      result.isProxied ? "text-primary" : "text-muted-foreground",
+                                    )}
+                                  >
+                                    {result.isProxied ? "[OK]" : "[--]"}
+                                  </TableCell>
+                                  <TableCell className="px-2 py-1.5 text-foreground">
+                                    {result.provider || "--"}
+                                  </TableCell>
+                                  <TableCell className="max-w-0 px-2 py-1.5 text-muted-foreground">
+                                    <span className="block truncate">
+                                      {result.detectionMethod || "--"}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell
+                                    className={cn(
+                                      "px-2 py-1.5 font-mono",
+                                      result.hasProviderConfig
+                                        ? "text-primary"
+                                        : "text-muted-foreground",
+                                    )}
+                                  >
+                                    {result.hasProviderConfig ? "[OK]" : "[--]"}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
                         </div>
                       </div>
                     </div>

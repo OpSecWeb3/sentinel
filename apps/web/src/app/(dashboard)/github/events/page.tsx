@@ -1,12 +1,21 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { apiGet } from "@/lib/api";
+import { tableRowToggleKeyDown } from "@/lib/table-row-a11y";
 
 /* -- types --------------------------------------------------------- */
 
@@ -170,60 +179,79 @@ export default function GitHubEventsPage() {
         ) : (
           <div className="overflow-x-auto animate-content-ready">
             <div className="min-w-[700px]">
-              {/* Header */}
-              <div className="grid grid-cols-[140px_minmax(200px,2fr)_120px_60px] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <span>Event Type</span>
-                <span>Summary</span>
-                <span>Timestamp</span>
-                <span className="text-right">Detail</span>
-              </div>
-
-              <p className="px-3 pt-2 text-xs text-muted-foreground">
-                {meta ? meta.total : events.length} event
-                {(meta ? meta.total : events.length) !== 1 ? "s" : ""}
-                {meta && meta.totalPages > 1
-                  ? ` -- page ${meta.page} of ${meta.totalPages}`
-                  : ""}
-              </p>
-
-              {/* Rows */}
-              {events.map((event) => {
-                const isExpanded = expandedIds.has(event.id);
-
-                return (
-                  <div key={event.id}>
-                    <div
-                      className="group grid grid-cols-[140px_minmax(200px,2fr)_120px_60px] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30 cursor-pointer"
-                      onClick={() => toggleExpand(event.id)}
+              <Table>
+                <colgroup>
+                  <col className="w-[140px]" />
+                  <col />
+                  <col className="w-[120px]" />
+                  <col className="w-[60px]" />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead scope="col">Event Type</TableHead>
+                    <TableHead scope="col">Summary</TableHead>
+                    <TableHead scope="col">Timestamp</TableHead>
+                    <TableHead scope="col" className="text-right">
+                      Detail
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow className="border-0 hover:bg-transparent">
+                    <TableCell
+                      colSpan={4}
+                      className="border-0 py-2 text-xs text-muted-foreground"
                     >
-                      <span className="text-primary font-mono text-xs">
-                        {event.eventType}
-                      </span>
+                      {meta ? meta.total : events.length} event
+                      {(meta ? meta.total : events.length) !== 1 ? "s" : ""}
+                      {meta && meta.totalPages > 1
+                        ? ` -- page ${meta.page} of ${meta.totalPages}`
+                        : ""}
+                    </TableCell>
+                  </TableRow>
+                  {events.map((event) => {
+                    const isExpanded = expandedIds.has(event.id);
+                    const toggle = () => toggleExpand(event.id);
 
-                      <span className="truncate text-muted-foreground text-xs font-mono">
-                        {summarizePayload(event.payload)}
-                      </span>
-
-                      <span className="text-xs text-muted-foreground">
-                        {formatTimestamp(event.createdAt)}
-                      </span>
-
-                      <span className="text-right text-xs text-muted-foreground hover:text-primary transition-colors">
-                        {isExpanded ? "[hide]" : "[show]"}
-                      </span>
-                    </div>
-
-                    {/* Expanded payload */}
-                    {isExpanded && (
-                      <div className="border-l-2 border-primary/30 ml-3 mb-2 pl-4 py-2">
-                        <pre className="text-xs text-muted-foreground font-mono overflow-x-auto max-h-80 overflow-y-auto bg-muted/20 rounded p-3 border border-border">
-                          {JSON.stringify(event.payload, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                    return (
+                      <Fragment key={event.id}>
+                        <TableRow
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={isExpanded}
+                          onClick={toggle}
+                          onKeyDown={(e) => tableRowToggleKeyDown(e, toggle)}
+                          className="group cursor-pointer border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        >
+                          <TableCell className="font-mono text-xs text-primary">
+                            {event.eventType}
+                          </TableCell>
+                          <TableCell className="max-w-0 font-mono text-xs text-muted-foreground">
+                            <span className="block truncate">
+                              {summarizePayload(event.payload)}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {formatTimestamp(event.createdAt)}
+                          </TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground transition-colors group-hover:text-primary">
+                            {isExpanded ? "[hide]" : "[show]"}
+                          </TableCell>
+                        </TableRow>
+                        {isExpanded && (
+                          <TableRow className="border-0 hover:bg-transparent">
+                            <TableCell colSpan={4} className="border-l-2 border-primary/30 py-2 pl-4">
+                              <pre className="max-h-80 overflow-y-auto overflow-x-auto rounded border border-border bg-muted/20 p-3 font-mono text-xs text-muted-foreground">
+                                {JSON.stringify(event.payload, null, 2)}
+                              </pre>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}

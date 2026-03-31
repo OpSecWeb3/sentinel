@@ -13,6 +13,14 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* -- types --------------------------------------------------------- */
 
@@ -466,153 +474,173 @@ export default function InfraHostsPage() {
         ) : (
           <div className="overflow-x-auto animate-content-ready">
             <div className="min-w-[800px]">
-              {/* Table header */}
-              <div className="grid grid-cols-[minmax(180px,2fr)_60px_70px_100px_100px_60px_1fr] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <button
-                  onClick={() => toggleSort("hostname")}
-                  className="text-left hover:text-foreground transition-colors"
-                >
-                  Hostname{sortIndicator("hostname")}
-                </button>
-                <button
-                  onClick={() => toggleSort("score")}
-                  className="text-left hover:text-foreground transition-colors"
-                >
-                  Grade{sortIndicator("score")}
-                </button>
-                <span>Status</span>
-                <button
-                  onClick={() => toggleSort("lastScanAt")}
-                  className="text-left hover:text-foreground transition-colors"
-                >
-                  Last Scan{sortIndicator("lastScanAt")}
-                </button>
-                <button
-                  onClick={() => toggleSort("certExpiry")}
-                  className="text-left hover:text-foreground transition-colors"
-                >
-                  Cert Expiry{sortIndicator("certExpiry")}
-                </button>
-                <span>Score</span>
-                <span className="text-right">Actions</span>
-              </div>
+              <Table>
+                <colgroup>
+                  <col className="w-[180px]" />
+                  <col className="w-[60px]" />
+                  <col className="w-[70px]" />
+                  <col className="w-[100px]" />
+                  <col className="w-[100px]" />
+                  <col className="w-[60px]" />
+                  <col />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead scope="col" className="p-0 align-bottom">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("hostname")}
+                        className="w-full px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        Hostname{sortIndicator("hostname")}
+                      </button>
+                    </TableHead>
+                    <TableHead scope="col" className="p-0 align-bottom">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("score")}
+                        className="w-full px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        Grade{sortIndicator("score")}
+                      </button>
+                    </TableHead>
+                    <TableHead scope="col">Status</TableHead>
+                    <TableHead scope="col" className="p-0 align-bottom">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("lastScanAt")}
+                        className="w-full px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        Last Scan{sortIndicator("lastScanAt")}
+                      </button>
+                    </TableHead>
+                    <TableHead scope="col" className="p-0 align-bottom">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("certExpiry")}
+                        className="w-full px-3 py-2 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        Cert Expiry{sortIndicator("certExpiry")}
+                      </button>
+                    </TableHead>
+                    <TableHead scope="col">Score</TableHead>
+                    <TableHead scope="col" className="text-right">
+                      Actions
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className="animate-stagger">
+                  <TableRow className="border-0 hover:bg-transparent">
+                    <TableCell colSpan={7} className="border-0 py-2 text-xs text-muted-foreground">
+                      {meta ? meta.total : hosts.length}{" "}
+                      {showAll ? "host" : "root host"}
+                      {(meta ? meta.total : hosts.length) !== 1 ? "s" : ""}
+                      {meta && meta.totalPages > 1
+                        ? ` -- page ${meta.page} of ${meta.totalPages}`
+                        : ""}
+                    </TableCell>
+                  </TableRow>
+                  {hosts.map((host) => {
+                    const busy = actionLoading[host.id] ?? false;
+                    const scanBusy = actionLoading[`scan-${host.id}`] ?? false;
+                    const discoverBusy = actionLoading[`discover-${host.id}`] ?? false;
+                    const cert = formatCertExpiry(host.certExpiry);
 
-              <p className="px-3 pt-2 text-xs text-muted-foreground">
-                {meta ? meta.total : hosts.length}{" "}
-                {showAll ? "host" : "root host"}
-                {(meta ? meta.total : hosts.length) !== 1 ? "s" : ""}
-                {meta && meta.totalPages > 1
-                  ? ` -- page ${meta.page} of ${meta.totalPages}`
-                  : ""}
-              </p>
-
-              {/* Rows */}
-              <div className="animate-stagger">
-              {hosts.map((host) => {
-                const busy = actionLoading[host.id] ?? false;
-                const scanBusy = actionLoading[`scan-${host.id}`] ?? false;
-                const discoverBusy = actionLoading[`discover-${host.id}`] ?? false;
-                const cert = formatCertExpiry(host.certExpiry);
-
-                return (
-                  <div
-                    key={host.id}
-                    className="group grid grid-cols-[minmax(180px,2fr)_60px_70px_100px_100px_60px_1fr] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30"
-                  >
-                    <Link
-                      href={`/infra/hosts/${host.id}`}
-                      className={cn(
-                        "truncate font-medium transition-colors group-hover:text-primary",
-                        host.isRoot ? "text-foreground" : "text-muted-foreground pl-3",
-                      )}
-                    >
-                      {!host.isRoot && <span className="mr-1 select-none">└</span>}
-                      {host.hostname}
-                    </Link>
-
-                    {/* Grade badge */}
-                    <span>
-                      {host.grade ? (
-                        <span
+                    return (
+                      <TableRow
+                        key={host.id}
+                        className="group border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30"
+                      >
+                        <TableCell className="max-w-0 font-medium">
+                          <Link
+                            href={`/infra/hosts/${host.id}`}
+                            className={cn(
+                              "block truncate transition-colors group-hover:text-primary",
+                              host.isRoot ? "text-foreground" : "text-muted-foreground pl-3",
+                            )}
+                          >
+                            {!host.isRoot && <span className="mr-1 select-none">└</span>}
+                            {host.hostname}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          {host.grade ? (
+                            <span
+                              className={cn(
+                                "inline-flex h-7 w-7 items-center justify-center border text-sm font-bold",
+                                gradeBg[host.grade] ?? "border-border bg-muted/30",
+                                gradeColor[host.grade] ?? "text-muted-foreground",
+                              )}
+                            >
+                              {host.grade}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">--</span>
+                          )}
+                        </TableCell>
+                        <TableCell
                           className={cn(
-                            "inline-flex items-center justify-center w-7 h-7 text-sm font-bold border",
-                            gradeBg[host.grade] ?? "bg-muted/30 border-border",
-                            gradeColor[host.grade] ?? "text-muted-foreground",
+                            "font-mono text-xs",
+                            statusColor[host.status] ?? "text-muted-foreground",
                           )}
                         >
-                          {host.grade}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">--</span>
-                      )}
-                    </span>
-
-                    {/* Status */}
-                    <span
-                      className={cn(
-                        "font-mono text-xs",
-                        statusColor[host.status] ?? "text-muted-foreground",
-                      )}
-                    >
-                      [{host.status}]
-                    </span>
-
-                    {/* Last scan */}
-                    <span className="text-xs text-muted-foreground">
-                      {formatDate(host.lastScanAt)}
-                    </span>
-
-                    {/* Cert expiry */}
-                    <span className={cn("text-xs", cert.color)}>
-                      {cert.text}
-                    </span>
-
-                    {/* Score */}
-                    <span
-                      className={cn(
-                        "text-xs font-mono",
-                        gradeColor[host.grade ?? ""] ?? "text-muted-foreground",
-                      )}
-                    >
-                      {host.score !== null ? host.score : "--"}
-                    </span>
-
-                    {/* Actions */}
-                    <span className="flex items-center justify-end gap-2 text-xs">
-                      <button
-                        disabled={scanBusy || host.status === "scanning"}
-                        onClick={() => scanHost(host)}
-                        className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
-                      >
-                        {scanBusy ? "..." : "[scan]"}
-                      </button>
-                      {host.isRoot && (
-                        <button
-                          disabled={discoverBusy}
-                          onClick={() => discoverHost(host)}
-                          className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                          [{host.status}]
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {formatDate(host.lastScanAt)}
+                        </TableCell>
+                        <TableCell className={cn("text-xs", cert.color)}>
+                          {cert.text}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "font-mono text-xs",
+                            gradeColor[host.grade ?? ""] ?? "text-muted-foreground",
+                          )}
                         >
-                          {discoverBusy ? "..." : "[discover]"}
-                        </button>
-                      )}
-                      <Link
-                        href={`/infra/hosts/${host.id}`}
-                        className="text-muted-foreground hover:text-primary transition-colors"
-                      >
-                        [view]
-                      </Link>
-                      <button
-                        disabled={busy}
-                        onClick={() => removeHost(host)}
-                        className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                      >
-                        [remove]
-                      </button>
-                    </span>
-                  </div>
-                );
-              })}
-              </div>
+                          {host.score !== null ? host.score : "--"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="flex items-center justify-end gap-2 text-xs">
+                            <button
+                              type="button"
+                              disabled={scanBusy || host.status === "scanning"}
+                              onClick={() => scanHost(host)}
+                              className="text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
+                            >
+                              {scanBusy ? "..." : "[scan]"}
+                            </button>
+                            {host.isRoot && (
+                              <button
+                                type="button"
+                                disabled={discoverBusy}
+                                onClick={() => discoverHost(host)}
+                                className="text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
+                              >
+                                {discoverBusy ? "..." : "[discover]"}
+                              </button>
+                            )}
+                            <Link
+                              href={`/infra/hosts/${host.id}`}
+                              className="text-muted-foreground transition-colors hover:text-primary"
+                            >
+                              [view]
+                            </Link>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => removeHost(host)}
+                              className="text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+                            >
+                              [remove]
+                            </button>
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}

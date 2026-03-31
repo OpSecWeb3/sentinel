@@ -5,11 +5,20 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { apiFetch } from "@/lib/api";
+import { tableRowLinkKeyDown } from "@/lib/table-row-a11y";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { SearchInput } from "@/components/ui/search-input";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* ── types ───────────────────────────────────────────────────── */
 
@@ -396,65 +405,86 @@ function AlertsPageInner() {
         {!showLoading && !loading && !error && data.length > 0 && (
           <div className="overflow-x-auto animate-content-ready">
             <div className="min-w-[800px]">
-              {/* Header */}
-              <div className="grid grid-cols-[50px_minmax(100px,2fr)_minmax(80px,1fr)_100px_120px_80px] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <span>Sev</span>
-                <span>Title</span>
-                <span>Detection</span>
-                <span>Module</span>
-                <span>Time</span>
-                <span className="text-right">Notif</span>
-              </div>
-
-              {/* Rows */}
-              <div className="animate-stagger">
-                {data.map((alert) => {
-                  const sev = alert.severity.toLowerCase();
-                  return (
-                    <Link
-                      key={String(alert.id)}
-                      href={`/alerts/${alert.id}`}
-                      className="group grid grid-cols-[50px_minmax(100px,2fr)_minmax(80px,1fr)_100px_120px_80px] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30"
-                    >
-                      <span
-                        className={cn(
-                          "font-mono text-xs uppercase",
-                          SEVERITY_COLOR[sev] ?? "text-muted-foreground",
-                        )}
+              <Table>
+                <colgroup>
+                  <col className="w-[50px]" />
+                  <col />
+                  <col />
+                  <col className="w-[100px]" />
+                  <col className="w-[120px]" />
+                  <col className="w-[80px]" />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead scope="col">Sev</TableHead>
+                    <TableHead scope="col">Title</TableHead>
+                    <TableHead scope="col">Detection</TableHead>
+                    <TableHead scope="col">Module</TableHead>
+                    <TableHead scope="col">Time</TableHead>
+                    <TableHead scope="col" className="text-right">
+                      Notif
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className="animate-stagger">
+                  {data.map((alert) => {
+                    const sev = alert.severity.toLowerCase();
+                    const href = `/alerts/${alert.id}`;
+                    const go = () => {
+                      router.push(href);
+                    };
+                    return (
+                      <TableRow
+                        key={String(alert.id)}
+                        role="link"
+                        tabIndex={0}
+                        aria-label={`Open alert: ${alert.title ?? "Untitled"}`}
+                        onClick={go}
+                        onKeyDown={(e) => tableRowLinkKeyDown(e, go)}
+                        className="group cursor-pointer border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       >
-                        {SEVERITY_LABEL[sev as Severity] ?? sev}
-                      </span>
-
-                      <span className="truncate text-foreground group-hover:text-primary font-medium text-xs">
-                        {alert.title ?? "Untitled"}
-                      </span>
-
-                      <span className="truncate text-muted-foreground text-xs">
-                        {alert.detectionName ?? "--"}
-                      </span>
-
-                      <span className="text-muted-foreground text-xs">
-                        {alert.moduleId ?? "--"}
-                      </span>
-
-                      <span className="text-muted-foreground text-xs" title={new Date(alert.createdAt).toLocaleString()}>
-                        {timeAgo(alert.createdAt)}
-                      </span>
-
-                      <span
-                        className={cn(
-                          "text-right text-xs",
-                          NOTIF_COLOR[alert.notificationStatus] ??
-                            "text-muted-foreground",
-                        )}
-                      >
-                        {NOTIF_LABEL[alert.notificationStatus] ??
-                          `[${alert.notificationStatus}]`}
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
+                        <TableCell
+                          className={cn(
+                            "font-mono text-xs uppercase",
+                            SEVERITY_COLOR[sev] ?? "text-muted-foreground",
+                          )}
+                        >
+                          {SEVERITY_LABEL[sev as Severity] ?? sev}
+                        </TableCell>
+                        <TableCell className="max-w-0 font-medium text-xs text-foreground">
+                          <span className="block truncate transition-colors group-hover:text-primary">
+                            {alert.title ?? "Untitled"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="max-w-0 text-xs text-muted-foreground">
+                          <span className="block truncate">
+                            {alert.detectionName ?? "--"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {alert.moduleId ?? "--"}
+                        </TableCell>
+                        <TableCell
+                          className="text-xs text-muted-foreground"
+                          title={new Date(alert.createdAt).toLocaleString()}
+                        >
+                          {timeAgo(alert.createdAt)}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "text-right text-xs",
+                            NOTIF_COLOR[alert.notificationStatus] ??
+                              "text-muted-foreground",
+                          )}
+                        >
+                          {NOTIF_LABEL[alert.notificationStatus] ??
+                            `[${alert.notificationStatus}]`}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}

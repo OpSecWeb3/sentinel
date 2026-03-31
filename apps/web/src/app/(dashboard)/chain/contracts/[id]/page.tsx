@@ -11,6 +11,14 @@ import { Button } from "@/components/ui/button";
 import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { ContractCallPanel } from "@/components/contract-call-panel";
 
 /* -- types --------------------------------------------------------- */
@@ -419,18 +427,27 @@ export default function ContractDetailPage() {
                 {contract.abiEvents.length === 0 ? (
                   <p className="text-xs text-muted-foreground">no events in ABI</p>
                 ) : (
-                  <div className="space-y-0.5">
-                    {contract.abiEvents.map((ev) => (
-                      <div key={ev.signature} className="grid grid-cols-[2fr_3fr] gap-x-3 text-xs">
-                        <span className="text-primary font-medium truncate">
-                          {ev.name}
-                        </span>
-                        <span className="text-muted-foreground font-mono truncate">
-                          {ev.signature}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  <Table>
+                    <colgroup>
+                      <col />
+                      <col />
+                    </colgroup>
+                    <TableBody>
+                      {contract.abiEvents.map((ev) => (
+                        <TableRow
+                          key={ev.signature}
+                          className="border-0 hover:bg-transparent"
+                        >
+                          <TableCell className="max-w-0 py-1 text-xs font-medium text-primary">
+                            <span className="block truncate">{ev.name}</span>
+                          </TableCell>
+                          <TableCell className="max-w-0 py-1 font-mono text-xs text-muted-foreground">
+                            <span className="block truncate">{ev.signature}</span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 )}
               </div>
             )}
@@ -489,27 +506,35 @@ export default function ContractDetailPage() {
                   </p>
                 )}
                 {storageSlots.length > 0 ? (
-                  <div className="space-y-0.5">
-                    <div className="grid grid-cols-[1fr_2fr_1fr] gap-x-3 text-xs font-medium uppercase tracking-wider text-muted-foreground border-b border-border pb-1 mb-1">
-                      <span>Slot</span>
-                      <span>Name</span>
-                      <span>Type</span>
-                    </div>
-                    {storageSlots.map((s, i) => (
-                      <div
-                        key={i}
-                        className="grid grid-cols-[1fr_2fr_1fr] gap-x-3 text-xs"
-                      >
-                        <span className="font-mono text-muted-foreground truncate">
-                          {s.slot}
-                        </span>
-                        <span className="text-foreground truncate">{s.label}</span>
-                        <span className="text-muted-foreground font-mono truncate">
-                          {s.type}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  <Table>
+                    <colgroup>
+                      <col />
+                      <col />
+                      <col />
+                    </colgroup>
+                    <TableHeader>
+                      <TableRow className="border-b border-border hover:bg-transparent">
+                        <TableHead scope="col">Slot</TableHead>
+                        <TableHead scope="col">Name</TableHead>
+                        <TableHead scope="col">Type</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {storageSlots.map((s, i) => (
+                        <TableRow key={i} className="border-0 hover:bg-transparent">
+                          <TableCell className="max-w-0 py-1 font-mono text-xs text-muted-foreground">
+                            <span className="block truncate">{s.slot}</span>
+                          </TableCell>
+                          <TableCell className="max-w-0 py-1 text-xs text-foreground">
+                            <span className="block truncate">{s.label}</span>
+                          </TableCell>
+                          <TableCell className="max-w-0 py-1 font-mono text-xs text-muted-foreground">
+                            <span className="block truncate">{s.type}</span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     no storage slots

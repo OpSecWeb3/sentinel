@@ -1,11 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/api";
+import { tableRowToggleKeyDown } from "@/lib/table-row-a11y";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 
 /* -- types ----------------------------------------------------------- */
@@ -102,6 +111,7 @@ function CopyButton({ value }: { value: string }) {
   }
   return (
     <button
+      type="button"
       onClick={handleCopy}
       className="ml-1 text-muted-foreground/60 hover:text-foreground transition-colors"
     >
@@ -449,105 +459,126 @@ export default function RegistryEventsPage() {
         ) : (
           <div className="overflow-x-auto animate-content-ready">
             <div className="min-w-[800px]">
-              {/* Header */}
-              <div className="grid grid-cols-[140px_minmax(160px,2fr)_90px_90px_100px_80px_60px] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <span>Type</span>
-                <span>Artifact</span>
-                <span>Signature</span>
-                <span>Provenance</span>
-                <span>Attribution</span>
-                <span>Time</span>
-                <span className="text-right">Detail</span>
-              </div>
-
-              <p className="px-3 pt-2 text-xs text-muted-foreground">
-                {meta ? meta.total : events.length} event
-                {(meta ? meta.total : events.length) !== 1 ? "s" : ""}
-                {meta && meta.totalPages > 1
-                  ? ` -- page ${meta.page} of ${meta.totalPages}`
-                  : ""}
-              </p>
-
-              {/* Rows */}
-              {events.map((event) => {
-                const shortType = getShortType(event.eventType);
-                const color =
-                  eventTypeColor[shortType] ?? "text-muted-foreground";
-                const isExpanded = expandedId === event.id;
-
-                const artifact = event.payload.artifact as string | undefined;
-                const hasSignature = (
-                  event.payload.verification as
-                    | { signature?: { hasSignature?: boolean } }
-                    | undefined
-                )?.signature?.hasSignature;
-                const hasProvenance = (
-                  event.payload.verification as
-                    | { provenance?: { hasProvenance?: boolean } }
-                    | undefined
-                )?.provenance?.hasProvenance;
-                const attributionStatus = event.payload
-                  .attributionStatus as string | undefined;
-
-                return (
-                  <div key={event.id}>
-                    <div
-                      className="group grid grid-cols-[140px_minmax(160px,2fr)_90px_90px_100px_80px_60px] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30 cursor-pointer"
-                      onClick={() =>
-                        setExpandedId(isExpanded ? null : event.id)
-                      }
+              <Table>
+                <colgroup>
+                  <col className="w-[140px]" />
+                  <col />
+                  <col className="w-[90px]" />
+                  <col className="w-[90px]" />
+                  <col className="w-[100px]" />
+                  <col className="w-[80px]" />
+                  <col className="w-[60px]" />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead scope="col">Type</TableHead>
+                    <TableHead scope="col">Artifact</TableHead>
+                    <TableHead scope="col">Signature</TableHead>
+                    <TableHead scope="col">Provenance</TableHead>
+                    <TableHead scope="col">Attribution</TableHead>
+                    <TableHead scope="col">Time</TableHead>
+                    <TableHead scope="col" className="text-right">
+                      Detail
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow className="border-0 hover:bg-transparent">
+                    <TableCell
+                      colSpan={7}
+                      className="border-0 py-2 text-xs text-muted-foreground"
                     >
-                      <span
-                        className={cn("font-mono text-xs truncate", color)}
-                      >
-                        {shortType}
-                      </span>
+                      {meta ? meta.total : events.length} event
+                      {(meta ? meta.total : events.length) !== 1 ? "s" : ""}
+                      {meta && meta.totalPages > 1
+                        ? ` -- page ${meta.page} of ${meta.totalPages}`
+                        : ""}
+                    </TableCell>
+                  </TableRow>
+                  {events.map((event) => {
+                    const shortType = getShortType(event.eventType);
+                    const color =
+                      eventTypeColor[shortType] ?? "text-muted-foreground";
+                    const isExpanded = expandedId === event.id;
+                    const toggle = () =>
+                      setExpandedId(isExpanded ? null : event.id);
 
-                      <span className="text-xs text-foreground truncate">
-                        {artifact ?? "--"}
-                      </span>
+                    const artifact = event.payload.artifact as
+                      | string
+                      | undefined;
+                    const hasSignature = (
+                      event.payload.verification as
+                        | { signature?: { hasSignature?: boolean } }
+                        | undefined
+                    )?.signature?.hasSignature;
+                    const hasProvenance = (
+                      event.payload.verification as
+                        | { provenance?: { hasProvenance?: boolean } }
+                        | undefined
+                    )?.provenance?.hasProvenance;
+                    const attributionStatus = event.payload
+                      .attributionStatus as string | undefined;
 
-                      {/* Signature badge */}
-                      <span className="text-xs">
-                        {hasSignature === true ? (
-                          <span className="text-primary">[sig:yes]</span>
-                        ) : hasSignature === false ? (
-                          <span className="text-destructive">[sig:no]</span>
-                        ) : (
-                          <span className="text-muted-foreground">[--]</span>
+                    return (
+                      <Fragment key={event.id}>
+                        <TableRow
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={isExpanded}
+                          onClick={toggle}
+                          onKeyDown={(e) => tableRowToggleKeyDown(e, toggle)}
+                          className="group cursor-pointer border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        >
+                          <TableCell
+                            className={cn("max-w-0 font-mono text-xs", color)}
+                          >
+                            <span className="block truncate">{shortType}</span>
+                          </TableCell>
+                          <TableCell className="max-w-0 text-xs text-foreground">
+                            <span className="block truncate">
+                              {artifact ?? "--"}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {hasSignature === true ? (
+                              <span className="text-primary">[sig:yes]</span>
+                            ) : hasSignature === false ? (
+                              <span className="text-destructive">[sig:no]</span>
+                            ) : (
+                              <span className="text-muted-foreground">[--]</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {hasProvenance === true ? (
+                              <span className="text-primary">[prov:yes]</span>
+                            ) : hasProvenance === false ? (
+                              <span className="text-destructive">[prov:no]</span>
+                            ) : (
+                              <span className="text-muted-foreground">[--]</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            <AttributionBadge status={attributionStatus} />
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {formatTimestamp(event.receivedAt)}
+                          </TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground transition-colors group-hover:text-primary">
+                            {isExpanded ? "[-]" : "[+]"}
+                          </TableCell>
+                        </TableRow>
+                        {isExpanded && (
+                          <TableRow className="border-0 hover:bg-transparent">
+                            <TableCell colSpan={7} className="p-0">
+                              <EventDetail event={event} />
+                            </TableCell>
+                          </TableRow>
                         )}
-                      </span>
-
-                      {/* Provenance badge */}
-                      <span className="text-xs">
-                        {hasProvenance === true ? (
-                          <span className="text-primary">[prov:yes]</span>
-                        ) : hasProvenance === false ? (
-                          <span className="text-destructive">[prov:no]</span>
-                        ) : (
-                          <span className="text-muted-foreground">[--]</span>
-                        )}
-                      </span>
-
-                      {/* Attribution badge */}
-                      <span className="text-xs">
-                        <AttributionBadge status={attributionStatus} />
-                      </span>
-
-                      <span className="text-xs text-muted-foreground">
-                        {formatTimestamp(event.receivedAt)}
-                      </span>
-
-                      <span className="text-right text-xs text-muted-foreground group-hover:text-primary transition-colors">
-                        {isExpanded ? "[-]" : "[+]"}
-                      </span>
-                    </div>
-
-                    {/* Expanded detail */}
-                    {isExpanded && <EventDetail event={event} />}
-                  </div>
-                );
-              })}
+                      </Fragment>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}

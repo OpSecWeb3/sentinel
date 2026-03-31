@@ -1,13 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { apiFetch } from "@/lib/api";
+import { tableRowLinkKeyDown } from "@/lib/table-row-a11y";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 
 /* ── types ─────────────────────────────────────────────────────── */
 
@@ -70,6 +80,7 @@ const severityKeys = ["critical", "high", "medium", "low"] as const;
 /* ── page ──────────────────────────────────────────────────────── */
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const showLoading = useDelayedLoading(loading);
@@ -304,26 +315,75 @@ export default function DashboardPage() {
               ) : recentEvents.length > 0 ? (
                 <Card className="animate-content-ready">
                   <CardContent className="p-0">
-                    <div className="grid grid-cols-[80px_110px_minmax(80px,1fr)_160px] gap-x-3 border-b border-border px-4 py-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground/60">
-                      <span>module</span>
-                      <span>type</span>
-                      <span>ref</span>
-                      <span>received</span>
-                    </div>
-                    <div className="animate-stagger">
-                      {recentEvents.map((event) => (
-                        <Link
-                          key={event.id}
-                          href="/events"
-                          className="grid grid-cols-[80px_110px_minmax(80px,1fr)_160px] items-center gap-x-3 border-b border-border px-4 py-2 text-xs transition-colors hover:bg-muted/30 last:border-b-0"
-                        >
-                          <span className="text-primary font-mono">[{event.moduleId}]</span>
-                          <span className="text-foreground truncate">{event.eventType}</span>
-                          <span className="text-muted-foreground truncate">{event.externalId ?? "--"}</span>
-                          <span className="text-muted-foreground">{new Date(event.receivedAt).toLocaleString()}</span>
-                        </Link>
-                      ))}
-                    </div>
+                    <Table>
+                      <colgroup>
+                        <col className="w-20" />
+                        <col className="w-[110px]" />
+                        <col />
+                        <col className="w-[160px]" />
+                      </colgroup>
+                      <TableHeader>
+                        <TableRow className="border-b border-border hover:bg-transparent">
+                          <TableHead
+                            scope="col"
+                            className="px-4 py-1.5 text-muted-foreground/60"
+                          >
+                            module
+                          </TableHead>
+                          <TableHead
+                            scope="col"
+                            className="px-4 py-1.5 text-muted-foreground/60"
+                          >
+                            type
+                          </TableHead>
+                          <TableHead
+                            scope="col"
+                            className="px-4 py-1.5 text-muted-foreground/60"
+                          >
+                            ref
+                          </TableHead>
+                          <TableHead
+                            scope="col"
+                            className="px-4 py-1.5 text-muted-foreground/60"
+                          >
+                            received
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody className="animate-stagger">
+                        {recentEvents.map((event) => {
+                          const go = () => {
+                            router.push("/events");
+                          };
+                          return (
+                            <TableRow
+                              key={event.id}
+                              role="link"
+                              tabIndex={0}
+                              aria-label="View events"
+                              onClick={go}
+                              onKeyDown={(e) => tableRowLinkKeyDown(e, go)}
+                              className="cursor-pointer border-b border-border text-xs transition-colors last:border-b-0 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            >
+                              <TableCell className="px-4 py-2 font-mono text-primary">
+                                [{event.moduleId}]
+                              </TableCell>
+                              <TableCell className="max-w-0 px-4 py-2 text-foreground">
+                                <span className="block truncate">{event.eventType}</span>
+                              </TableCell>
+                              <TableCell className="max-w-0 px-4 py-2 text-muted-foreground">
+                                <span className="block truncate">
+                                  {event.externalId ?? "--"}
+                                </span>
+                              </TableCell>
+                              <TableCell className="px-4 py-2 text-muted-foreground">
+                                {new Date(event.receivedAt).toLocaleString()}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
                   </CardContent>
                 </Card>
               ) : (

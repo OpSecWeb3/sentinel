@@ -1,12 +1,21 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { apiFetch } from "@/lib/api";
+import { tableRowToggleKeyDown } from "@/lib/table-row-a11y";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 
 /* -- types --------------------------------------------------------- */
@@ -344,87 +353,107 @@ function InfraEventsPageInner() {
 
         {/* Event list */}
         {!showLoading && !loading && !error && data.length > 0 && (
-          <div className="animate-content-ready">
-            {/* Header */}
-            <div className="grid grid-cols-[60px_140px_120px_minmax(100px,1fr)_160px] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              <span>Severity</span>
-              <span>Type</span>
-              <span>Host</span>
-              <span>Details</span>
-              <span>Received</span>
-            </div>
-
-            <p className="px-3 pt-2 text-xs text-muted-foreground">
-              {meta?.total ?? data.length} event
-              {(meta?.total ?? data.length) !== 1 ? "s" : ""}
-            </p>
-
-            {/* Rows */}
-            {data.map((event) => {
-              const severity =
-                event.severity ??
-                (event.payload.severity as string) ??
-                "low";
-              const hostname =
-                event.hostname ??
-                (event.payload.hostname as string) ??
-                "--";
-              const message =
-                (event.payload.message as string) ??
-                (event.payload.description as string) ??
-                event.eventType;
-
-              return (
-                <div key={event.id}>
-                  <button
-                    onClick={() =>
-                      setExpandedId(
-                        expandedId === event.id ? null : event.id,
-                      )
-                    }
-                    className="group grid w-full grid-cols-[60px_140px_120px_minmax(100px,1fr)_160px] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30 text-left"
+          <div className="animate-content-ready overflow-x-auto">
+            <Table className="min-w-[640px]">
+              <colgroup>
+                <col className="w-[60px]" />
+                <col className="w-[140px]" />
+                <col className="w-[120px]" />
+                <col />
+                <col className="w-[160px]" />
+              </colgroup>
+              <TableHeader>
+                <TableRow className="border-b border-border hover:bg-transparent">
+                  <TableHead scope="col">Severity</TableHead>
+                  <TableHead scope="col">Type</TableHead>
+                  <TableHead scope="col">Host</TableHead>
+                  <TableHead scope="col">Details</TableHead>
+                  <TableHead scope="col">Received</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow className="border-0 hover:bg-transparent">
+                  <TableCell
+                    colSpan={5}
+                    className="border-0 py-2 text-xs text-muted-foreground"
                   >
-                    <span
-                      className={cn(
-                        "font-mono text-xs",
-                        severityColor[severity] ?? "text-muted-foreground",
-                      )}
-                    >
-                      {severityTag[severity] ?? `[${severity}]`}
-                    </span>
-                    <span
-                      className={cn(
-                        "text-xs font-mono",
-                        eventTypeColor[event.eventType] ?? "text-foreground",
-                      )}
-                    >
-                      {event.eventType}
-                    </span>
-                    <span className="text-primary text-xs truncate">
-                      {hostname}
-                    </span>
-                    <span className="truncate text-muted-foreground text-xs">
-                      {message}
-                    </span>
-                    <span className="text-muted-foreground text-xs">
-                      {new Date(event.receivedAt).toLocaleString()}
-                    </span>
-                  </button>
+                    {meta?.total ?? data.length} event
+                    {(meta?.total ?? data.length) !== 1 ? "s" : ""}
+                  </TableCell>
+                </TableRow>
+                {data.map((event) => {
+                  const severity =
+                    event.severity ??
+                    (event.payload.severity as string) ??
+                    "low";
+                  const hostname =
+                    event.hostname ??
+                    (event.payload.hostname as string) ??
+                    "--";
+                  const message =
+                    (event.payload.message as string) ??
+                    (event.payload.description as string) ??
+                    event.eventType;
+                  const expanded = expandedId === event.id;
+                  const toggle = () =>
+                    setExpandedId(expanded ? null : event.id);
 
-                  {/* Expanded payload */}
-                  {expandedId === event.id && (
-                    <div className="border-l-2 border-primary/30 bg-muted/10 ml-3 mb-2 pl-4 py-3">
-                      <p className="text-xs text-muted-foreground mb-2">
-                        $ cat event/{event.id.slice(0, 8)}/payload.json
-                      </p>
-                      <pre className="text-xs text-foreground overflow-x-auto max-h-64 overflow-y-auto">
-                        {JSON.stringify(event.payload, null, 2)}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                  return (
+                    <Fragment key={event.id}>
+                      <TableRow
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={expanded}
+                        onClick={toggle}
+                        onKeyDown={(e) => tableRowToggleKeyDown(e, toggle)}
+                        className="group cursor-pointer border border-transparent text-left text-sm transition-colors hover:border-border hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        <TableCell
+                          className={cn(
+                            "font-mono text-xs",
+                            severityColor[severity] ?? "text-muted-foreground",
+                          )}
+                        >
+                          {severityTag[severity] ?? `[${severity}]`}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "font-mono text-xs",
+                            eventTypeColor[event.eventType] ?? "text-foreground",
+                          )}
+                        >
+                          {event.eventType}
+                        </TableCell>
+                        <TableCell className="max-w-0 text-xs text-primary">
+                          <span className="block truncate">{hostname}</span>
+                        </TableCell>
+                        <TableCell className="max-w-0 text-xs text-muted-foreground">
+                          <span className="block truncate">{message}</span>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {new Date(event.receivedAt).toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                      {expanded && (
+                        <TableRow className="border-0 hover:bg-transparent">
+                          <TableCell
+                            colSpan={5}
+                            className="border-l-2 border-primary/30 bg-muted/10 py-3 pl-4"
+                          >
+                            <p className="mb-2 text-xs text-muted-foreground">
+                              $ cat event/{event.id.slice(0, 8)}/payload.json
+                            </p>
+                            <pre className="max-h-64 overflow-y-auto overflow-x-auto text-xs text-foreground">
+                              {JSON.stringify(event.payload, null, 2)}
+                            </pre>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </div>
         )}
       </div>

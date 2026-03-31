@@ -4,6 +4,14 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SearchInput } from "@/components/ui/search-input";
@@ -366,105 +374,121 @@ export default function CorrelationsPage() {
         ) : (
           <div className="overflow-x-auto animate-content-ready">
             <div className="min-w-[700px]">
-              {/* Header */}
-              <div className="grid grid-cols-[minmax(180px,2fr)_90px_70px_70px_80px_80px_1fr] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <span>Name</span>
-                <span>Type</span>
-                <span>Status</span>
-                <span>Severity</span>
-                <span>Window</span>
-                <span>Last Alert</span>
-                <span className="text-right">Actions</span>
-              </div>
-
-              <p className="px-3 pt-2 text-xs text-muted-foreground">
-                {meta ? meta.total : rules.length} rule
-                {(meta ? meta.total : rules.length) !== 1 ? "s" : ""}
-                {meta && meta.totalPages > 1
-                  ? ` — page ${meta.page} of ${meta.totalPages}`
-                  : ""}
-              </p>
-
-              {/* Rows */}
-              <div className="animate-stagger">
-                {rules.map((rule) => {
-                  const busy = actionLoading[rule.id] ?? false;
-
-                  return (
-                    <div
-                      key={rule.id}
-                      className="group grid grid-cols-[minmax(180px,2fr)_90px_70px_70px_80px_80px_1fr] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30"
+              <Table>
+                <colgroup>
+                  <col className="w-[180px]" />
+                  <col className="w-[90px]" />
+                  <col className="w-[70px]" />
+                  <col className="w-[70px]" />
+                  <col className="w-20" />
+                  <col className="w-20" />
+                  <col />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead scope="col">Name</TableHead>
+                    <TableHead scope="col">Type</TableHead>
+                    <TableHead scope="col">Status</TableHead>
+                    <TableHead scope="col">Severity</TableHead>
+                    <TableHead scope="col">Window</TableHead>
+                    <TableHead scope="col">Last Alert</TableHead>
+                    <TableHead scope="col" className="text-right">
+                      Actions
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className="animate-stagger">
+                  <TableRow className="border-0 hover:bg-transparent">
+                    <TableCell
+                      colSpan={7}
+                      className="border-0 py-2 text-xs text-muted-foreground"
                     >
-                      <Link
-                        href={`/correlations/${rule.id}`}
-                        className="truncate text-foreground group-hover:text-primary font-medium transition-colors"
+                      {meta ? meta.total : rules.length} rule
+                      {(meta ? meta.total : rules.length) !== 1 ? "s" : ""}
+                      {meta && meta.totalPages > 1
+                        ? ` — page ${meta.page} of ${meta.totalPages}`
+                        : ""}
+                    </TableCell>
+                  </TableRow>
+                  {rules.map((rule) => {
+                    const busy = actionLoading[rule.id] ?? false;
+
+                    return (
+                      <TableRow
+                        key={rule.id}
+                        className="group border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30"
                       >
-                        {rule.name}
-                      </Link>
-
-                      <span className="text-xs text-muted-foreground">
-                        {stepsLabel(rule)}
-                      </span>
-
-                      <span
-                        className={cn(
-                          "font-mono text-xs",
-                          statusColor[rule.status],
-                        )}
-                      >
-                        [{rule.status}]
-                      </span>
-
-                      <span
-                        className={cn(
-                          "capitalize text-xs",
-                          severityColor[rule.severity] ?? "text-muted-foreground",
-                        )}
-                      >
-                        {rule.severity}
-                      </span>
-
-                      <span className="text-xs text-muted-foreground">
-                        {rule.config.windowMinutes}m
-                      </span>
-
-                      <span className="text-xs text-muted-foreground">
-                        {formatDate(rule.lastTriggeredAt)}
-                      </span>
-
-                      {/* Actions */}
-                      <span className="flex items-center justify-end gap-2 text-xs">
-                        <button
-                          disabled={busy}
-                          onClick={() => toggleStatus(rule)}
-                          className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                        <TableCell className="max-w-0 font-medium">
+                          <Link
+                            href={`/correlations/${rule.id}`}
+                            className="block truncate text-foreground transition-colors group-hover:text-primary"
+                          >
+                            {rule.name}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {stepsLabel(rule)}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "font-mono text-xs",
+                            statusColor[rule.status],
+                          )}
                         >
-                          {busy
-                            ? "..."
-                            : rule.status === "active"
-                              ? "[pause]"
-                              : "[resume]"}
-                        </button>
-
-                        <Link
-                          href={`/correlations/${rule.id}/edit`}
-                          className="text-muted-foreground hover:text-primary transition-colors"
+                          [{rule.status}]
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "text-xs capitalize",
+                            severityColor[rule.severity] ??
+                              "text-muted-foreground",
+                          )}
                         >
-                          [edit]
-                        </Link>
+                          {rule.severity}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {rule.config.windowMinutes}m
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {formatDate(rule.lastTriggeredAt)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="flex items-center justify-end gap-2 text-xs">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => toggleStatus(rule)}
+                              className="text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
+                            >
+                              {busy
+                                ? "..."
+                                : rule.status === "active"
+                                  ? "[pause]"
+                                  : "[resume]"}
+                            </button>
 
-                        <button
-                          disabled={busy}
-                          onClick={() => deleteRule(rule)}
-                          className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                        >
-                          [delete]
-                        </button>
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+                            <Link
+                              href={`/correlations/${rule.id}/edit`}
+                              className="text-muted-foreground transition-colors hover:text-primary"
+                            >
+                              [edit]
+                            </Link>
+
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => deleteRule(rule)}
+                              className="text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+                            >
+                              [delete]
+                            </button>
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}

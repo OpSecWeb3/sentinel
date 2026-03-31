@@ -11,6 +11,14 @@ import { Select } from "@/components/ui/select";
 import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* -- types ----------------------------------------------------------- */
 
@@ -517,24 +525,36 @@ export default function TemplatesPage() {
                 <p className="mb-2 text-xs text-muted-foreground">
                   $ registry event-types ls
                 </p>
-                <div className="rounded border border-border overflow-hidden">
-                  <div className="grid grid-cols-[200px_1fr] gap-x-3 border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    <span>Type</span>
-                    <span>Description</span>
-                  </div>
-                  {eventTypes.map((et) => (
-                    <div
-                      key={et.type}
-                      className="grid grid-cols-[200px_1fr] gap-x-3 border-b border-border last:border-b-0 px-3 py-2 text-xs"
-                    >
-                      <span className="font-mono text-foreground truncate">
-                        {et.type.replace("registry.", "")}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {et.description}
-                      </span>
-                    </div>
-                  ))}
+                <div className="overflow-hidden rounded border border-border">
+                  <Table>
+                    <colgroup>
+                      <col className="w-[200px]" />
+                      <col />
+                    </colgroup>
+                    <TableHeader>
+                      <TableRow className="border-b border-border bg-muted/30 hover:bg-muted/30">
+                        <TableHead scope="col">Type</TableHead>
+                        <TableHead scope="col">Description</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {eventTypes.map((et) => (
+                        <TableRow
+                          key={et.type}
+                          className="border-b border-border last:border-b-0 hover:bg-transparent"
+                        >
+                          <TableCell className="max-w-0 font-mono text-xs text-foreground">
+                            <span className="block truncate">
+                              {et.type.replace("registry.", "")}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {et.description}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               </div>
             )}

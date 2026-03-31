@@ -4,6 +4,14 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SearchInput } from "@/components/ui/search-input";
@@ -355,117 +363,132 @@ export default function DetectionsPage() {
         ) : (
           <div className="overflow-x-auto animate-content-ready">
             <div className="min-w-[700px]">
-              {/* Header */}
-              <div className="grid grid-cols-[minmax(180px,2fr)_80px_70px_70px_60px_80px_1fr] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <span>Name</span>
-                <span>Module</span>
-                <span>Status</span>
-                <span>Severity</span>
-                <span>Rules</span>
-                <span>Last Alert</span>
-                <span className="text-right">Actions</span>
-              </div>
-
-              <p className="px-3 pt-2 text-xs text-muted-foreground">
-                {meta ? meta.total : detections.length} detection
-                {(meta ? meta.total : detections.length) !== 1 ? "s" : ""}
-                {meta && meta.totalPages > 1
-                  ? ` — page ${meta.page} of ${meta.totalPages}`
-                  : ""}
-              </p>
-
-              {/* Rows */}
-              <div className="animate-stagger">
-              {detections.map((detection) => {
-                const busy = actionLoading[detection.id] ?? false;
-
-                return (
-                  <div
-                    key={detection.id}
-                    className="group grid grid-cols-[minmax(180px,2fr)_80px_70px_70px_60px_80px_1fr] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30"
-                  >
-                    <Link
-                      href={`/detections/${detection.id}`}
-                      className="truncate text-foreground group-hover:text-primary font-medium transition-colors"
+              <Table>
+                <colgroup>
+                  <col className="w-[180px]" />
+                  <col className="w-20" />
+                  <col className="w-[70px]" />
+                  <col className="w-[70px]" />
+                  <col className="w-[60px]" />
+                  <col className="w-20" />
+                  <col />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead scope="col">Name</TableHead>
+                    <TableHead scope="col">Module</TableHead>
+                    <TableHead scope="col">Status</TableHead>
+                    <TableHead scope="col">Severity</TableHead>
+                    <TableHead scope="col">Rules</TableHead>
+                    <TableHead scope="col">Last Alert</TableHead>
+                    <TableHead scope="col" className="text-right">
+                      Actions
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className="animate-stagger">
+                  <TableRow className="border-0 hover:bg-transparent">
+                    <TableCell
+                      colSpan={7}
+                      className="border-0 py-2 text-xs text-muted-foreground"
                     >
-                      {detection.name}
-                    </Link>
+                      {meta ? meta.total : detections.length} detection
+                      {(meta ? meta.total : detections.length) !== 1 ? "s" : ""}
+                      {meta && meta.totalPages > 1
+                        ? ` — page ${meta.page} of ${meta.totalPages}`
+                        : ""}
+                    </TableCell>
+                  </TableRow>
+                  {detections.map((detection) => {
+                    const busy = actionLoading[detection.id] ?? false;
 
-                    <span className="text-xs text-muted-foreground">
-                      {detection.moduleId}
-                    </span>
-
-                    <span
-                      className={cn(
-                        "font-mono text-xs",
-                        statusColor[detection.status],
-                      )}
-                    >
-                      [{statusLabel[detection.status]}]
-                    </span>
-
-                    <span
-                      className={cn(
-                        "capitalize text-xs",
-                        severityColor[detection.severity] ??
-                          "text-muted-foreground",
-                      )}
-                    >
-                      {detection.severity}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground">
-                      {detection.ruleCount}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground">
-                      {formatDate(detection.lastTriggeredAt)}
-                    </span>
-
-                    {/* Actions */}
-                    <span className="flex items-center justify-end gap-2 text-xs">
-                      {detection.status === "disabled" ? (
-                        <Link
-                          href={`/detections/${detection.id}`}
-                          className="text-muted-foreground hover:text-primary transition-colors"
-                        >
-                          [view]
-                        </Link>
-                      ) : (
-                        <>
-                          <button
-                            disabled={busy || detection.status === "error"}
-                            onClick={() => toggleStatus(detection)}
-                            className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
-                          >
-                            {busy
-                              ? "..."
-                              : detection.status === "active"
-                                ? "[pause]"
-                                : "[resume]"}
-                          </button>
-
+                    return (
+                      <TableRow
+                        key={detection.id}
+                        className="group border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30"
+                      >
+                        <TableCell className="max-w-0 font-medium">
                           <Link
-                            href={`/detections/${detection.id}/edit`}
-                            className="text-muted-foreground hover:text-primary transition-colors"
+                            href={`/detections/${detection.id}`}
+                            className="block truncate text-foreground transition-colors group-hover:text-primary"
                           >
-                            [edit]
+                            {detection.name}
                           </Link>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {detection.moduleId}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "font-mono text-xs",
+                            statusColor[detection.status],
+                          )}
+                        >
+                          [{statusLabel[detection.status]}]
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "text-xs capitalize",
+                            severityColor[detection.severity] ??
+                              "text-muted-foreground",
+                          )}
+                        >
+                          {detection.severity}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {detection.ruleCount}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {formatDate(detection.lastTriggeredAt)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="flex items-center justify-end gap-2 text-xs">
+                            {detection.status === "disabled" ? (
+                              <Link
+                                href={`/detections/${detection.id}`}
+                                className="text-muted-foreground transition-colors hover:text-primary"
+                              >
+                                [view]
+                              </Link>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={busy || detection.status === "error"}
+                                  onClick={() => toggleStatus(detection)}
+                                  className="text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
+                                >
+                                  {busy
+                                    ? "..."
+                                    : detection.status === "active"
+                                      ? "[pause]"
+                                      : "[resume]"}
+                                </button>
 
-                          <button
-                            disabled={busy}
-                            onClick={() => archiveDetection(detection)}
-                            className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                          >
-                            [archive]
-                          </button>
-                        </>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
-              </div>
+                                <Link
+                                  href={`/detections/${detection.id}/edit`}
+                                  className="text-muted-foreground transition-colors hover:text-primary"
+                                >
+                                  [edit]
+                                </Link>
+
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => archiveDetection(detection)}
+                                  className="text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+                                >
+                                  [archive]
+                                </button>
+                              </>
+                            )}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}

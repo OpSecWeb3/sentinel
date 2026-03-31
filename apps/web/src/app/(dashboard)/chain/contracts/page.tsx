@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,15 @@ import { SearchInput } from "@/components/ui/search-input";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { useToast } from "@/hooks/use-toast";
 import { ToastContainer } from "@/components/ui/toast";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { tableRowToggleKeyDown } from "@/lib/table-row-a11y";
 
 /* ── types ─────────────────────────────────────────────────────── */
 
@@ -374,92 +383,110 @@ export default function ChainContractsPage() {
         ) : (
           <div className="overflow-x-auto animate-content-ready">
             <div className="min-w-[800px]">
-              {/* Header */}
-              <div className="grid grid-cols-[minmax(100px,1.2fr)_minmax(100px,0.8fr)_minmax(80px,0.6fr)_80px_minmax(80px,0.5fr)_60px_70px] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <span>Label</span>
-                <span>Address</span>
-                <span>Network</span>
-                <span>ABI</span>
-                <span>Tags</span>
-                <span>Detect.</span>
-                <span className="text-right">Added</span>
-              </div>
-
-              <p className="px-3 pt-2 text-xs text-muted-foreground">
-                {total} contract{total !== 1 ? "s" : ""}
-              </p>
-
-              {/* Rows */}
-              {contracts.map((contract) => (
-                <div key={contract.id}>
-                  <button
-                    onClick={() => loadContractDetail(contract.id)}
-                    className="group grid w-full grid-cols-[minmax(100px,1.2fr)_minmax(100px,0.8fr)_minmax(80px,0.6fr)_80px_minmax(80px,0.5fr)_60px_70px] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30 text-left"
-                  >
-                    <span className="truncate text-foreground group-hover:text-primary font-medium">
-                      {contract.label || truncateAddress(contract.address)}
-                    </span>
-
-                    <span className="truncate text-xs">
-                      {contract.explorerUrl ? (
-                        <a
-                          href={`${contract.explorerUrl}/address/${contract.address}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-primary hover:underline"
-                          onClick={(e) => e.stopPropagation()}
+              <Table>
+                <colgroup>
+                  <col />
+                  <col />
+                  <col className="w-[100px]" />
+                  <col className="w-20" />
+                  <col />
+                  <col className="w-[60px]" />
+                  <col className="w-[70px]" />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead scope="col">Label</TableHead>
+                    <TableHead scope="col">Address</TableHead>
+                    <TableHead scope="col">Network</TableHead>
+                    <TableHead scope="col">ABI</TableHead>
+                    <TableHead scope="col">Tags</TableHead>
+                    <TableHead scope="col">Detect.</TableHead>
+                    <TableHead scope="col" className="text-right">
+                      Added
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow className="border-0 hover:bg-transparent">
+                    <TableCell colSpan={7} className="border-0 py-2 text-xs text-muted-foreground">
+                      {total} contract{total !== 1 ? "s" : ""}
+                    </TableCell>
+                  </TableRow>
+                  {contracts.map((contract) => {
+                    const expanded = expandedId === contract.id;
+                    const toggle = () => loadContractDetail(contract.id);
+                    return (
+                      <Fragment key={contract.id}>
+                        <TableRow
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={expanded}
+                          onClick={toggle}
+                          onKeyDown={(e) => tableRowToggleKeyDown(e, toggle)}
+                          className="group cursor-pointer border border-transparent text-left text-sm transition-colors hover:border-border hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         >
-                          {truncateAddress(contract.address)}
-                        </a>
-                      ) : (
-                        <span className="text-muted-foreground">
-                          {truncateAddress(contract.address)}
-                        </span>
-                      )}
-                    </span>
-
-                    <span className="text-xs text-primary">
-                      [{contract.networkName}]
-                    </span>
-
-                    <span
-                      className={cn(
-                        "text-xs font-mono",
-                        abiStatusColor[contract.abiStatus] ??
-                          "text-muted-foreground",
-                      )}
-                    >
-                      [{contract.abiStatus}]
-                    </span>
-
-                    <span className="flex flex-wrap gap-1 truncate text-xs">
-                      {contract.tags.slice(0, 3).map((tag) => (
-                        <span
-                          key={tag}
-                          className="text-muted-foreground font-mono"
-                        >
-                          [{tag}]
-                        </span>
-                      ))}
-                      {contract.tags.length > 3 && (
-                        <span className="text-muted-foreground">
-                          +{contract.tags.length - 3}
-                        </span>
-                      )}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground">
-                      {contract.detectionCount}
-                    </span>
-
-                    <span className="text-right text-xs text-muted-foreground">
-                      {formatDate(contract.createdAt)}
-                    </span>
-                  </button>
-
-                  {/* Inline quick-actions panel */}
-                  {expandedId === contract.id && (
-                    <div className="border-l-2 border-primary/30 bg-muted/10 ml-3 mb-2 pl-4 py-3 space-y-3">
+                          <TableCell className="max-w-0 font-medium text-foreground">
+                            <span className="block truncate transition-colors group-hover:text-primary">
+                              {contract.label || truncateAddress(contract.address)}
+                            </span>
+                          </TableCell>
+                          <TableCell className="max-w-0 text-xs">
+                            {contract.explorerUrl ? (
+                              <a
+                                href={`${contract.explorerUrl}/address/${contract.address}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-primary hover:underline"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {truncateAddress(contract.address)}
+                              </a>
+                            ) : (
+                              <span className="text-muted-foreground">
+                                {truncateAddress(contract.address)}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-primary">
+                            [{contract.networkName}]
+                          </TableCell>
+                          <TableCell
+                            className={cn(
+                              "font-mono text-xs",
+                              abiStatusColor[contract.abiStatus] ??
+                                "text-muted-foreground",
+                            )}
+                          >
+                            [{contract.abiStatus}]
+                          </TableCell>
+                          <TableCell className="max-w-0 text-xs">
+                            <span className="flex flex-wrap gap-1 truncate">
+                              {contract.tags.slice(0, 3).map((tag) => (
+                                <span
+                                  key={tag}
+                                  className="font-mono text-muted-foreground"
+                                >
+                                  [{tag}]
+                                </span>
+                              ))}
+                              {contract.tags.length > 3 && (
+                                <span className="text-muted-foreground">
+                                  +{contract.tags.length - 3}
+                                </span>
+                              )}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {contract.detectionCount}
+                          </TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground">
+                            {formatDate(contract.createdAt)}
+                          </TableCell>
+                        </TableRow>
+                        {expanded && (
+                          <TableRow className="border-0 hover:bg-transparent">
+                            <TableCell colSpan={7} className="border-l-2 border-primary/30 bg-muted/10 py-3 pl-4">
+                    <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3 text-xs text-muted-foreground">
                           <span className="font-mono">{contract.address}</span>
@@ -529,9 +556,14 @@ export default function ChainContractsPage() {
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-              ))}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}

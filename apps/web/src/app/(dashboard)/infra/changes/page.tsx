@@ -11,6 +11,14 @@ import { Select } from "@/components/ui/select";
 import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* -- types --------------------------------------------------------- */
 
@@ -225,23 +233,49 @@ export default function InfraChangesPage() {
       <div className="min-h-[300px]">
         {showLoading ? (
           <div className="border border-border">
-            {/* Skeleton header */}
-            <div className="grid grid-cols-[160px_180px_80px_90px_1fr] gap-0 border-b border-border bg-muted/20 px-3 py-2">
-              {["time", "host", "type", "severity", "details"].map((h) => (
-                <span key={h} className="text-xs text-muted-foreground font-mono uppercase tracking-wide">
-                  {h}
-                </span>
-              ))}
-            </div>
-            {[...Array(8)].map((_, i) => (
-              <div key={i} className="grid grid-cols-[160px_180px_80px_90px_1fr] gap-0 border-b border-border/50 px-3 py-2.5">
-                <div className="h-3 w-28 animate-pulse rounded bg-muted" />
-                <div className="h-3 w-32 animate-pulse rounded bg-muted" />
-                <div className="h-3 w-12 animate-pulse rounded bg-muted" />
-                <div className="h-3 w-14 animate-pulse rounded bg-muted" />
-                <div className="h-3 w-48 animate-pulse rounded bg-muted" />
-              </div>
-            ))}
+            <Table>
+              <colgroup>
+                <col className="w-[160px]" />
+                <col className="w-[180px]" />
+                <col className="w-20" />
+                <col className="w-[90px]" />
+                <col />
+              </colgroup>
+              <TableHeader>
+                <TableRow className="border-b border-border bg-muted/20 hover:bg-muted/20">
+                  {["time", "host", "type", "severity", "details"].map((h) => (
+                    <TableHead
+                      key={h}
+                      scope="col"
+                      className="px-3 py-2 font-mono text-xs uppercase tracking-wide text-muted-foreground"
+                    >
+                      {h}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {[...Array(8)].map((_, i) => (
+                  <TableRow key={i} className="border-b border-border/50 hover:bg-transparent">
+                    <TableCell className="px-3 py-2.5">
+                      <div className="h-3 w-28 animate-pulse rounded bg-muted" />
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      <div className="h-3 w-32 animate-pulse rounded bg-muted" />
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      <div className="h-3 w-12 animate-pulse rounded bg-muted" />
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      <div className="h-3 w-14 animate-pulse rounded bg-muted" />
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
+                      <div className="h-3 w-48 animate-pulse rounded bg-muted" />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
         ) : error ? (
           <Card>
@@ -277,65 +311,100 @@ export default function InfraChangesPage() {
               {hostSearch && " (filtered)"}
             </p>
 
-            {/* Table */}
             <div className="border border-border">
-              {/* Header */}
-              <div className="grid grid-cols-[160px_180px_80px_90px_1fr] gap-0 border-b border-border bg-muted/20 px-3 py-2">
-                <span className="text-xs text-muted-foreground font-mono uppercase tracking-wide">time</span>
-                <span className="text-xs text-muted-foreground font-mono uppercase tracking-wide">host</span>
-                <span className="text-xs text-muted-foreground font-mono uppercase tracking-wide">type</span>
-                <span className="text-xs text-muted-foreground font-mono uppercase tracking-wide">severity</span>
-                <span className="text-xs text-muted-foreground font-mono uppercase tracking-wide">details</span>
-              </div>
-
-              {/* Rows */}
-              {filteredChanges.map((change, idx) => (
-                <div
-                  key={change.id}
-                  className={cn(
-                    "grid grid-cols-[160px_180px_80px_90px_1fr] gap-0 px-3 py-2.5 text-xs font-mono transition-colors hover:bg-muted/20",
-                    idx !== filteredChanges.length - 1 && "border-b border-border/50",
-                  )}
-                >
-                  {/* Time */}
-                  <span className="text-muted-foreground shrink-0 tabular-nums">
-                    {formatDateTime(change.detectedAt)}
-                  </span>
-
-                  {/* Host */}
-                  <Link
-                    href={`/infra/hosts/${change.hostId}`}
-                    className="text-foreground hover:text-primary transition-colors truncate pr-2"
-                  >
-                    {change.hostname}
-                  </Link>
-
-                  {/* Type */}
-                  <span className="text-primary shrink-0">{change.type}</span>
-
-                  {/* Severity */}
-                  <span
-                    className={cn(
-                      "shrink-0",
-                      severityColor[change.severity] ?? "text-muted-foreground",
-                    )}
-                  >
-                    {change.severity}
-                  </span>
-
-                  {/* Details */}
-                  <span className="min-w-0 flex items-center gap-1.5 flex-wrap">
-                    <span className="text-muted-foreground">{change.field}:</span>
-                    <span className="text-muted-foreground line-through">
-                      {change.oldValue || "(none)"}
-                    </span>
-                    <span className="text-muted-foreground">{"→"}</span>
-                    <span className={change.newValue ? "text-foreground" : "text-muted-foreground"}>
-                      {change.newValue || "(removed)"}
-                    </span>
-                  </span>
-                </div>
-              ))}
+              <Table>
+                <colgroup>
+                  <col className="w-[160px]" />
+                  <col className="w-[180px]" />
+                  <col className="w-20" />
+                  <col className="w-[90px]" />
+                  <col />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border bg-muted/20 hover:bg-muted/20">
+                    <TableHead
+                      scope="col"
+                      className="px-3 py-2 font-mono text-xs uppercase tracking-wide text-muted-foreground"
+                    >
+                      time
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-3 py-2 font-mono text-xs uppercase tracking-wide text-muted-foreground"
+                    >
+                      host
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-3 py-2 font-mono text-xs uppercase tracking-wide text-muted-foreground"
+                    >
+                      type
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-3 py-2 font-mono text-xs uppercase tracking-wide text-muted-foreground"
+                    >
+                      severity
+                    </TableHead>
+                    <TableHead
+                      scope="col"
+                      className="px-3 py-2 font-mono text-xs uppercase tracking-wide text-muted-foreground"
+                    >
+                      details
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredChanges.map((change, idx) => (
+                    <TableRow
+                      key={change.id}
+                      className={cn(
+                        "font-mono text-xs transition-colors hover:bg-muted/20",
+                        idx !== filteredChanges.length - 1 && "border-b border-border/50",
+                      )}
+                    >
+                      <TableCell className="shrink-0 px-3 py-2.5 tabular-nums text-muted-foreground">
+                        {formatDateTime(change.detectedAt)}
+                      </TableCell>
+                      <TableCell className="max-w-0 px-3 py-2.5">
+                        <Link
+                          href={`/infra/hosts/${change.hostId}`}
+                          className="block truncate pr-2 text-foreground transition-colors hover:text-primary"
+                        >
+                          {change.hostname}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="shrink-0 px-3 py-2.5 text-primary">
+                        {change.type}
+                      </TableCell>
+                      <TableCell
+                        className={cn(
+                          "shrink-0 px-3 py-2.5",
+                          severityColor[change.severity] ?? "text-muted-foreground",
+                        )}
+                      >
+                        {change.severity}
+                      </TableCell>
+                      <TableCell className="min-w-0 px-3 py-2.5">
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-muted-foreground">{change.field}:</span>
+                          <span className="text-muted-foreground line-through">
+                            {change.oldValue || "(none)"}
+                          </span>
+                          <span className="text-muted-foreground">{"→"}</span>
+                          <span
+                            className={
+                              change.newValue ? "text-foreground" : "text-muted-foreground"
+                            }
+                          >
+                            {change.newValue || "(removed)"}
+                          </span>
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}

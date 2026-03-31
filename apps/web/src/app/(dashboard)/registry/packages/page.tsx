@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 import { apiFetch } from "@/lib/api";
@@ -12,6 +12,14 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* -- types ----------------------------------------------------------- */
 
@@ -675,102 +683,112 @@ export default function PackagesPage() {
         {/* Package list */}
         {!showLoading && !loading && !error && packages.length > 0 && (
           <div className="animate-content-ready">
-            {/* Header row */}
-            <div className="grid grid-cols-[2fr_100px_80px_100px_120px_1fr] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              <span>Package</span>
-              <span>Latest</span>
-              <span>Registry</span>
-              <span>Last Event</span>
-              <span>Provenance</span>
-              <span className="text-right">Actions</span>
-            </div>
+            <Table>
+              <colgroup>
+                <col />
+                <col className="w-[100px]" />
+                <col className="w-20" />
+                <col className="w-[100px]" />
+                <col className="w-[120px]" />
+                <col />
+              </colgroup>
+              <TableHeader>
+                <TableRow className="border-b border-border hover:bg-transparent">
+                  <TableHead scope="col">Package</TableHead>
+                  <TableHead scope="col">Latest</TableHead>
+                  <TableHead scope="col">Registry</TableHead>
+                  <TableHead scope="col">Last Event</TableHead>
+                  <TableHead scope="col">Provenance</TableHead>
+                  <TableHead scope="col" className="text-right">
+                    Actions
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow className="border-0 hover:bg-transparent">
+                  <TableCell colSpan={6} className="border-0 py-2 text-xs text-muted-foreground">
+                    {packages.length} package{packages.length !== 1 ? "s" : ""} monitored
+                  </TableCell>
+                </TableRow>
+                {packages.map((pkg) => {
+                  const pollBusy = actionLoading[`poll-${pkg.name}`] ?? false;
+                  const removeBusy = actionLoading[`remove-${pkg.name}`] ?? false;
+                  const isEditing = editingId === (pkg.id ?? pkg.name);
 
-            <p className="px-3 pt-2 text-xs text-muted-foreground">
-              {packages.length} package{packages.length !== 1 ? "s" : ""} monitored
-            </p>
-
-            {/* Rows */}
-            {packages.map((pkg) => {
-              const pollBusy = actionLoading[`poll-${pkg.name}`] ?? false;
-              const removeBusy = actionLoading[`remove-${pkg.name}`] ?? false;
-              const isEditing = editingId === (pkg.id ?? pkg.name);
-
-              return (
-                <div key={pkg.name}>
-                  <div className="group grid grid-cols-[2fr_100px_80px_100px_120px_1fr] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30">
-                    <Link
-                      href={`/registry/packages/${pkg.id ?? pkg.name}`}
-                      className="truncate font-medium text-foreground group-hover:text-primary transition-colors"
-                    >
-                      {pkg.name}
-                    </Link>
-
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {pkg.latestVersion ?? "--"}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground">
-                      {pkg.registry}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground">
-                      {formatDate(pkg.lastEvent ?? pkg.lastPolledAt)}
-                    </span>
-
-                    <span className="text-xs">
-                      {provenanceBadge(pkg.provenanceStatus)}
-                    </span>
-
-                    <span className="flex items-center justify-end gap-2 text-xs">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingId(
-                            isEditing ? null : (pkg.id ?? pkg.name),
-                          );
-                        }}
-                        className={cn(
-                          "transition-colors",
-                          isEditing
-                            ? "text-primary"
-                            : "text-muted-foreground hover:text-primary",
-                        )}
-                      >
-                        [edit]
-                      </button>
-                      <button
-                        disabled={pollBusy}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          pollNow(pkg);
-                        }}
-                        className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
-                      >
-                        {pollBusy ? "..." : "[poll]"}
-                      </button>
-                      <button
-                        disabled={removeBusy}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removePackage(pkg);
-                        }}
-                        className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                      >
-                        {removeBusy ? "..." : "[remove]"}
-                      </button>
-                    </span>
-                  </div>
-
-                  {isEditing && (
-                    <EditPanel
-                      pkg={pkg}
-                      onClose={() => setEditingId(null)}
-                      onSaved={handleEditSaved}
-                    />
-                  )}
-                </div>
-              );
-            })}
+                  return (
+                    <Fragment key={pkg.name}>
+                      <TableRow className="group border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30">
+                        <TableCell className="max-w-0 font-medium">
+                          <Link
+                            href={`/registry/packages/${pkg.id ?? pkg.name}`}
+                            className="block truncate text-foreground transition-colors group-hover:text-primary"
+                          >
+                            {pkg.name}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {pkg.latestVersion ?? "--"}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {pkg.registry}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {formatDate(pkg.lastEvent ?? pkg.lastPolledAt)}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {provenanceBadge(pkg.provenanceStatus)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="flex items-center justify-end gap-2 text-xs">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditingId(isEditing ? null : (pkg.id ?? pkg.name))
+                              }
+                              className={cn(
+                                "transition-colors",
+                                isEditing
+                                  ? "text-primary"
+                                  : "text-muted-foreground hover:text-primary",
+                              )}
+                            >
+                              [edit]
+                            </button>
+                            <button
+                              type="button"
+                              disabled={pollBusy}
+                              onClick={() => pollNow(pkg)}
+                              className="text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
+                            >
+                              {pollBusy ? "..." : "[poll]"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={removeBusy}
+                              onClick={() => removePackage(pkg)}
+                              className="text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+                            >
+                              {removeBusy ? "..." : "[remove]"}
+                            </button>
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                      {isEditing && (
+                        <TableRow className="border-0 hover:bg-transparent">
+                          <TableCell colSpan={6} className="p-0">
+                            <EditPanel
+                              pkg={pkg}
+                              onClose={() => setEditingId(null)}
+                              onSaved={handleEditSaved}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </div>
         )}
       </div>

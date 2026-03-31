@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 
@@ -12,6 +12,15 @@ import { Input } from "@/components/ui/input";
 import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import { tableRowToggleKeyDown } from "@/lib/table-row-a11y";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* -- types ----------------------------------------------------------- */
 
@@ -541,58 +550,68 @@ export default function ImageDetailPage() {
         ) : (
           <div className="overflow-x-auto">
             <div className="min-w-[640px]">
-              {/* Header row */}
-              <div className="grid grid-cols-[1fr_180px_80px_120px] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <span>Tag</span>
-                <span>Digest</span>
-                <span>Status</span>
-                <span>Changed</span>
-              </div>
+              <Table>
+                <colgroup>
+                  <col />
+                  <col className="w-[180px]" />
+                  <col className="w-20" />
+                  <col className="w-[120px]" />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead scope="col">Tag</TableHead>
+                    <TableHead scope="col">Digest</TableHead>
+                    <TableHead scope="col">Status</TableHead>
+                    <TableHead scope="col">Changed</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {versions.map((v) => {
+                    const digestKey = `v-${v.id}`;
+                    const isCopied = copiedId === digestKey;
+                    const shortDigest = truncateDigest(v.currentDigest);
 
-              {versions.map((v) => {
-                const digestKey = `v-${v.id}`;
-                const isCopied = copiedId === digestKey;
-                const shortDigest = truncateDigest(v.currentDigest);
-
-                return (
-                  <div
-                    key={v.id}
-                    className="grid grid-cols-[1fr_180px_80px_120px] items-center gap-x-3 border border-transparent px-3 py-2 text-xs transition-colors hover:border-border hover:bg-muted/30"
-                  >
-                    <span className="truncate text-foreground font-mono">
-                      {v.version}
-                    </span>
-
-                    <span className="flex items-center gap-1.5">
-                      <span className="font-mono text-muted-foreground">
-                        {shortDigest}
-                      </span>
-                      {v.currentDigest && (
-                        <button
-                          onClick={() => copyDigest(v.currentDigest!, digestKey)}
-                          className="text-muted-foreground/50 hover:text-primary transition-colors"
-                          title="Copy full digest"
+                    return (
+                      <TableRow
+                        key={v.id}
+                        className="border border-transparent text-xs transition-colors hover:border-border hover:bg-muted/30"
+                      >
+                        <TableCell className="max-w-0 font-mono text-foreground">
+                          <span className="block truncate">{v.version}</span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="flex items-center gap-1.5">
+                            <span className="font-mono text-muted-foreground">
+                              {shortDigest}
+                            </span>
+                            {v.currentDigest && (
+                              <button
+                                type="button"
+                                onClick={() => copyDigest(v.currentDigest!, digestKey)}
+                                className="text-muted-foreground/50 transition-colors hover:text-primary"
+                                title="Copy full digest"
+                              >
+                                {isCopied ? "[copied]" : "[copy]"}
+                              </button>
+                            )}
+                          </span>
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "font-mono",
+                            versionStatusColor[v.status] ?? "text-muted-foreground",
+                          )}
                         >
-                          {isCopied ? "[copied]" : "[copy]"}
-                        </button>
-                      )}
-                    </span>
-
-                    <span
-                      className={cn(
-                        "font-mono",
-                        versionStatusColor[v.status] ?? "text-muted-foreground",
-                      )}
-                    >
-                      [{v.status}]
-                    </span>
-
-                    <span className="text-muted-foreground">
-                      {formatRelative(v.digestChangedAt)}
-                    </span>
-                  </div>
-                );
-              })}
+                          [{v.status}]
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {formatRelative(v.digestChangedAt)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}
@@ -618,138 +637,149 @@ export default function ImageDetailPage() {
         ) : (
           <div className="overflow-x-auto">
             <div className="min-w-[700px]">
-              {/* Header row */}
-              <div className="grid grid-cols-[140px_100px_80px_140px_100px] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <span>Event</span>
-                <span>Tag</span>
-                <span>Source</span>
-                <span>Digest Change</span>
-                <span>Time</span>
-              </div>
+              <Table>
+                <colgroup>
+                  <col className="w-[140px]" />
+                  <col className="w-[100px]" />
+                  <col className="w-20" />
+                  <col className="w-[140px]" />
+                  <col className="w-[100px]" />
+                </colgroup>
+                <TableHeader>
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead scope="col">Event</TableHead>
+                    <TableHead scope="col">Tag</TableHead>
+                    <TableHead scope="col">Source</TableHead>
+                    <TableHead scope="col">Digest Change</TableHead>
+                    <TableHead scope="col">Time</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {events.map((ev) => {
+                    const shortType = getShortEventType(ev.artifactEventType);
+                    const color =
+                      eventTypeColor[shortType] ?? "text-muted-foreground";
+                    const isExpanded = expandedEventId === ev.id;
+                    const toggle = () =>
+                      setExpandedEventId(isExpanded ? null : ev.id);
+                    const oldShort = truncateDigest(ev.oldDigest);
+                    const newShort = truncateDigest(ev.newDigest);
+                    const oldKey = `ev-old-${ev.id}`;
+                    const newKey = `ev-new-${ev.id}`;
 
-              {events.map((ev) => {
-                const shortType = getShortEventType(ev.artifactEventType);
-                const color =
-                  eventTypeColor[shortType] ?? "text-muted-foreground";
-                const isExpanded = expandedEventId === ev.id;
-                const oldShort = truncateDigest(ev.oldDigest);
-                const newShort = truncateDigest(ev.newDigest);
-                const oldKey = `ev-old-${ev.id}`;
-                const newKey = `ev-new-${ev.id}`;
-
-                return (
-                  <div key={ev.id}>
-                    <div
-                      className="group grid grid-cols-[140px_100px_80px_140px_100px] items-center gap-x-3 border border-transparent px-3 py-2 text-xs transition-colors hover:border-border hover:bg-muted/30 cursor-pointer"
-                      onClick={() =>
-                        setExpandedEventId(isExpanded ? null : ev.id)
-                      }
-                    >
-                      <span className={cn("font-mono truncate", color)}>
-                        {shortType}
-                      </span>
-
-                      <span className="font-mono text-foreground truncate">
-                        {ev.version || "--"}
-                      </span>
-
-                      <span className="text-muted-foreground">{ev.source}</span>
-
-                      <span className="flex items-center gap-1 font-mono text-muted-foreground">
-                        {ev.oldDigest || ev.newDigest ? (
-                          <>
-                            <span>{oldShort}</span>
-                            <span className="text-muted-foreground/40">→</span>
-                            <span>{newShort}</span>
-                          </>
-                        ) : (
-                          <span>--</span>
-                        )}
-                      </span>
-
-                      <span className="text-muted-foreground">
-                        {formatRelative(ev.createdAt)}
-                      </span>
-                    </div>
-
-                    {/* Expanded row */}
-                    {isExpanded && (
-                      <div className="border-x border-b border-border bg-muted/20 px-4 py-3 text-xs space-y-3">
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <div>
-                            <span className="text-muted-foreground">id: </span>
-                            <span className="font-mono text-foreground">{ev.id}</span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">event: </span>
-                            <span className="font-mono text-foreground">{ev.artifactEventType}</span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">timestamp: </span>
-                            <span className="text-foreground">
-                              {new Date(ev.createdAt).toLocaleString()}
+                    return (
+                      <Fragment key={ev.id}>
+                        <TableRow
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={isExpanded}
+                          onClick={toggle}
+                          onKeyDown={(e) => tableRowToggleKeyDown(e, toggle)}
+                          className="group cursor-pointer border border-transparent text-xs transition-colors hover:border-border hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        >
+                          <TableCell className={cn("max-w-0 font-mono", color)}>
+                            <span className="block truncate">{shortType}</span>
+                          </TableCell>
+                          <TableCell className="max-w-0 font-mono text-foreground">
+                            <span className="block truncate">{ev.version || "--"}</span>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{ev.source}</TableCell>
+                          <TableCell className="max-w-0 font-mono text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              {ev.oldDigest || ev.newDigest ? (
+                                <>
+                                  <span>{oldShort}</span>
+                                  <span className="text-muted-foreground/40">→</span>
+                                  <span>{newShort}</span>
+                                </>
+                              ) : (
+                                <span>--</span>
+                              )}
                             </span>
-                          </div>
-                          {ev.pusher && (
-                            <div>
-                              <span className="text-muted-foreground">pusher: </span>
-                              <span className="text-foreground">{ev.pusher}</span>
-                            </div>
-                          )}
-                        </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {formatRelative(ev.createdAt)}
+                          </TableCell>
+                        </TableRow>
+                        {isExpanded && (
+                          <TableRow className="border-0 hover:bg-transparent">
+                            <TableCell colSpan={5} className="border-x border-b border-border bg-muted/20 px-4 py-3 text-xs">
+                              <div className="space-y-3">
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                  <div>
+                                    <span className="text-muted-foreground">id: </span>
+                                    <span className="font-mono text-foreground">{ev.id}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">event: </span>
+                                    <span className="font-mono text-foreground">{ev.artifactEventType}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">timestamp: </span>
+                                    <span className="text-foreground">
+                                      {new Date(ev.createdAt).toLocaleString()}
+                                    </span>
+                                  </div>
+                                  {ev.pusher && (
+                                    <div>
+                                      <span className="text-muted-foreground">pusher: </span>
+                                      <span className="text-foreground">{ev.pusher}</span>
+                                    </div>
+                                  )}
+                                </div>
 
-                        {(ev.oldDigest || ev.newDigest) && (
-                          <div className="space-y-1">
-                            {ev.oldDigest && (
-                              <div className="flex items-center gap-2">
-                                <span className="text-muted-foreground w-20">old digest:</span>
-                                <span className="font-mono text-xs text-foreground break-all">
-                                  {ev.oldDigest}
-                                </span>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    copyDigest(ev.oldDigest!, oldKey);
-                                  }}
-                                  className="shrink-0 text-muted-foreground/50 hover:text-primary transition-colors"
-                                >
-                                  {copiedId === oldKey ? "[copied]" : "[copy]"}
-                                </button>
-                              </div>
-                            )}
-                            {ev.newDigest && (
-                              <div className="flex items-center gap-2">
-                                <span className="text-muted-foreground w-20">new digest:</span>
-                                <span className="font-mono text-xs text-foreground break-all">
-                                  {ev.newDigest}
-                                </span>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    copyDigest(ev.newDigest!, newKey);
-                                  }}
-                                  className="shrink-0 text-muted-foreground/50 hover:text-primary transition-colors"
-                                >
-                                  {copiedId === newKey ? "[copied]" : "[copy]"}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                                {(ev.oldDigest || ev.newDigest) && (
+                                  <div className="space-y-1">
+                                    {ev.oldDigest && (
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-20 text-muted-foreground">old digest:</span>
+                                        <span className="break-all font-mono text-xs text-foreground">
+                                          {ev.oldDigest}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => copyDigest(ev.oldDigest!, oldKey)}
+                                          className="shrink-0 text-muted-foreground/50 transition-colors hover:text-primary"
+                                        >
+                                          {copiedId === oldKey ? "[copied]" : "[copy]"}
+                                        </button>
+                                      </div>
+                                    )}
+                                    {ev.newDigest && (
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-20 text-muted-foreground">new digest:</span>
+                                        <span className="break-all font-mono text-xs text-foreground">
+                                          {ev.newDigest}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => copyDigest(ev.newDigest!, newKey)}
+                                          className="shrink-0 text-muted-foreground/50 transition-colors hover:text-primary"
+                                        >
+                                          {copiedId === newKey ? "[copied]" : "[copy]"}
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
 
-                        {ev.metadata && Object.keys(ev.metadata).length > 0 && (
-                          <div>
-                            <p className="mb-1 text-muted-foreground">metadata:</p>
-                            <pre className="rounded border border-border bg-background p-2 font-mono text-xs text-foreground overflow-x-auto">
-                              {JSON.stringify(ev.metadata, null, 2)}
-                            </pre>
-                          </div>
+                                {ev.metadata && Object.keys(ev.metadata).length > 0 && (
+                                  <div>
+                                    <p className="mb-1 text-muted-foreground">metadata:</p>
+                                    <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-xs text-foreground">
+                                      {JSON.stringify(ev.metadata, null, 2)}
+                                    </pre>
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
                         )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                      </Fragment>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </div>
         )}

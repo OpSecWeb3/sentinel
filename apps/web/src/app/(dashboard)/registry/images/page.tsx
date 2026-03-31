@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
 import { apiFetch } from "@/lib/api";
@@ -12,6 +12,14 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ToastContainer } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* -- types ----------------------------------------------------------- */
 
@@ -546,102 +554,112 @@ export default function ImagesPage() {
         {/* Image list */}
         {!showLoading && !loading && !error && images.length > 0 && (
           <div className="animate-content-ready">
-            {/* Header row */}
-            <div className="grid grid-cols-[2fr_80px_80px_100px_100px_1fr] gap-x-3 border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              <span>Image</span>
-              <span>Tags</span>
-              <span>Registry</span>
-              <span>Last Event</span>
-              <span>Verification</span>
-              <span className="text-right">Actions</span>
-            </div>
+            <Table>
+              <colgroup>
+                <col />
+                <col className="w-20" />
+                <col className="w-20" />
+                <col className="w-[100px]" />
+                <col className="w-[100px]" />
+                <col />
+              </colgroup>
+              <TableHeader>
+                <TableRow className="border-b border-border hover:bg-transparent">
+                  <TableHead scope="col">Image</TableHead>
+                  <TableHead scope="col">Tags</TableHead>
+                  <TableHead scope="col">Registry</TableHead>
+                  <TableHead scope="col">Last Event</TableHead>
+                  <TableHead scope="col">Verification</TableHead>
+                  <TableHead scope="col" className="text-right">
+                    Actions
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow className="border-0 hover:bg-transparent">
+                  <TableCell colSpan={6} className="border-0 py-2 text-xs text-muted-foreground">
+                    {images.length} image{images.length !== 1 ? "s" : ""} monitored
+                  </TableCell>
+                </TableRow>
+                {images.map((image) => {
+                  const pollBusy = actionLoading[`poll-${image.name}`] ?? false;
+                  const removeBusy = actionLoading[`remove-${image.name}`] ?? false;
+                  const isEditing = editingId === (image.id ?? image.name);
 
-            <p className="px-3 pt-2 text-xs text-muted-foreground">
-              {images.length} image{images.length !== 1 ? "s" : ""} monitored
-            </p>
-
-            {/* Rows */}
-            {images.map((image) => {
-              const pollBusy = actionLoading[`poll-${image.name}`] ?? false;
-              const removeBusy = actionLoading[`remove-${image.name}`] ?? false;
-              const isEditing = editingId === (image.id ?? image.name);
-
-              return (
-                <div key={image.name}>
-                  <div className="group grid grid-cols-[2fr_80px_80px_100px_100px_1fr] items-center gap-x-3 border border-transparent px-3 py-2 text-sm transition-colors hover:border-border hover:bg-muted/30">
-                    <Link
-                      href={`/registry/images/${image.id ?? image.name}`}
-                      className="truncate font-medium text-foreground group-hover:text-primary transition-colors"
-                    >
-                      {image.name}
-                    </Link>
-
-                    <span className="text-xs text-muted-foreground">
-                      {image.tagCount ?? image.tagPatterns?.length ?? 0}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground">
-                      {image.registry}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground">
-                      {formatDate(image.lastEvent ?? image.lastPolledAt)}
-                    </span>
-
-                    <span className="text-xs">
-                      {verificationBadge(image.verificationStatus)}
-                    </span>
-
-                    <span className="flex items-center justify-end gap-2 text-xs">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingId(
-                            isEditing ? null : (image.id ?? image.name),
-                          );
-                        }}
-                        className={cn(
-                          "transition-colors",
-                          isEditing
-                            ? "text-primary"
-                            : "text-muted-foreground hover:text-primary",
-                        )}
-                      >
-                        [edit]
-                      </button>
-                      <button
-                        disabled={pollBusy}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          pollNow(image);
-                        }}
-                        className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
-                      >
-                        {pollBusy ? "..." : "[poll]"}
-                      </button>
-                      <button
-                        disabled={removeBusy}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeImage(image);
-                        }}
-                        className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                      >
-                        {removeBusy ? "..." : "[remove]"}
-                      </button>
-                    </span>
-                  </div>
-
-                  {isEditing && (
-                    <EditPanel
-                      image={image}
-                      onClose={() => setEditingId(null)}
-                      onSaved={handleEditSaved}
-                    />
-                  )}
-                </div>
-              );
-            })}
+                  return (
+                    <Fragment key={image.name}>
+                      <TableRow className="group border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30">
+                        <TableCell className="max-w-0 font-medium">
+                          <Link
+                            href={`/registry/images/${image.id ?? image.name}`}
+                            className="block truncate text-foreground transition-colors group-hover:text-primary"
+                          >
+                            {image.name}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {image.tagCount ?? image.tagPatterns?.length ?? 0}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {image.registry}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {formatDate(image.lastEvent ?? image.lastPolledAt)}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {verificationBadge(image.verificationStatus)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="flex items-center justify-end gap-2 text-xs">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditingId(isEditing ? null : (image.id ?? image.name))
+                              }
+                              className={cn(
+                                "transition-colors",
+                                isEditing
+                                  ? "text-primary"
+                                  : "text-muted-foreground hover:text-primary",
+                              )}
+                            >
+                              [edit]
+                            </button>
+                            <button
+                              type="button"
+                              disabled={pollBusy}
+                              onClick={() => pollNow(image)}
+                              className="text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
+                            >
+                              {pollBusy ? "..." : "[poll]"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={removeBusy}
+                              onClick={() => removeImage(image)}
+                              className="text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+                            >
+                              {removeBusy ? "..." : "[remove]"}
+                            </button>
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                      {isEditing && (
+                        <TableRow className="border-0 hover:bg-transparent">
+                          <TableCell colSpan={6} className="p-0">
+                            <EditPanel
+                              image={image}
+                              onClose={() => setEditingId(null)}
+                              onSaved={handleEditSaved}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </div>
         )}
       </div>
