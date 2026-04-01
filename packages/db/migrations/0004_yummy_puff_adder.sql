@@ -1,0 +1,2 @@
+DROP INDEX "uq_chain_org_rpc_configs_org_network";--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_chain_org_rpc_configs_org_network_url" ON "chain_org_rpc_configs" USING btree ("org_id","network_id","rpc_url");

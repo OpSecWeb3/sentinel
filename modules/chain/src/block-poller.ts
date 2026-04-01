@@ -231,7 +231,7 @@ export async function loadNetworkConfig(
   }
 
   if (orgId) {
-    const orgRpc = await db
+    const orgRpcRows = await db
       .select({ rpcUrl: chainOrgRpcConfigs.rpcUrl })
       .from(chainOrgRpcConfigs)
       .where(
@@ -240,11 +240,10 @@ export async function loadNetworkConfig(
           eq(chainOrgRpcConfigs.networkId, row.id),
           eq(chainOrgRpcConfigs.isActive, true),
         ),
-      )
-      .limit(1);
+      );
 
-    if (orgRpc.length > 0) {
-      rpcUrls = orgRpc[0]!.rpcUrl.split(',').map((s) => s.trim()).filter(Boolean);
+    if (orgRpcRows.length > 0) {
+      rpcUrls = orgRpcRows.map((r) => r.rpcUrl.trim()).filter(Boolean);
     }
   }
 

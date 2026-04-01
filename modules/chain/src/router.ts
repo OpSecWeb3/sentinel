@@ -1042,16 +1042,65 @@ chainRouter.post('/rpc-configs', async (c) => {
       rpcUrl: body.rpcUrl,
       isActive: body.isActive,
     })
-    .onConflictDoUpdate({
-      target: [chainOrgRpcConfigs.orgId, chainOrgRpcConfigs.networkId],
-      set: {
-        rpcUrl: body.rpcUrl,
-        isActive: body.isActive,
-      },
+    .onConflictDoNothing({
+      target: [chainOrgRpcConfigs.orgId, chainOrgRpcConfigs.networkId, chainOrgRpcConfigs.rpcUrl],
     })
     .returning();
 
+  if (!rpcConfig) {
+    return c.json({ error: 'RPC URL already configured for this network' }, 409);
+  }
+
   return c.json({ data: rpcConfig }, 201);
+});
+
+// ---------------------------------------------------------------------------
+// PATCH /modules/chain/rpc-configs/:id -- toggle active status
+// ---------------------------------------------------------------------------
+
+chainRouter.patch('/rpc-configs/:id', async (c) => {
+  const orgId = c.get('orgId');
+  const role = c.get('role');
+  if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+  if (role !== 'admin') return c.json({ error: 'Admin role required' }, 403);
+
+  const id = Number(c.req.param('id'));
+  if (!Number.isFinite(id)) return c.json({ error: 'Invalid id' }, 400);
+
+  const body = z.object({ status: z.enum(['active', 'inactive']) }).parse(await c.req.json());
+  const db = getDb();
+
+  const [updated] = await db
+    .update(chainOrgRpcConfigs)
+    .set({ isActive: body.status === 'active' })
+    .where(and(eq(chainOrgRpcConfigs.id, id), eq(chainOrgRpcConfigs.orgId, orgId)))
+    .returning();
+
+  if (!updated) return c.json({ error: 'RPC config not found' }, 404);
+  return c.json({ data: updated });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /modules/chain/rpc-configs/:id -- remove a custom RPC URL
+// ---------------------------------------------------------------------------
+
+chainRouter.delete('/rpc-configs/:id', async (c) => {
+  const orgId = c.get('orgId');
+  const role = c.get('role');
+  if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+  if (role !== 'admin') return c.json({ error: 'Admin role required' }, 403);
+
+  const id = Number(c.req.param('id'));
+  if (!Number.isFinite(id)) return c.json({ error: 'Invalid id' }, 400);
+
+  const db = getDb();
+  const [deleted] = await db
+    .delete(chainOrgRpcConfigs)
+    .where(and(eq(chainOrgRpcConfigs.id, id), eq(chainOrgRpcConfigs.orgId, orgId)))
+    .returning();
+
+  if (!deleted) return c.json({ error: 'RPC config not found' }, 404);
+  return c.json({ data: { id: deleted.id } });
 });
 
 // ---------------------------------------------------------------------------

@@ -82,7 +82,7 @@ export const chainOrgRpcConfigs = pgTable('chain_org_rpc_configs', {
   createdAt,
   updatedAt,
 }, (t) => [
-  uniqueIndex('uq_chain_org_rpc_configs_org_network').on(t.orgId, t.networkId),
+  uniqueIndex('uq_chain_org_rpc_configs_org_network_url').on(t.orgId, t.networkId, t.rpcUrl),
   index('idx_chain_org_rpc_configs_org').on(t.orgId),
 ]);
 
