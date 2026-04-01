@@ -77,7 +77,13 @@ function applyTemplateInputs(
     }
     return val;
   }
-  return { ...(interpolate(config) as Record<string, unknown>), ...inputs };
+  const interpolated = interpolate(config) as Record<string, unknown>;
+  // Only merge inputs whose keys already exist in the rule's config template
+  // so non-branch-specific rules don't get extra fields like watchBranches.
+  const relevant = Object.fromEntries(
+    Object.entries(inputs).filter(([k]) => k in config),
+  );
+  return { ...interpolated, ...relevant };
 }
 
 /* ── parseInputValue (mirrors server + form helpers) ────────────── */
