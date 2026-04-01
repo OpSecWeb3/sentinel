@@ -250,7 +250,7 @@ router.get('/payload-search', requireScope('api:read'), validate('query', payloa
 
   const conditions = [
     eq(events.orgId, orgId),
-    sql`${events.payload} #>> ${pathArray} = ${query.value}`,
+    sql`${events.payload} #>> ${sql.raw(`'${pathArray}'`)} = ${query.value}`,
   ];
   if (query.moduleId) conditions.push(eq(events.moduleId, query.moduleId));
   if (query.eventType) conditions.push(eq(events.eventType, query.eventType));

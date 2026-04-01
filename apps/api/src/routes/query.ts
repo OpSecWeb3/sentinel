@@ -67,7 +67,7 @@ function payloadRef(table: TableRef, field: string): ReturnType<typeof sql> {
   const jsonPath = field.startsWith('payload.') ? field.slice(8) : field;
   const pathArray = `{${jsonPath.split('.').join(',')}}`;
   const payloadCol = 'payload' in table ? (table as typeof events).payload : (table as typeof alerts).triggerData;
-  return sql`${payloadCol} #>> ${pathArray}`;
+  return sql`${payloadCol} #>> ${sql.raw(`'${pathArray}'`)}`;
 }
 
 function fieldRef(table: TableRef, collection: Collection, field: string): ReturnType<typeof sql> {
