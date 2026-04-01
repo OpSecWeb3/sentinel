@@ -14,6 +14,17 @@ import { ToastContainer } from "@/components/ui/toast";
 import { SlackChannelPicker } from "@/components/slack-channel-picker";
 import { TagInput, splitToTags, type TagInputHandle } from "@/components/ui/tag-input";
 import { TemplateFieldHeader } from "@/components/detections/template-field-header";
+import { ViewModeToggle } from "@/components/detections/view-mode-toggle";
+import {
+  JsonDetectionEditor,
+  type JsonDetectionEditorHandle,
+} from "@/components/detections/json-detection-editor";
+import {
+  serializeToJson,
+  serializeDetectionToJson,
+  deserializeFromJson,
+  validateJson,
+} from "@/components/detections/use-detection-json";
 
 /* ── types ────────────────────────────────────────────────────────── */
 
@@ -169,6 +180,11 @@ export default function EditDetectionPage() {
   const [slackChannelName, setSlackChannelName] = useState("");
   const [slackConnected, setSlackConnected] = useState(false);
   const [slackTeamName, setSlackTeamName] = useState("");
+
+  // Advanced JSON editor state
+  const [viewMode, setViewMode] = useState<"form" | "advanced">("form");
+  const [advancedJson, setAdvancedJson] = useState("");
+  const editorRef = useRef<JsonDetectionEditorHandle>(null);
 
   useEffect(() => {
     apiFetch<{ connected: boolean; teamName?: string }>("/integrations/slack", { credentials: "include" })
@@ -1052,6 +1068,157 @@ export default function EditDetectionPage() {
     }
   }
 
+  /* ── advanced JSON toggle ───────────────────────────────────────── */
+
+  function handleViewModeChange(newMode: "form" | "advanced") {
+    if (!detection) return;
+
+    if (newMode === "advanced") {
+      let json: string;
+      if (template) {
+        // Template-based: serialize from form state + template rules
+        json = serializeToJson({
+          moduleId: detection.moduleId,
+          templateRules: (template as { rules?: unknown[] }).rules
+            ? ((template as { rules?: unknown[] }).rules as Array<{
+                ruleType: string;
+                config?: Record<string, unknown>;
+                action?: string;
+                priority?: number;
+              }>)
+            : detection.rules,
+          templateInputs: template.inputs ?? [],
+          name,
+          severity,
+          cooldownMinutes,
+          inputValues,
+          slackChannelId: slackChannelId || undefined,
+          slackChannelName: slackChannelId ? slackChannelName || undefined : undefined,
+        });
+      } else {
+        // Legacy: serialize from detection rules with current form values applied
+        const rulesPayload = legacyRules.map((rule, i) => {
+          const schema = ruleSchemas.get(rule.ruleType) ?? [];
+          let config: Record<string, unknown>;
+          if (schema.length > 0) {
+            config = {};
+            for (const inp of schema) {
+              const raw = ruleInputValues[i]?.[inp.key] ?? "";
+              if (raw.trim() !== "") {
+                config[inp.key] = parseInputValue(raw, inp.type);
+              }
+            }
+          } else {
+            config = Object.fromEntries(
+              Object.entries(ruleInputValues[i] ?? {}).filter(([, v]) => v.trim() !== ""),
+            );
+          }
+          return { ruleType: rule.ruleType, config, action: rule.action, priority: rule.priority };
+        });
+
+        json = serializeDetectionToJson({
+          moduleId: detection.moduleId,
+          name,
+          severity,
+          cooldownMinutes,
+          rules: rulesPayload,
+          slackChannelId: slackChannelId || undefined,
+          slackChannelName: slackChannelId ? slackChannelName || undefined : undefined,
+        });
+      }
+      setAdvancedJson(json);
+      editorRef.current?.updateContent(json);
+    } else {
+      // Deserialize JSON back to form state
+      if (template) {
+        const result = deserializeFromJson(advancedJson, template.inputs ?? []);
+        if ("error" in result) {
+          toast(result.error);
+          return;
+        }
+        setName(result.name);
+        setSeverity(
+          (["critical", "high", "medium", "low"].includes(result.severity)
+            ? result.severity
+            : "high") as (typeof SEVERITIES)[number],
+        );
+        setCooldownMinutes(result.cooldownMinutes);
+        setInputValues(result.inputValues);
+        setSlackChannelId(result.slackChannelId);
+        setSlackChannelName(result.slackChannelName);
+      } else {
+        // Legacy: parse top-level fields + rules from JSON
+        try {
+          const parsed = JSON.parse(advancedJson);
+          if (parsed.name) setName(parsed.name);
+          if (parsed.severity) setSeverity(parsed.severity);
+          if (parsed.cooldownMinutes !== undefined) setCooldownMinutes(parsed.cooldownMinutes);
+          if (typeof parsed.slackChannelId === "string") setSlackChannelId(parsed.slackChannelId);
+          if (typeof parsed.slackChannelName === "string") setSlackChannelName(parsed.slackChannelName);
+
+          // Sync rules back to legacy form state
+          if (Array.isArray(parsed.rules)) {
+            setLegacyRules(
+              parsed.rules.map((r: Record<string, unknown>) => ({
+                ruleType: (r.ruleType as string) ?? "",
+                action: (ACTIONS.includes(r.action as typeof ACTIONS[number]) ? r.action : "alert") as typeof ACTIONS[number],
+                priority: typeof r.priority === "number" ? r.priority : 50,
+              })),
+            );
+            setRuleInputValues(
+              parsed.rules.map((r: Record<string, unknown>) => {
+                const config = (r.config ?? {}) as Record<string, unknown>;
+                const vals: Record<string, string> = {};
+                for (const [k, v] of Object.entries(config)) {
+                  if (Array.isArray(v)) vals[k] = (v as string[]).join("\n");
+                  else if (v !== null && v !== undefined) vals[k] = String(v);
+                }
+                return vals;
+              }),
+            );
+          }
+        } catch {
+          toast("Invalid JSON — cannot switch to form view");
+          return;
+        }
+      }
+    }
+    setViewMode(newMode);
+  }
+
+  async function handleAdvancedSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const validation = validateJson(advancedJson);
+    if (!validation.valid) {
+      toast(validation.errors[0]);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const parsed = JSON.parse(advancedJson);
+      await apiFetch(`/api/detections/${id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: parsed.name,
+          description: description || null,
+          severity: parsed.severity,
+          cooldownMinutes: parsed.cooldownMinutes,
+          rules: parsed.rules,
+          slackChannelId: parsed.slackChannelId || null,
+          slackChannelName: parsed.slackChannelId ? parsed.slackChannelName || null : null,
+        }),
+      });
+      router.push(`/detections/${id}`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to save changes");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   /* ── render ─────────────────────────────────────────────────────── */
 
   if (loading) {
@@ -1112,6 +1279,25 @@ export default function EditDetectionPage() {
               {template.description}
             </p>
           </div>
+
+          <ViewModeToggle
+            mode={viewMode}
+            onChange={handleViewModeChange}
+            disabled={saving}
+          />
+
+          {viewMode === "advanced" ? (
+            <form onSubmit={handleAdvancedSubmit} className="space-y-5">
+              <JsonDetectionEditor
+                ref={editorRef}
+                initialValue={advancedJson}
+                onChange={setAdvancedJson}
+              />
+              <Button type="submit" className="w-full" disabled={saving}>
+                {saving ? "> saving..." : "$ save changes"}
+              </Button>
+            </form>
+          ) : (
 
           <form onSubmit={handleTemplateSubmit} className="space-y-5">
             {/* Name */}
@@ -1283,11 +1469,33 @@ export default function EditDetectionPage() {
               {saving ? "> saving..." : "$ save changes"}
             </Button>
           </form>
+
+          )}
         </>
       )}
 
       {!loadError && detection && !template && (
-        /* ── LEGACY JSON EDITOR (no templateId or template fetch failed) ── */
+        /* ── LEGACY RULE EDITOR (no templateId or template fetch failed) ── */
+        <>
+          <ViewModeToggle
+            mode={viewMode}
+            onChange={handleViewModeChange}
+            disabled={saving}
+          />
+
+          {viewMode === "advanced" ? (
+            <form onSubmit={handleAdvancedSubmit} className="space-y-5">
+              <JsonDetectionEditor
+                ref={editorRef}
+                initialValue={advancedJson}
+                onChange={setAdvancedJson}
+              />
+              <Button type="submit" className="w-full" disabled={saving}>
+                {saving ? "> saving..." : "$ save changes"}
+              </Button>
+            </form>
+          ) : (
+
         <form onSubmit={handleLegacySubmit} className="space-y-6">
           {/* Name */}
           <div className="space-y-1.5">
@@ -1467,6 +1675,9 @@ export default function EditDetectionPage() {
             {saving ? "> saving..." : "$ save changes"}
           </Button>
         </form>
+
+          )}
+        </>
       )}
     </div>
   );

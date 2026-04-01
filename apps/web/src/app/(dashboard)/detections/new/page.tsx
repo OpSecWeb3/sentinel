@@ -17,6 +17,16 @@ import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { SlackChannelPicker } from "@/components/slack-channel-picker";
 import { TagInput, splitToTags, type TagInputHandle } from "@/components/ui/tag-input";
 import { TemplateFieldHeader } from "@/components/detections/template-field-header";
+import { ViewModeToggle } from "@/components/detections/view-mode-toggle";
+import {
+  JsonDetectionEditor,
+  type JsonDetectionEditorHandle,
+} from "@/components/detections/json-detection-editor";
+import {
+  serializeToJson,
+  deserializeFromJson,
+  validateJson,
+} from "@/components/detections/use-detection-json";
 
 /* ── types ──────────────────────────────────────────────────────── */
 
@@ -490,6 +500,54 @@ function ConfigureDetection({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const tagInputRefs = useRef<Record<string, TagInputHandle | null>>({});
 
+  // Advanced JSON editor state
+  const [viewMode, setViewMode] = useState<"form" | "advanced">("form");
+  const [advancedJson, setAdvancedJson] = useState("");
+  const editorRef = useRef<JsonDetectionEditorHandle>(null);
+
+  function handleViewModeChange(newMode: "form" | "advanced") {
+    if (newMode === "advanced") {
+      // Serialize current form state to JSON
+      const json = serializeToJson({
+        moduleId,
+        templateRules: (template.rules ?? []) as Array<{
+          ruleType: string;
+          config?: Record<string, unknown>;
+          action?: string;
+          priority?: number;
+        }>,
+        templateInputs: template.inputs ?? [],
+        name,
+        severity,
+        cooldownMinutes,
+        inputValues,
+        slackChannelId: slackChannelId || undefined,
+        slackChannelName: slackChannelId ? slackChannelName || undefined : undefined,
+      });
+      setAdvancedJson(json);
+      // Update editor if it's already mounted
+      editorRef.current?.updateContent(json);
+    } else {
+      // Deserialize JSON back to form state
+      const result = deserializeFromJson(advancedJson, template.inputs ?? []);
+      if ("error" in result) {
+        toast(result.error);
+        return;
+      }
+      setName(result.name);
+      setSeverity(
+        (["critical", "high", "medium", "low"].includes(result.severity)
+          ? result.severity
+          : "high") as (typeof SEVERITIES)[number],
+      );
+      setCooldownMinutes(result.cooldownMinutes);
+      setInputValues(result.inputValues);
+      setSlackChannelId(result.slackChannelId);
+      setSlackChannelName(result.slackChannelName);
+    }
+    setViewMode(newMode);
+  }
+
   const hasNetworkInput = (template.inputs ?? []).some(
     (i) => i.type === "network",
   );
@@ -897,6 +955,33 @@ function ConfigureDetection({
     }
   }
 
+  async function handleAdvancedSubmit() {
+    const validation = validateJson(advancedJson);
+    if (!validation.valid) {
+      toast(validation.errors[0]);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await apiFetch<{
+        data: { id?: string; detection?: { id: string } };
+      }>("/api/detections", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: advancedJson,
+      });
+
+      const detectionId = res.data.id ?? res.data.detection?.id;
+      router.push(detectionId ? `/detections/${detectionId}` : "/detections");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to create detection");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const templateInputs = template.inputs ?? [];
 
   return (
@@ -922,6 +1007,35 @@ function ConfigureDetection({
           module:{moduleId} · cat:{template.category}
         </p>
       </div>
+
+      <ViewModeToggle
+        mode={viewMode}
+        onChange={handleViewModeChange}
+        disabled={submitting}
+      />
+
+      {viewMode === "advanced" ? (
+        <div className="space-y-5">
+          <JsonDetectionEditor
+            ref={editorRef}
+            initialValue={advancedJson}
+            onChange={setAdvancedJson}
+          />
+          <div className="flex gap-3 pt-2">
+            <Button
+              type="button"
+              disabled={submitting}
+              className="flex-1"
+              onClick={handleAdvancedSubmit}
+            >
+              {submitting ? "> creating..." : "$ create detection"}
+            </Button>
+            <Button type="button" variant="outline" onClick={onBack}>
+              [back]
+            </Button>
+          </div>
+        </div>
+      ) : (
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {/* Detection name */}
@@ -1081,6 +1195,8 @@ function ConfigureDetection({
           </Button>
         </div>
       </form>
+
+      )}
     </div>
   );
 }
