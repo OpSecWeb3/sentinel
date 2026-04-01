@@ -13,6 +13,10 @@ import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { useToast } from "@/hooks/use-toast";
 import { ToastContainer } from "@/components/ui/toast";
 import {
+  ConfirmDialog,
+  useConfirm,
+} from "@/components/ui/confirm-dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -113,6 +117,10 @@ export default function ChainContractsPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTags, setEditTags] = useState("");
   const [editNotes, setEditNotes] = useState("");
+
+  // Delete
+  const { confirmState, confirm, handleClose } = useConfirm();
+  const [deleting, setDeleting] = useState(false);
 
   // Load networks for selector
   useEffect(() => {
@@ -233,6 +241,34 @@ export default function ChainContractsPage() {
     }
   }
 
+  async function handleDeleteContract(contract: ChainContract) {
+    const detCount = contract.detectionCount;
+    const desc = detCount > 0
+      ? `This will remove "${contract.label || truncateAddress(contract.address)}" and disable ${detCount} linked detection rule${detCount !== 1 ? "s" : ""}. This cannot be undone.`
+      : `This will remove "${contract.label || truncateAddress(contract.address)}" from your monitored contracts. This cannot be undone.`;
+
+    const confirmed = await confirm("Delete contract", desc, {
+      variant: "destructive",
+      confirmLabel: "Delete",
+    });
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      await apiFetch(`/modules/chain/contracts/${contract.contractId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      toast("Contract deleted", "success");
+      setExpandedId(null);
+      fetchContracts(search);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to delete contract");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const networkOptions = [
     { value: "", label: "select network..." },
     ...networks.map((n) => ({
@@ -244,6 +280,15 @@ export default function ChainContractsPage() {
   return (
     <div className="space-y-8">
       <ToastContainer toasts={toasts} dismiss={dismiss} />
+      <ConfirmDialog
+        open={confirmState.open}
+        title={confirmState.title}
+        description={confirmState.description}
+        variant={confirmState.variant}
+        confirmLabel={confirmState.confirmLabel}
+        cancelLabel={confirmState.cancelLabel}
+        onClose={handleClose}
+      />
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -516,6 +561,16 @@ export default function ChainContractsPage() {
                             className="text-xs text-muted-foreground hover:text-primary transition-colors"
                           >
                             {editingId === contract.id ? "[cancel]" : "[edit]"}
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteContract(contract);
+                            }}
+                            disabled={deleting}
+                            className="text-xs text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+                          >
+                            [delete]
                           </button>
                           <Link
                             href={`/chain/contracts/${contract.contractId}`}

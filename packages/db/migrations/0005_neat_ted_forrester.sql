@@ -1,0 +1,1 @@
+ALTER TABLE "chain_org_contracts" ADD COLUMN "deleted_at" timestamp with time zone;

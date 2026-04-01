@@ -4,11 +4,16 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 
+import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ToastContainer } from "@/components/ui/toast";
+import {
+  ConfirmDialog,
+  useConfirm,
+} from "@/components/ui/confirm-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import {
@@ -100,11 +105,14 @@ function SectionToggle({
 
 export default function ContractDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [contract, setContract] = useState<ContractDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const showLoading = useDelayedLoading(loading);
   const [error, setError] = useState<string | null>(null);
   const { toasts, toast, dismiss } = useToast();
+  const { confirmState, confirm, handleClose } = useConfirm();
+  const [deleting, setDeleting] = useState(false);
 
   // Section open/close state
   const [openSections, setOpenSections] = useState({
@@ -175,6 +183,34 @@ export default function ContractDetailPage() {
     }
   }
 
+  async function handleDelete() {
+    if (!contract) return;
+    const detCount = contract.linkedDetections.length;
+    const desc = detCount > 0
+      ? `This will remove "${contract.label || truncateAddress(contract.address)}" and disable ${detCount} linked detection${detCount !== 1 ? "s" : ""}. This cannot be undone.`
+      : `This will remove "${contract.label || truncateAddress(contract.address)}" from your monitored contracts. This cannot be undone.`;
+
+    const confirmed = await confirm("Delete contract", desc, {
+      variant: "destructive",
+      confirmLabel: "Delete",
+    });
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      await apiFetch(`/modules/chain/contracts/${contract.contractId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      toast("Contract deleted", "success");
+      router.push("/chain/contracts");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to delete contract");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   if (showLoading || loading) {
     return (
       <div className="space-y-4 animate-pulse">
@@ -210,6 +246,15 @@ export default function ContractDetailPage() {
   return (
     <div className="space-y-6">
       <ToastContainer toasts={toasts} dismiss={dismiss} />
+      <ConfirmDialog
+        open={confirmState.open}
+        title={confirmState.title}
+        description={confirmState.description}
+        variant={confirmState.variant}
+        confirmLabel={confirmState.confirmLabel}
+        cancelLabel={confirmState.cancelLabel}
+        onClose={handleClose}
+      />
 
       {/* Breadcrumb */}
       <Link
@@ -261,16 +306,27 @@ export default function ContractDetailPage() {
             </div>
           )}
         </div>
-        {contract.abiEvents.length === 0 && contract.abiFunctions.length === 0 && (
+        <div className="flex items-center gap-2">
+          {contract.abiEvents.length === 0 && contract.abiFunctions.length === 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleFetchAbi}
+              disabled={fetchingAbi}
+            >
+              {fetchingAbi ? "[fetching...]" : "[fetch ABI]"}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
-            onClick={handleFetchAbi}
-            disabled={fetchingAbi}
+            onClick={handleDelete}
+            disabled={deleting}
+            className="text-destructive hover:text-destructive hover:border-destructive/50"
           >
-            {fetchingAbi ? "[fetching...]" : "[fetch ABI]"}
+            {deleting ? "[deleting...]" : "[delete]"}
           </Button>
-        )}
+        </div>
       </div>
 
       <div className="space-y-2">

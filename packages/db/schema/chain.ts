@@ -62,6 +62,7 @@ export const chainOrgContracts = pgTable('chain_org_contracts', {
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   notes: text('notes'),
   addedBy: uuid('added_by').notNull().references(() => users.id),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt,
   updatedAt,
 }, (t) => [

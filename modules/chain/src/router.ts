@@ -7,7 +7,7 @@
  */
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { eq, and, desc, gte, lte, count, sql, ne, ilike, or, inArray } from '@sentinel/db';
+import { eq, and, desc, gte, lte, count, sql, ne, ilike, or, inArray, isNull } from '@sentinel/db';
 import { getDb } from '@sentinel/db';
 import {
   chainNetworks,
@@ -55,7 +55,7 @@ chainRouter.get('/overview', async (c) => {
     networks,
     recentEvents,
   ] = await Promise.all([
-    db.select({ total: count() }).from(chainOrgContracts).where(eq(chainOrgContracts.orgId, orgId)),
+    db.select({ total: count() }).from(chainOrgContracts).where(and(eq(chainOrgContracts.orgId, orgId), isNull(chainOrgContracts.deletedAt))),
     db.select({ total: count() }).from(detections).where(and(eq(detections.orgId, orgId), eq(detections.moduleId, 'chain'), ne(detections.status, 'disabled'))),
     db.select({ total: count() }).from(alerts).innerJoin(detections, eq(detections.id, alerts.detectionId)).where(and(eq(detections.orgId, orgId), eq(detections.moduleId, 'chain'), gte(alerts.createdAt, new Date(Date.now() - 7 * 86_400_000)))),
     db.select({ total: count() }).from(events).where(and(eq(events.orgId, orgId), eq(events.moduleId, 'chain'))),
@@ -243,7 +243,7 @@ chainRouter.get('/contracts', async (c) => {
   const db = getDb();
 
   // Build base conditions
-  const baseConditions = [eq(chainOrgContracts.orgId, orgId)];
+  const baseConditions = [eq(chainOrgContracts.orgId, orgId), isNull(chainOrgContracts.deletedAt)];
   if (query.search) {
     const escapedSearch = query.search.replace(/[%_\\]/g, (ch) => `\\${ch}`);
     baseConditions.push(
@@ -486,6 +486,7 @@ chainRouter.get('/contracts/:id', async (c) => {
       and(
         eq(chainOrgContracts.contractId, contractId),
         eq(chainOrgContracts.orgId, orgId),
+        isNull(chainOrgContracts.deletedAt),
       ),
     )
     .limit(1);
@@ -589,6 +590,7 @@ chainRouter.post('/contracts/:contractId/call', async (c) => {
       and(
         eq(chainOrgContracts.contractId, contractId),
         eq(chainOrgContracts.orgId, orgId),
+        isNull(chainOrgContracts.deletedAt),
       ),
     )
     .limit(1);
@@ -700,6 +702,7 @@ chainRouter.get('/contracts/:contractId/storage-slots', async (c) => {
       and(
         eq(chainOrgContracts.contractId, contractId),
         eq(chainOrgContracts.orgId, orgId),
+        isNull(chainOrgContracts.deletedAt),
       ),
     )
     .limit(1);
@@ -748,6 +751,7 @@ chainRouter.post('/contracts/:contractId/analyze-storage', async (c) => {
       and(
         eq(chainOrgContracts.contractId, contractId),
         eq(chainOrgContracts.orgId, orgId),
+        isNull(chainOrgContracts.deletedAt),
       ),
     )
     .limit(1);
@@ -789,6 +793,7 @@ chainRouter.get('/contracts/:id/detail', async (c) => {
       and(
         eq(chainOrgContracts.contractId, contractId),
         eq(chainOrgContracts.orgId, orgId),
+        isNull(chainOrgContracts.deletedAt),
       ),
     )
     .limit(1);
@@ -834,7 +839,7 @@ chainRouter.post('/contracts/:id/verify', async (c) => {
     .from(chainOrgContracts)
     .innerJoin(chainContracts, eq(chainContracts.id, chainOrgContracts.contractId))
     .innerJoin(chainNetworks, eq(chainNetworks.id, chainContracts.networkId))
-    .where(and(eq(chainOrgContracts.contractId, contractId), eq(chainOrgContracts.orgId, orgId)))
+    .where(and(eq(chainOrgContracts.contractId, contractId), eq(chainOrgContracts.orgId, orgId), isNull(chainOrgContracts.deletedAt)))
     .limit(1);
 
   if (!orgContract) return c.json({ error: 'Contract not found' }, 404);
@@ -865,7 +870,7 @@ chainRouter.post('/contracts/:id/fetch-abi', async (c) => {
     .from(chainOrgContracts)
     .innerJoin(chainContracts, eq(chainContracts.id, chainOrgContracts.contractId))
     .innerJoin(chainNetworks, eq(chainNetworks.id, chainContracts.networkId))
-    .where(and(eq(chainOrgContracts.contractId, contractId), eq(chainOrgContracts.orgId, orgId)))
+    .where(and(eq(chainOrgContracts.contractId, contractId), eq(chainOrgContracts.orgId, orgId), isNull(chainOrgContracts.deletedAt)))
     .limit(1);
 
   if (!orgContract) return c.json({ error: 'Contract not found' }, 404);
@@ -915,7 +920,7 @@ chainRouter.patch('/contracts/:id', async (c) => {
   const [existing] = await db
     .select({ id: chainOrgContracts.id })
     .from(chainOrgContracts)
-    .where(and(eq(chainOrgContracts.contractId, contractId), eq(chainOrgContracts.orgId, orgId)))
+    .where(and(eq(chainOrgContracts.contractId, contractId), eq(chainOrgContracts.orgId, orgId), isNull(chainOrgContracts.deletedAt)))
     .limit(1);
 
   if (!existing) return c.json({ error: 'Contract not found' }, 404);
@@ -928,10 +933,105 @@ chainRouter.patch('/contracts/:id', async (c) => {
   const [updated] = await db
     .update(chainOrgContracts)
     .set(updateData)
-    .where(and(eq(chainOrgContracts.contractId, contractId), eq(chainOrgContracts.orgId, orgId)))
+    .where(and(eq(chainOrgContracts.contractId, contractId), eq(chainOrgContracts.orgId, orgId), isNull(chainOrgContracts.deletedAt)))
     .returning();
 
   return c.json({ data: updated });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /modules/chain/contracts/:id -- soft-delete contract, disable linked rules
+// ---------------------------------------------------------------------------
+
+chainRouter.delete('/contracts/:id', async (c) => {
+  const orgId = c.get('orgId');
+  const role = c.get('role');
+  if (!orgId) return c.json({ error: 'Organisation required' }, 403);
+  if (role !== 'admin') return c.json({ error: 'Admin role required' }, 403);
+
+  const contractId = parseInt(c.req.param('id'), 10);
+  if (!Number.isFinite(contractId)) return c.json({ error: 'Invalid contract ID' }, 400);
+
+  const db = getDb();
+
+  // Verify org owns this contract and it's not already deleted
+  const [existing] = await db
+    .select({
+      id: chainOrgContracts.id,
+      address: chainContracts.address,
+      networkId: chainContracts.networkId,
+    })
+    .from(chainOrgContracts)
+    .innerJoin(chainContracts, eq(chainContracts.id, chainOrgContracts.contractId))
+    .where(
+      and(
+        eq(chainOrgContracts.contractId, contractId),
+        eq(chainOrgContracts.orgId, orgId),
+        isNull(chainOrgContracts.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!existing) return c.json({ error: 'Contract not found' }, 404);
+
+  // Find active rules that reference this contract address
+  const linkedRules = await db
+    .select({ id: rules.id, ruleType: rules.ruleType, config: rules.config, detectionId: rules.detectionId })
+    .from(rules)
+    .innerJoin(chainNetworks, sql`${chainNetworks.chainId} = (${rules.config}->>'networkId')::int`)
+    .where(
+      and(
+        eq(rules.orgId, orgId),
+        eq(rules.moduleId, 'chain'),
+        ne(rules.status, 'disabled'),
+        eq(chainNetworks.id, existing.networkId),
+        sql`lower(${rules.config}->>'contractAddress') = lower(${existing.address})`,
+      ),
+    );
+
+  // Disable linked rules and enqueue sync removal
+  if (linkedRules.length > 0) {
+    const ruleIds = linkedRules.map((r) => r.id);
+    await db
+      .update(rules)
+      .set({ status: 'disabled' })
+      .where(inArray(rules.id, ruleIds));
+
+    const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
+    for (const rule of linkedRules) {
+      await queue.add('chain.rule.sync', {
+        action: 'remove',
+        ruleId: rule.id,
+        config: { ruleType: rule.ruleType, ...rule.config as object },
+      });
+    }
+
+    // Disable detections that have no remaining active rules
+    const affectedDetectionIds = [...new Set(linkedRules.map((r) => r.detectionId))];
+    for (const detId of affectedDetectionIds) {
+      const [remaining] = await db
+        .select({ total: count() })
+        .from(rules)
+        .where(and(eq(rules.detectionId, detId), eq(rules.status, 'active')));
+      if (Number(remaining?.total ?? 0) === 0) {
+        await db
+          .update(detections)
+          .set({ status: 'disabled' })
+          .where(eq(detections.id, detId));
+      }
+    }
+  }
+
+  // Soft-delete the contract
+  await db
+    .update(chainOrgContracts)
+    .set({ deletedAt: new Date() })
+    .where(and(eq(chainOrgContracts.contractId, contractId), eq(chainOrgContracts.orgId, orgId), isNull(chainOrgContracts.deletedAt)));
+
+  return c.json({
+    deleted: true,
+    rulesDisabled: linkedRules.length,
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1278,6 +1378,7 @@ chainRouter.get('/events', async (c) => {
       and(
         eq(chainOrgContracts.contractId, chainContracts.id),
         eq(chainOrgContracts.orgId, orgId),
+        isNull(chainOrgContracts.deletedAt),
       ),
     )
     .leftJoin(chainNetworks, eq(chainNetworks.id, chainContracts.networkId))
