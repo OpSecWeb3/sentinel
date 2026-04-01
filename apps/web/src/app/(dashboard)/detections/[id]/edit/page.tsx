@@ -325,6 +325,19 @@ export default function EditDetectionPage() {
         );
         setRuleSchemas(schemaMap);
       }
+
+      // Pre-populate advanced JSON editor with current detection state
+      setAdvancedJson(
+        serializeDetectionToJson({
+          moduleId: d.moduleId,
+          name: d.name,
+          severity: d.severity,
+          cooldownMinutes: d.cooldownMinutes,
+          rules: d.rules,
+          slackChannelId: d.slackChannelId ?? undefined,
+          slackChannelName: d.slackChannelName ?? undefined,
+        }),
+      );
     } catch (err) {
       setLoadError(
         err instanceof Error ? err.message : "Failed to load detection",
