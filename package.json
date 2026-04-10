@@ -11,6 +11,8 @@
     "dev:api": "pnpm --filter @sentinel/api dev",
     "dev:worker": "pnpm --filter @sentinel/worker dev",
     "dev:web": "pnpm --filter @sentinel/web dev",
+    "dev:mcp": "pnpm --filter @sentinel/mcp dev",
+    "dev:mcp:http": "pnpm --filter @sentinel/mcp dev:http",
     "build": "pnpm -r build",
     "db:generate": "pnpm --filter @sentinel/db generate",
     "db:migrate": "pnpm --filter @sentinel/db migrate",

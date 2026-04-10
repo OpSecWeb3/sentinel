@@ -1,0 +1,42 @@
+{
+  "name": "@sentinel/mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Sentinel — query your security monitoring platform with Claude",
+  "type": "module",
+  "bin": {
+    "sentinel-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "dev:http": "MCP_TRANSPORT=http tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "start:http": "MCP_TRANSPORT=http node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.10.2",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "mcp",
+    "sentinel",
+    "security",
+    "monitoring",
+    "claude",
+    "model-context-protocol"
+  ],
+  "license": "MIT"
+}
