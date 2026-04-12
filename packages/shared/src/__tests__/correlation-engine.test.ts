@@ -811,12 +811,14 @@ describe('Sequence Evaluation - New Instance', () => {
     const event = makeEvent();
     await engine.evaluate(event);
 
-    // Check that set was called with correct TTL (30 * 60000 = 1800000)
+    // Check that set was called with correct TTL (30 * 60000 = 1800000).
+    // Use closeTo to tolerate ≤1 ms drift from Date.now() advancing between
+    // when expiresAt is computed and when the TTL is derived from it.
     expect(redis.set).toHaveBeenCalledWith(
       expect.stringContaining('sentinel:corr:seq:rule-1:'),
       expect.any(String),
       'PX',
-      1_800_000,
+      expect.closeTo(1_800_000, 2),
       'NX',
     );
   });
