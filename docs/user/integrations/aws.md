@@ -5,95 +5,349 @@ can ingest and analyze API activity across your AWS accounts.
 
 ## Architecture overview
 
-Sentinel reads CloudTrail events from an Amazon SQS queue. The recommended
-data flow is:
+Sentinel reads CloudTrail events from an Amazon SQS queue. Two event delivery
+patterns are supported:
+
+**Pattern A: EventBridge (recommended)**
 
 ```
-CloudTrail --> S3 bucket --> S3 event notification --> SQS queue --> Sentinel
+CloudTrail --> EventBridge Rule --> SQS Queue --> Sentinel
+```
+
+**Pattern B: SNS (legacy / existing trails)**
+
+```
+CloudTrail --> S3 --> SNS Topic --> SQS Queue --> Sentinel
 ```
 
 Sentinel polls the SQS queue on a configurable interval (default: 60 seconds)
-and processes each CloudTrail event through its detection engine.
+and processes each event through its detection engine. Events land in a 7-day
+raw buffer, and rule-matched events are promoted to the platform events table
+(14-day retention).
+
+> **Note:** Sentinel does not read CloudTrail logs from S3 directly. It only
+> consumes events delivered to SQS via EventBridge or SNS.
 
 ## Prerequisites
 
 - A Sentinel account with the **Admin** role in your organization.
-- An AWS account with CloudTrail enabled.
-- An SQS queue that receives CloudTrail event notifications.
-- Either an IAM role (recommended) or IAM access keys that Sentinel can use to
-  read from the SQS queue.
+- An AWS account with CloudTrail enabled (management events, all regions).
+- Terraform >= 1.5 (if using the provided Terraform module), or manual AWS
+  console/CLI access.
 
-## IAM role setup (recommended)
+## Quick start with Terraform (recommended)
+
+Sentinel ships a Terraform module that provisions all required AWS resources
+automatically. This is the fastest and most reliable setup path.
+
+### Step 1: Initialize the integration in Sentinel
+
+1. Navigate to **AWS > Integrations > [+ add]**.
+2. Enter a name for the integration (e.g. "Production account").
+3. Enter the 12-digit **AWS Account ID**.
+4. For AWS Organizations, toggle **Organization** on and optionally enter the
+   **AWS Organization ID** (`o-xxxxxxxxxx`).
+5. Click **Initialize**.
+6. Copy the generated **External ID** (format: `ca_sentinel:<orgId>:<random>`).
+
+### Step 2: Deploy Terraform
+
+```bash
+cd modules/aws/terraform
+cp terraform.tfvars.example terraform.tfvars
+```
+
+Edit `terraform.tfvars`:
+
+```hcl
+ca_sentinel_account_id  = "111111111111"                    # Sentinel's AWS account ID
+external_id             = "ca_sentinel:your-org:abc123..."  # from Step 1
+name_prefix             = "ca-sentinel"
+enable_eventbridge_rule = true
+create_kms_key          = true
+```
+
+Configure providers in `providers.tf` for your primary region:
+
+```hcl
+provider "aws" {
+  region = "eu-west-2"  # your primary region
+}
+
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}
+```
+
+> If your primary region **is** us-east-1, you still need the alias — but no
+> cross-region forwarding resources are created.
+
+Deploy:
+
+```bash
+terraform init
+terraform plan
+terraform apply
+```
+
+### Step 3: Finalize in Sentinel
+
+Copy the Terraform outputs into Sentinel's integration form:
+
+```bash
+terraform output
+```
+
+You need three values:
+- **Role ARN** -- `role_arn`
+- **SQS Queue URL** -- `sqs_queue_url`
+- **SQS Region** -- `sqs_region`
+
+Paste them into the Sentinel setup screen and click **Finalize**.
+
+Or use the API shortcut:
+
+```bash
+curl -X PATCH https://your-sentinel/api/modules/aws/integrations/YOUR_ID \
+  -H "Cookie: $SESSION" \
+  -H "Content-Type: application/json" \
+  -d "$(terraform output -json ca_sentinel_integration_config | jq '. + {name: "Production"}')"
+```
+
+Sentinel immediately triggers an initial SQS poll.
+
+### What Terraform creates
+
+| Resource | Purpose |
+|---|---|
+| SQS Queue | Sentinel polls this for events |
+| SQS Dead-Letter Queue | Failed messages retained 14 days for forensic review |
+| KMS Key + Alias (optional) | Encrypts queue messages at rest |
+| EventBridge Rule (primary region) | Routes CloudTrail events to SQS |
+| EventBridge Rule (us-east-1) | Forwards global events (IAM, STS, sign-in) to primary region |
+| EventBridge Catch Rule (primary) | Routes forwarded global events to SQS |
+| IAM Role | Cross-account role Sentinel assumes (SQS read-only) |
+| IAM Forwarding Role | Allows EventBridge cross-region bus forwarding |
+
+## AWS Organizations integration
+
+Sentinel supports ingesting CloudTrail events from all accounts in an AWS
+Organization through a single integration.
+
+### How it works
+
+An organization trail in the management account captures management events
+from every member account. These events flow through a single SQS queue to
+Sentinel, which automatically tracks which member account generated each
+event. The **Connected Accounts** column on the integrations page shows all
+account IDs seen in ingested events.
+
+### Setup with Terraform (recommended)
+
+#### Step 1: Enable organization trail
+
+1. Open the CloudTrail console in the **management account**.
+2. Create or update a trail with **Enable for all accounts in my
+   organization** checked.
+3. Ensure the trail captures **Management events** in **All regions**.
+
+#### Step 2: Initialize in Sentinel
+
+1. Navigate to **AWS > Integrations > [+ add]**.
+2. Enter a name (e.g. "Production Org").
+3. Enter the **Management Account ID** (12 digits).
+4. Toggle **Organization** on.
+5. Enter the **AWS Organization ID** (`o-xxxxxxxxxx`).
+6. Click **Initialize** and copy the **External ID**.
+
+#### Step 3: Deploy Terraform in the management account
+
+Using the EventBridge pattern (recommended):
+
+```hcl
+ca_sentinel_account_id  = "111111111111"                        # Sentinel's AWS account
+external_id             = "ca_sentinel:your-org-id:abc123..."   # from Step 2
+name_prefix             = "ca-sentinel-org"
+enable_eventbridge_rule = true
+create_kms_key          = true
+```
+
+If your org trail already publishes to an SNS topic, use the SNS pattern
+instead:
+
+```hcl
+ca_sentinel_account_id   = "111111111111"
+external_id              = "ca_sentinel:your-org-id:abc123..."
+name_prefix              = "ca-sentinel-org"
+enable_eventbridge_rule  = false
+cloudtrail_sns_topic_arn = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
+```
+
+Deploy:
+
+```bash
+terraform init && terraform plan && terraform apply
+```
+
+#### Step 4: Finalize in Sentinel
+
+Copy the outputs (`role_arn`, `sqs_queue_url`, `sqs_region`) into the Sentinel
+integration form and click **Finalize**.
+
+#### Step 5: Verify
+
+1. Check the integration status shows **Active** on the integrations page.
+2. Wait for the first poll cycle (default 60 seconds).
+3. Navigate to **AWS > Events** -- you should see CloudTrail events from
+   member accounts.
+4. The **Connected Accounts** column populates as events arrive from each
+   member account.
+
+### Global event forwarding
+
+IAM, STS, and console sign-in events only appear in us-east-1 regardless of
+where the action was performed. When your primary region is different, the
+Terraform module automatically deploys a second EventBridge rule in us-east-1
+that forwards these global events to the primary region's event bus, where a
+catch rule routes them to the SQS queue.
+
+This is enabled by default (`enable_global_event_forwarding = true`) and
+requires no additional configuration. If your primary region is us-east-1,
+no forwarding resources are created.
+
+## Manual setup (without Terraform)
+
+If you cannot use Terraform, follow these steps to provision resources
+manually.
+
+### IAM role setup (recommended)
 
 Cross-account IAM role assumption is the recommended authentication method.
 Sentinel assumes the role to read from SQS without storing long-lived
 credentials.
 
-### Step 1: Create the IAM policy
+#### Step 1: Create the IAM role
 
-Create a policy named `SentinelCloudTrailRead` with the following permissions:
+1. Open the IAM console and create a new role.
+2. Select **Another AWS account** as the trusted entity.
+3. Enter the **Sentinel AWS account ID** (provided by your Sentinel
+   administrator).
+4. Enable **Require external ID** and paste the external ID from Sentinel's
+   integration setup screen.
+5. Name the role (e.g. `ca-sentinel-integration-role`).
+6. Set **Maximum session duration** to 1 hour.
+
+#### Step 2: Attach the SQS read policy
 
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "ReadSQS",
+      "Sid": "SQSRead",
       "Effect": "Allow",
       "Action": [
         "sqs:ReceiveMessage",
         "sqs:DeleteMessage",
-        "sqs:GetQueueAttributes"
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl"
       ],
       "Resource": "arn:aws:sqs:<region>:<account-id>:<queue-name>"
-    },
-    {
-      "Sid": "ReadS3Objects",
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject"
-      ],
-      "Resource": "arn:aws:s3:::<cloudtrail-bucket-name>/AWSLogs/*"
     }
   ]
 }
 ```
 
-Replace `<region>`, `<account-id>`, `<queue-name>`, and
-`<cloudtrail-bucket-name>` with your actual values.
+If using a customer-managed KMS key for SQS encryption, also attach:
 
-### Step 2: Create the IAM role
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "KMSDecrypt",
+      "Effect": "Allow",
+      "Action": "kms:Decrypt",
+      "Resource": "arn:aws:kms:<region>:<account-id>:key/<key-id>"
+    }
+  ]
+}
+```
 
-1. Open the IAM console and create a new role.
-2. Select **Another AWS account** as the trusted entity.
-3. Enter the Sentinel AWS account ID (provided by your Sentinel
-   administrator).
-4. Enable **Require external ID** and enter a unique external ID. Record this
-   value; you will enter it in Sentinel.
-5. Attach the `SentinelCloudTrailRead` policy.
-6. Name the role `SentinelRole` (or your preferred name).
-7. Copy the role ARN (for example,
-   `arn:aws:iam::123456789012:role/SentinelRole`).
+#### Step 3: Create the SQS queue
 
-### Step 3: Register the role in Sentinel
+1. Create a **Standard** queue (FIFO is not required).
+2. Set **Visibility Timeout** to at least 120 seconds.
+3. Set **Message Retention Period** to at least 4 days.
+4. Enable **Server-Side Encryption** (AWS-managed or custom KMS key).
+5. Configure a **Dead-Letter Queue** with max receive count of 5.
 
-1. In the Sentinel web console, navigate to **AWS > Integrations**.
-2. Click **[+ add]**.
-3. Enter a name for the integration (for example, "Production account").
-4. Enter the 12-digit **AWS Account ID**.
-5. Paste the **Role ARN**.
-6. Enter the **External ID** you configured in Step 2.
-7. Enter the **SQS Queue URL**.
-8. Click **[create]**.
+#### Step 4: Configure event delivery
 
-Sentinel immediately triggers an initial SQS poll.
+**EventBridge (recommended):**
 
-## IAM access key setup (alternative)
+Create an EventBridge rule with this pattern:
+
+```json
+{
+  "source": ["aws.cloudtrail", "aws.signin", "aws.iam", "aws.ec2", "aws.s3",
+             "aws.route53", "aws.ssm", "aws.secretsmanager", "aws.dynamodb", "aws.ecs"],
+  "detail-type": ["AWS API Call via CloudTrail", "AWS Console Sign In via CloudTrail"],
+  "detail": {
+    "eventSource": [
+      "iam.amazonaws.com",
+      "sts.amazonaws.com",
+      "signin.amazonaws.com",
+      "cloudtrail.amazonaws.com",
+      "ec2.amazonaws.com",
+      "s3.amazonaws.com",
+      "route53.amazonaws.com",
+      "ssm.amazonaws.com",
+      "secretsmanager.amazonaws.com",
+      "dynamodb.amazonaws.com",
+      "ecs.amazonaws.com"
+    ]
+  }
+}
+```
+
+Set the target to your SQS queue. Add a queue policy allowing EventBridge to
+send messages:
+
+```json
+{
+  "Sid": "AllowEventBridge",
+  "Effect": "Allow",
+  "Principal": { "Service": "events.amazonaws.com" },
+  "Action": "sqs:SendMessage",
+  "Resource": "arn:aws:sqs:<region>:<account-id>:<queue-name>",
+  "Condition": {
+    "ArnLike": {
+      "aws:SourceArn": "arn:aws:events:<region>:<account-id>:rule/<rule-name>"
+    }
+  }
+}
+```
+
+**SNS (existing trails):**
+
+If your CloudTrail trail already publishes to an SNS topic, subscribe the SQS
+queue to that topic with **Raw message delivery** enabled.
+
+#### Step 5: Register in Sentinel
+
+1. Initialize the integration in Sentinel (see Quick start Step 1).
+2. Paste the **Role ARN**, **SQS Queue URL**, and **SQS Region** into the
+   finalization form.
+3. Click **Finalize**.
+
+### IAM access key setup (alternative)
 
 If cross-account role assumption is not possible, you can provide static IAM
 credentials instead.
 
-1. Create an IAM user with the `SentinelCloudTrailRead` policy attached.
+1. Create an IAM user with the SQS read policy attached.
 2. Generate an access key pair for the user.
 3. In the Sentinel integration form, enter the **Access Key ID** and **Secret
    Access Key** instead of a Role ARN.
@@ -101,92 +355,25 @@ credentials instead.
 Sentinel encrypts credentials at rest. However, IAM roles are preferred because
 they use temporary credentials and do not require key rotation.
 
-## SQS queue configuration
-
-### Creating the SQS queue
-
-1. Open the SQS console and create a **Standard** queue (FIFO is not
-   required).
-2. Set the **Visibility Timeout** to at least 120 seconds (Sentinel may need
-   time to process large batches).
-3. Set the **Message Retention Period** to at least 4 days to buffer events
-   during maintenance windows.
-4. Enable **Server-Side Encryption** using an AWS-managed key or a custom
-   KMS key.
-
-### Connecting CloudTrail to SQS
-
-1. Open the CloudTrail console and select your trail.
-2. Under **S3 bucket**, enable **SNS notification delivery** or configure an
-   **S3 event notification** on the bucket to publish to your SQS queue.
-3. Alternatively, configure an EventBridge rule to forward CloudTrail events
-   to the SQS queue.
-
-### SQS access policy
-
-Add a policy statement that allows S3 (or SNS/EventBridge) to send messages:
-
-```json
-{
-  "Sid": "AllowCloudTrailDelivery",
-  "Effect": "Allow",
-  "Principal": { "Service": "s3.amazonaws.com" },
-  "Action": "sqs:SendMessage",
-  "Resource": "arn:aws:sqs:<region>:<account-id>:<queue-name>",
-  "Condition": {
-    "ArnLike": {
-      "aws:SourceArn": "arn:aws:s3:::<cloudtrail-bucket-name>"
-    }
-  }
-}
-```
-
-## AWS Organizations multi-account setup
-
-Sentinel supports ingesting CloudTrail events from all accounts in an AWS
-Organization through a single integration.
-
-### Step 1: Enable organization trail
-
-1. Open the CloudTrail console in the **management account**.
-2. Create or update a trail with **Enable for all accounts in my
-   organization** checked.
-3. Configure the trail to deliver to a central S3 bucket in the management
-   account.
-
-### Step 2: Create a centralized SQS queue
-
-Create an SQS queue in the management account. Configure the CloudTrail S3
-bucket to send event notifications to this queue.
-
-### Step 3: Register as an organization integration
-
-1. In the Sentinel integration form, toggle **AWS Organizations** on.
-2. Enter the **Management Account ID** (12 digits).
-3. Optionally enter the **AWS Organization ID** (format: `o-xxxxxxxxxx`).
-4. Enter the **SQS Queue URL** for the centralized queue.
-5. Configure the IAM role in the management account.
-6. Click **[create]**.
-
-Sentinel automatically tracks which member account generated each event. The
-**Connected Accounts** column on the integrations page shows all account IDs
-seen in ingested events.
-
 ## What CloudTrail events Sentinel monitors
 
 Sentinel ingests all CloudTrail management events delivered to the SQS queue.
 Each event includes:
 
-- **Event name** -- the AWS API action (for example, `CreateUser`,
-  `RunInstances`).
-- **Event source** -- the AWS service (for example, `iam.amazonaws.com`).
+- **Event name** -- the AWS API action (e.g. `CreateUser`, `RunInstances`).
+- **Event source** -- the AWS service (e.g. `iam.amazonaws.com`).
 - **Principal ID** -- who performed the action.
 - **User ARN** -- the full ARN of the caller.
 - **Source IP** -- where the request originated.
 - **AWS Region** -- where the action occurred.
-- **Error code** -- present if the API call failed (for example,
-  `AccessDenied`).
+- **Error code** -- present if the API call failed (e.g. `AccessDenied`).
 - **Resources** -- the AWS resources involved in the action.
+
+Sentinel also ingests native EventBridge events when configured:
+
+- **EC2 Spot Instance Interruption Warning**
+- **EC2 Instance State-change Notification**
+- **EC2 Spot Rebalance Recommendation**
 
 Navigate to **AWS > Events** to browse raw CloudTrail events with filtering
 by integration, event name, and time range.
@@ -245,21 +432,18 @@ the following built-in templates:
 
 ## Required IAM permissions reference
 
-The table below lists every IAM permission Sentinel needs, organized by
-purpose.
-
 | Permission | Resource | Purpose |
 |---|---|---|
 | `sqs:ReceiveMessage` | SQS queue ARN | Read CloudTrail event notifications |
 | `sqs:DeleteMessage` | SQS queue ARN | Acknowledge processed messages |
 | `sqs:GetQueueAttributes` | SQS queue ARN | Check queue depth and configuration |
-| `s3:GetObject` | S3 bucket ARN (`/AWSLogs/*`) | Read CloudTrail log files |
+| `sqs:GetQueueUrl` | SQS queue ARN | Resolve queue URL |
 
-If you use a customer-managed KMS key for SQS or S3 encryption, also grant:
+If you use a customer-managed KMS key for SQS encryption, also grant:
 
 | Permission | Resource | Purpose |
 |---|---|---|
-| `kms:Decrypt` | KMS key ARN | Decrypt SQS messages and S3 objects |
+| `kms:Decrypt` | KMS key ARN | Decrypt SQS messages |
 
 ## Managing integrations
 
@@ -267,7 +451,7 @@ If you use a customer-managed KMS key for SQS or S3 encryption, also grant:
 
 Navigate to **AWS > Integrations**. Each integration shows:
 
-- **Status** -- `active`, `error`, or `disabled`.
+- **Status** -- `active`, `error`, `setup`, `disabled`, or `needs_update`.
 - **Last polled** -- when Sentinel last checked the SQS queue.
 - **Auth method** -- `role` (IAM role) or `access-key` (static credentials).
 - **Connected accounts** -- AWS account IDs seen in ingested events.
@@ -283,6 +467,13 @@ This is useful for verifying that the connection works after initial setup.
 Click **[disable]** to pause polling without deleting the integration. Click
 **[enable]** to resume.
 
+### Rotating the external ID
+
+Click **[rotate ID]** to regenerate the external ID. The integration enters
+a `needs_update` status. Update the IAM trust policy in AWS with the new
+external ID (or run `terraform apply` with the new value in `terraform.tfvars`),
+then click **[acknowledge]** in Sentinel to resume polling.
+
 ### Deleting an integration
 
 Click **[delete]** to permanently remove the integration and all associated
@@ -291,24 +482,26 @@ pauses all AWS detection rules for your organization.
 
 ### Updating configuration
 
-Use the PATCH endpoint (or edit from the API) to update the SQS queue URL,
+Click **[edit]** or use the PATCH API endpoint to update the SQS queue URL,
 regions, poll interval, or credentials without deleting and recreating the
 integration. Changes take effect immediately; Sentinel triggers a new poll
 after each configuration update.
 
 ## Troubleshooting
 
-### "No SQS queue URL configured" when triggering a manual poll
+### Integration stuck in "setup" status
 
-The integration was created without an SQS queue URL. Update the integration
-to add the queue URL, then retry.
+The integration was initialized but not finalized. Complete Step 3 of the
+setup process by entering the Role ARN, SQS Queue URL, and SQS Region.
+Abandoned setup integrations are automatically cleaned up after 24 hours.
 
 ### Integration shows "error" status
 
 Check the **Error message** field on the integrations page. Common causes:
 
-- **Access denied** -- the IAM role or access keys lack the required SQS
-  permissions. Review the permissions reference above.
+- **Access denied** -- the IAM role lacks the required SQS permissions, or the
+  external ID in the trust policy doesn't match. Review the permissions
+  reference above.
 - **Queue does not exist** -- the SQS queue was deleted or the URL is
   incorrect. Update the integration with the correct URL.
 - **Region mismatch** -- the SQS region in Sentinel does not match the actual
@@ -316,13 +509,22 @@ Check the **Error message** field on the integrations page. Common causes:
 
 ### No events appearing after setup
 
-1. Verify CloudTrail is delivering logs to the S3 bucket (check the bucket
-   contents).
-2. Verify the S3 bucket is sending event notifications to the SQS queue
-   (check the SQS console for message count).
-3. Trigger a manual poll in Sentinel and check the worker logs for errors.
-4. Confirm the IAM permissions are correct by testing with the AWS CLI:
+1. Verify CloudTrail is enabled and logging management events.
+2. Verify the EventBridge rule is matching events (check the rule's monitoring
+   tab in the AWS console).
+3. Check the SQS console for message count -- if zero, events aren't reaching
+   the queue.
+4. Trigger a manual poll in Sentinel and check the worker logs for errors.
+5. Confirm the IAM permissions are correct by testing with the AWS CLI:
    `aws sqs receive-message --queue-url <url>`.
+
+### Global events (IAM, STS, sign-in) not appearing
+
+These events only emit in us-east-1. If your SQS queue is in a different
+region, you need cross-region EventBridge forwarding. The Terraform module
+handles this automatically. For manual setups, create an EventBridge rule in
+us-east-1 that forwards matching events to your primary region's default
+event bus.
 
 ### Poll interval configuration
 

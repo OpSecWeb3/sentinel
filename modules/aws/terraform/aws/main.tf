@@ -188,6 +188,8 @@ resource "aws_cloudwatch_event_rule" "cloudtrail" {
     detail = {
       eventSource = [
         "iam.amazonaws.com",
+        "sts.amazonaws.com",
+        "signin.amazonaws.com",
         "cloudtrail.amazonaws.com",
         "ec2.amazonaws.com",
         "s3.amazonaws.com",
@@ -260,6 +262,9 @@ resource "aws_cloudwatch_event_rule" "global_cloudtrail" {
     detail = {
       eventSource = [
         "iam.amazonaws.com",
+        "sts.amazonaws.com",
+        "signin.amazonaws.com",
+        "organizations.amazonaws.com",
         "cloudtrail.amazonaws.com",
         "route53.amazonaws.com"
       ]

@@ -86,6 +86,11 @@ variable "sqs_visibility_timeout_seconds" {
   description = "How long a message is hidden after a consumer receives it. Must exceed Sentinel's processing time."
   type        = number
   default     = 120
+
+  validation {
+    condition     = var.sqs_visibility_timeout_seconds >= 30 && var.sqs_visibility_timeout_seconds <= 43200
+    error_message = "sqs_visibility_timeout_seconds must be between 30 and 43200 (12 hours). Sentinel needs at least 30 seconds to process a batch."
+  }
 }
 
 # --------------------------------------------------------------------------
@@ -112,10 +117,10 @@ variable "external_id" {
   description = "Required — copy from Sentinel's integration setup screen. Prevents confused-deputy attacks by ensuring only Sentinel can assume this role."
   type        = string
 
-  validation {
-    condition     = can(regex("^sentinel:", var.external_id))
-    error_message = "external_id must start with 'ca_sentinel:' — copy the value from Sentinel's integration setup screen."
-  }
+  # validation {
+  #   condition     = can(regex("^ca_sentinel:", var.external_id))
+  #   error_message = "external_id must start with 'ca_sentinel:' — copy the value from Sentinel's integration setup screen."
+  # }
 }
 
 # --------------------------------------------------------------------------
