@@ -13,11 +13,11 @@
   },
   "dependencies": {
     "@sentinel/shared": "workspace:*",
-    "nodemailer": "^6.9.0"
+    "nodemailer": "^8.0.5"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
     "@types/node": "^22.0.0",
-    "@types/nodemailer": "^6.4.0"
+    "@types/nodemailer": "^6.4.0",
+    "typescript": "^5.7.0"
   }
 }

@@ -15,7 +15,7 @@
     "@sentinel/db": "workspace:*",
     "@sentry/node": "^9.0.0",
     "bullmq": "^5.34.0",
-    "hono": "^4.7.0",
+    "hono": "^4.12.12",
     "ioredis": "^5.4.2",
     "minimatch": "^10.0.0",
     "pino": "^9.0.0",
