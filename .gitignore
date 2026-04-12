@@ -22,3 +22,11 @@ memory/
 
 # Generated reports
 docs/BUG-REPORT.md
+
+# Terraform (modules/aws/terraform/)
+modules/aws/terraform/.terraform/
+modules/aws/terraform/*.tfstate
+modules/aws/terraform/*.tfstate.*
+modules/aws/terraform/terraform.tfvars
+modules/aws/terraform/*.tfplan
+modules/aws/terraform/crash.log
