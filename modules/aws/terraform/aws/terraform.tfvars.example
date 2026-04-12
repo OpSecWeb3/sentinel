@@ -15,8 +15,8 @@ ca_sentinel_role_name = "CASentinelServiceRole"
 
 # Required: external ID for cross-account trust.
 # Copy this value from Sentinel's integration setup screen (Step 1).
-# It starts with "sentinel:" and is unique to your integration.
-external_id = "sentinel:YOUR_ORG_ID:COPY_FROM_SENTINEL_UI"
+# It starts with "ca_sentinel:" and is unique to your integration.
+external_id = "ca_sentinel:YOUR_ORG_ID:COPY_FROM_SENTINEL_UI"
 
 # Optional: prefix for resource names (useful for multi-env accounts).
 # name_prefix = "ca_sentinel-prod"
@@ -29,15 +29,23 @@ external_id = "sentinel:YOUR_ORG_ID:COPY_FROM_SENTINEL_UI"
 # }
 
 # --------------------------------------------------------------------------
-# Event source — choose ONE of these patterns:
+# Event delivery patterns
 # --------------------------------------------------------------------------
 
-# Pattern A (recommended): EventBridge -> SQS
+# Pattern A: EventBridge only (single account, 1-2 min latency)
 # enable_eventbridge_rule = true
 
-# Pattern B: existing CloudTrail SNS topic -> SQS
-# enable_eventbridge_rule  = false
-# cloudtrail_sns_topic_arn = "arn:aws:sns:us-east-1:123456789012:cloudtrail-notifications"
+# Pattern B: SNS only (org-wide coverage, 5-15 min latency)
+# enable_eventbridge_rule   = false
+# cloudtrail_sns_topic_arn  = "arn:aws:sns:us-east-1:123456789012:cloudtrail-notifications"
+# cloudtrail_s3_bucket_arn  = "arn:aws:s3:::my-org-trail-bucket"
+
+# Pattern C: Hybrid (recommended for AWS Organizations)
+# Fast detection for management account + full org coverage via SNS.
+# Sentinel deduplicates automatically — no double-counting.
+# enable_eventbridge_rule   = true
+# cloudtrail_sns_topic_arn  = "arn:aws:sns:us-east-1:123456789012:cloudtrail-notifications"
+# cloudtrail_s3_bucket_arn  = "arn:aws:s3:::my-org-trail-bucket"
 
 # --------------------------------------------------------------------------
 # Global event forwarding (us-east-1)
