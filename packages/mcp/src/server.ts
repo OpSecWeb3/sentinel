@@ -28,34 +28,73 @@ export function createServer(): McpServer {
     },
     {
       instructions: [
-        'Sentinel is a security monitoring platform. Use these workflows for best results:',
+        'Sentinel is a security monitoring platform. You are an autonomous security agent.',
+        'Your job: investigate alerts, identify threats, and build/tune detections and correlation rules.',
+        '',
+        '## Platform architecture',
+        'Modules (chain, infra, aws, registry, github) ingest events into a shared event store.',
+        'Detections contain rules that evaluate against events and fire alerts.',
+        'Correlation rules detect patterns across multiple events (sequence, aggregation, absence).',
+        'Notification channels deliver alerts to Slack, email, or webhooks.',
         '',
         '## Investigation workflow',
-        '1. Start with `list-alerts` to see recent alerts (filter by severity/status).',
-        '2. Use `get-alert` to inspect a specific alert and read its payload.',
-        '3. Pivot to `search-events` or `entity-timeline` to see what happened around the same entity or time window.',
-        '4. Use `payload-search` for deep JSONB queries when you know the field path.',
-        '5. Use `frequency` to check whether an event pattern is anomalous or routine.',
+        '1. `get-alert-stats` for overall volume and severity distribution.',
+        '2. `list-alerts` with severity/module/date filters to find relevant alerts.',
+        '3. `get-alert` for full payload, triggerData, and the raw event that caused it.',
+        '4. `event-entity-timeline` to pivot on any identifier (address, ARN, hostname, username, digest) across ALL modules.',
+        '5. `event-search-payload` for targeted JSONB field queries (dot-notation: "sender.login", "repository.full_name").',
+        '6. `event-frequency` to determine if a pattern is anomalous vs routine by checking daily counts.',
+        '7. `get-event-filters` to discover which modules and event types have data.',
         '',
-        '## Detection management',
-        '1. `list-modules-and-event-types` shows available modules, event types, and template slugs.',
-        '2. `resolve-detection-template` shows available templates and their required inputs for a module.',
-        '3. `test-detection` dry-runs a detection against a real or inline event — always test before enabling.',
-        '4. `create-detection-from-template` creates a detection with rules from a template.',
-        '5. `update-detection` changes severity, status (active/paused/disabled), or cooldown.',
+        '## Building detections',
+        'Two paths: template-based (faster) or raw (full control).',
         '',
-        '## Infrastructure monitoring',
-        '1. `infra-list-hosts` → `infra-lookup-host` for full host intelligence (IP, ASN, ports, CDN).',
-        '2. `infra-dns-history` and `infra-cert-expiry-report` for DNS/TLS hygiene.',
-        '3. `infra-security-score` for a composite score with category breakdown.',
-        '4. `infra-trigger-scan` to force an immediate rescan of a host.',
+        '### Template path',
+        '1. `list-modules-and-event-types` to see modules, their event types, and available template slugs.',
+        '2. `resolve-template` with moduleId + slug to get the template definition: required inputs, rule blueprints, default severity.',
+        '3. `create-detection-from-template` with the moduleId, templateSlug, and filled inputs. The API substitutes inputs into rule configs.',
+        '',
+        '### Raw path',
+        '1. `get-rule-schema` with a ruleType to see what config fields the evaluator expects (field names, types, constraints).',
+        '2. `get-sample-event-fields` with moduleId + eventType to see real payload field names and sample values.',
+        '3. `create-detection` with moduleId, name, severity, and a rules array where each rule has ruleType + config.',
+        '',
+        '### Testing and tuning',
+        '- ALWAYS call `test-detection` before enabling — pass an eventId from a real event or an inline event object.',
+        '- `update-detection` can change status (active/paused), severity, cooldown, channelIds, or replace rules entirely.',
+        '- To re-derive rules from a template with new inputs, pass templateSlug + inputs to `update-detection`.',
+        '- `delete-detection` archives (soft-deletes) a detection and disables all its rules.',
         '',
         '## Correlation rules',
-        'Use correlation rules when you need to detect patterns across multiple events:',
-        '- **Sequence**: ordered steps that must occur within a time window (e.g., login → privilege escalation → data export).',
-        '- **Aggregation**: threshold-based (e.g., >10 failed logins in 5 minutes for the same principal).',
-        '- **Absence**: alert when an expected event does NOT occur within a window.',
-        'Always use `get-correlation-instances` to inspect in-flight state before clearing.',
+        'For multi-event patterns that single-event detections cannot catch.',
+        '',
+        '- **Sequence**: ordered steps within a time window. Config needs `steps` array with moduleId + eventType + conditions per step, plus `correlationKey` to link them (e.g. same actor).',
+        '- **Aggregation**: count threshold within a window. Config needs `aggregation` with moduleId + eventType + conditions + `threshold` + `groupBy`.',
+        '- **Absence**: expected event did NOT occur within window. Config needs `absence` with expected moduleId + eventType + conditions.',
+        '',
+        'All correlation rules require: `config.type` ("sequence"|"aggregation"|"absence"), `config.correlationKey` (array of {field, alias}), `config.windowMinutes`.',
+        '',
+        '- `get-correlation-instances` shows in-flight state (which key groups are being tracked).',
+        '- `clear-correlation-instances` resets tracking — use for debugging or after rule changes.',
+        '- `delete-correlation-rule` archives the rule and cleans up Redis state.',
+        '',
+        '## Notification channels',
+        'Detections reference channels by UUID. Before creating a detection with channelIds, verify channels exist with `list-channels`.',
+        'Channel types: "slack" (config: {channelId}), "email" (config: {recipients: string[]}), "webhook" (config: {url, secret?, headers?}).',
+        'Use `test-channel` to verify connectivity. Use `get-notification-delivery` to debug failed deliveries.',
+        '',
+        '## Module-specific analytics',
+        '- **AWS**: `aws-query-events` for CloudTrail, `aws-principal-activity` for per-identity timelines, `aws-error-patterns` for IAM issues.',
+        '- **Chain**: `chain-address-activity` for on-chain events, `chain-state-history` for storage slot changes, `chain-network-status` for poller health.',
+        '- **Infra**: `infra-lookup-host` for full host intelligence, `infra-security-score` for composite scoring, `infra-cert-expiry-report` for TLS hygiene.',
+        '- **Registry**: `registry-artifact-summary` for monitored images/packages, `registry-unsigned-releases` for supply chain gaps.',
+        '- **GitHub**: `github-repo-activity` for per-repo events, `github-actor-activity` for per-user timelines.',
+        '',
+        '## Key principles',
+        '- Always investigate before acting. Read alerts, events, and existing detections before creating new ones.',
+        '- Always test detections against real events before enabling.',
+        '- Use `query-audit-log` to understand what changes were made and by whom.',
+        '- Prefer templates when available — they encode best practices. Use raw detections only when no template fits.',
       ].join('\n'),
       // Enable experimental task support for long-running operations
       capabilities: {
@@ -67,13 +106,13 @@ export function createServer(): McpServer {
     },
   );
 
-  // Register all tools (65 total)
+  // Register all tools (73 tools + 3 task variants)
   registerAlertTools(server);       // 3  — list-alerts, get-alert, get-alert-stats
-  registerEventTools(server);       // 5  — search-events, get-event, entity-timeline, payload-search, frequency
-  registerDetectionTools(server);   // 5  — list, get, test, create-from-template, update
-  registerCorrelationTools(server); // 6  — list, get, create, update, get-instances, clear-instances
-  registerNotificationTools(server); // 7 — list-deliveries, delivery-stats, list/get/create/update-channel, test-channel
-  registerModuleTools(server);      // 4  — list-modules, get-sample-fields, resolve-template, browse-field-catalog
+  registerEventTools(server);       // 6  — search-events, get-event, entity-timeline, payload-search, frequency, get-event-filters
+  registerDetectionTools(server);   // 9  — list, get, test, create, create-from-template, update, delete, get-rule-schema, resolve-template
+  registerCorrelationTools(server); // 7  — list, get, create, update, delete, get-instances, clear-instances
+  registerNotificationTools(server); // 9 — list-deliveries, get-delivery, delivery-stats, list/get/create/update/delete-channel, test-channel
+  registerModuleTools(server);      // 4  — list-modules, get-sample-fields, resolve-detection-template, browse-field-catalog
   registerInfraTools(server);       // 10 — list-hosts, lookup, origin, dns-history, cert-expiry, tls, whois, score, add-host, trigger-scan
   registerAwsTools(server);         // 6  — query-events, principal-activity, resource-history, error-patterns, top-actors, account-summary
   registerChainTools(server);       // 7  — address-activity, balance-history, state-history, network-status, rpc-usage, add-contract, discover-storage

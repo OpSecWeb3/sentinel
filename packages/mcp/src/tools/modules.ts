@@ -4,43 +4,50 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 export function registerModuleTools(server: McpServer) {
-  server.tool(
+  server.registerTool(
     'list-modules-and-event-types',
-    'List all Sentinel modules and their registered event types, evaluators, and template slugs.',
-    {},
-    { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    {
+      description: 'List all Sentinel modules and their registered event types, evaluators, and template slugs.',
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
     async () => ok(await safe(() => apiGet('/api/modules/metadata'))),
   );
 
-  server.tool(
+  server.registerTool(
     'get-sample-event-fields',
-    'Inspect the most recent event of a given moduleId+eventType and return the top-level payload field names with sample values. Useful before writing an event-search-payload query.',
     {
-      moduleId: z.string(),
-      eventType: z.string(),
+      description: 'Inspect the most recent event of a given moduleId+eventType and return the top-level payload field names with sample values. Useful before writing an event-search-payload query.',
+      inputSchema: {
+        moduleId: z.string(),
+        eventType: z.string(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     async (params) => ok(await safe(() => apiGet('/api/events', { ...params, limit: 1 }))),
   );
 
-  server.tool(
+  server.registerTool(
     'resolve-detection-template',
-    'Look up available detection templates for a module, showing slug, name, description, required inputs, and default severity.',
     {
-      moduleId: z.string().describe('chain | infra | aws | registry | github'),
+      description: 'Look up available detection templates for a module, showing slug, name, description, required inputs, and default severity.',
+      inputSchema: {
+        moduleId: z.string().describe('chain | infra | aws | registry | github'),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     async (params) => ok(await safe(() => apiGet('/api/modules/metadata', params))),
   );
 
-  server.tool(
+  server.registerTool(
     'browse-field-catalog',
-    'Browse discovered field paths across events and alerts. Useful for understanding available payload fields before writing detection rules or searches.',
     {
-      source: z.enum(['events', 'alerts']).optional(),
-      sourceType: z.string().optional().describe('e.g. specific eventType or alert type'),
+      description: 'Browse discovered field paths across events and alerts. Useful for understanding available payload fields before writing detection rules or searches.',
+      inputSchema: {
+        source: z.enum(['events', 'alerts']).optional(),
+        sourceType: z.string().optional().describe('e.g. specific eventType or alert type'),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     async (params) => ok(await safe(() => apiGet('/api/field-catalog', params))),
   );
 

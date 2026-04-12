@@ -17,14 +17,14 @@ function toText(data: unknown, uri: string) {
 
 export function registerResources(server: McpServer) {
   // Static resources
-  server.resource(
+  server.registerResource(
     'alert-stats',
     'sentinel://alerts/stats',
     { description: 'Live alert statistics: total, today, this week, by severity, 10 most recent' },
     async (uri) => toText(await safe(() => apiGet('/api/alerts/stats')), uri.href),
   );
 
-  server.resource(
+  server.registerResource(
     'modules-metadata',
     'sentinel://modules/metadata',
     { description: 'All modules, their event types, evaluators, and detection templates' },
@@ -32,7 +32,7 @@ export function registerResources(server: McpServer) {
   );
 
   // Template resources
-  server.resource(
+  server.registerResource(
     'alert-detail',
     new ResourceTemplate('sentinel://alerts/{id}', { list: undefined }),
     { description: 'Single alert with triggerData, event payload, and delivery status' },
@@ -42,7 +42,7 @@ export function registerResources(server: McpServer) {
     },
   );
 
-  server.resource(
+  server.registerResource(
     'detection-detail',
     new ResourceTemplate('sentinel://detections/{id}', { list: undefined }),
     { description: 'Detection with all rules and full config' },
@@ -52,7 +52,7 @@ export function registerResources(server: McpServer) {
     },
   );
 
-  server.resource(
+  server.registerResource(
     'correlation-rule-detail',
     new ResourceTemplate('sentinel://correlation-rules/{id}', { list: undefined }),
     { description: 'Correlation rule with full config JSONB' },
@@ -62,7 +62,7 @@ export function registerResources(server: McpServer) {
     },
   );
 
-  server.resource(
+  server.registerResource(
     'correlation-instances',
     new ResourceTemplate('sentinel://correlation-rules/{id}/instances', { list: undefined }),
     { description: 'Active in-flight correlation instances from Redis' },
@@ -72,7 +72,7 @@ export function registerResources(server: McpServer) {
     },
   );
 
-  server.resource(
+  server.registerResource(
     'event-detail',
     new ResourceTemplate('sentinel://events/{id}', { list: undefined }),
     { description: 'Single event with full JSONB payload' },
@@ -82,7 +82,7 @@ export function registerResources(server: McpServer) {
     },
   );
 
-  server.resource(
+  server.registerResource(
     'infra-host',
     new ResourceTemplate('sentinel://infra/hosts/{hostname}', { list: undefined }),
     { description: 'Full host intelligence: IP, cloud provider, CDN origin, DNS records, last scan' },

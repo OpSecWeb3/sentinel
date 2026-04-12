@@ -5,10 +5,12 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 export function registerPrompts(server: McpServer) {
-  server.prompt(
+  server.registerPrompt(
     'investigate-alert',
-    'Deep-dive investigation of a specific alert: loads alert detail, its detection, correlation rule (if correlated), and synthesizes findings.',
-    { alertId: z.string().describe('Numeric alert ID') },
+    {
+      description: 'Deep-dive investigation of a specific alert: loads alert detail, its detection, correlation rule (if correlated), and synthesizes findings.',
+      argsSchema: { alertId: z.string().describe('Numeric alert ID') },
+    },
     ({ alertId }) => ({
       messages: [{
         role: 'user' as const,
@@ -26,10 +28,11 @@ export function registerPrompts(server: McpServer) {
     }),
   );
 
-  server.prompt(
+  server.registerPrompt(
     'triage-alert-queue',
-    'Triage the current alert queue: get stats, surface critical/high alerts, cluster by type, and recommend priority order.',
-    {},
+    {
+      description: 'Triage the current alert queue: get stats, surface critical/high alerts, cluster by type, and recommend priority order.',
+    },
     () => ({
       messages: [{
         role: 'user' as const,
@@ -46,10 +49,12 @@ export function registerPrompts(server: McpServer) {
     }),
   );
 
-  server.prompt(
+  server.registerPrompt(
     'detection-coverage-audit',
-    'Audit detection coverage for a module: identify gaps, redundancies, and recommend templates to add.',
-    { moduleId: z.string().describe('Module to audit: chain | infra | aws | registry | github') },
+    {
+      description: 'Audit detection coverage for a module: identify gaps, redundancies, and recommend templates to add.',
+      argsSchema: { moduleId: z.string().describe('Module to audit: chain | infra | aws | registry | github') },
+    },
     ({ moduleId }) => ({
       messages: [{
         role: 'user' as const,
@@ -66,10 +71,12 @@ export function registerPrompts(server: McpServer) {
     }),
   );
 
-  server.prompt(
+  server.registerPrompt(
     'tune-noisy-detection',
-    'Analyze a noisy detection and suggest tuning: adjust thresholds, add suppressors, or update cooldown.',
-    { detectionId: z.string().uuid().describe('Detection UUID') },
+    {
+      description: 'Analyze a noisy detection and suggest tuning: adjust thresholds, add suppressors, or update cooldown.',
+      argsSchema: { detectionId: z.string().uuid().describe('Detection UUID') },
+    },
     ({ detectionId }) => ({
       messages: [{
         role: 'user' as const,
@@ -86,10 +93,12 @@ export function registerPrompts(server: McpServer) {
     }),
   );
 
-  server.prompt(
+  server.registerPrompt(
     'write-correlation-rule',
-    'Draft and create a correlation rule from a natural language description.',
-    { description: z.string().describe('What pattern to correlate, e.g. "branch protection disabled then push within 1 hour by same actor"') },
+    {
+      description: 'Draft and create a correlation rule from a natural language description.',
+      argsSchema: { description: z.string().describe('What pattern to correlate, e.g. "branch protection disabled then push within 1 hour by same actor"') },
+    },
     ({ description }) => ({
       messages: [{
         role: 'user' as const,
@@ -112,12 +121,14 @@ Steps:
     }),
   );
 
-  server.prompt(
+  server.registerPrompt(
     'diagnose-silent-alert',
-    'Diagnose why an expected alert did not fire: check detection health, delivery channels, and test the detection.',
     {
-      detectionId: z.string().uuid().describe('Detection UUID that should have fired'),
-      expectedTime: z.string().datetime().describe('ISO datetime when the alert was expected'),
+      description: 'Diagnose why an expected alert did not fire: check detection health, delivery channels, and test the detection.',
+      argsSchema: {
+        detectionId: z.string().uuid().describe('Detection UUID that should have fired'),
+        expectedTime: z.string().datetime().describe('ISO datetime when the alert was expected'),
+      },
     },
     ({ detectionId, expectedTime }) => ({
       messages: [{
@@ -136,13 +147,15 @@ Steps:
     }),
   );
 
-  server.prompt(
+  server.registerPrompt(
     'incident-timeline',
-    'Build a full incident timeline for an entity across all Sentinel modules.',
     {
-      entityId: z.string().describe('Entity identifier: address, hostname, ARN, username, digest, etc.'),
-      from: z.string().datetime().describe('Incident start time (ISO)'),
-      to: z.string().datetime().describe('Incident end time (ISO)'),
+      description: 'Build a full incident timeline for an entity across all Sentinel modules.',
+      argsSchema: {
+        entityId: z.string().describe('Entity identifier: address, hostname, ARN, username, digest, etc.'),
+        from: z.string().datetime().describe('Incident start time (ISO)'),
+        to: z.string().datetime().describe('Incident end time (ISO)'),
+      },
     },
     ({ entityId, from, to }) => ({
       messages: [{

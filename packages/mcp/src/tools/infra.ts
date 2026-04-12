@@ -4,98 +4,118 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 export function registerInfraTools(server: McpServer) {
-  server.tool(
+  server.registerTool(
     'infra-list-hosts',
-    'List all monitored infrastructure hosts for the org. Optional substring search on hostname.',
     {
-      search: z.string().optional(),
-      isRoot: z.enum(['true', 'false']).optional(),
+      description: 'List all monitored infrastructure hosts for the org. Optional substring search on hostname.',
+      inputSchema: {
+        search: z.string().optional(),
+        isRoot: z.enum(['true', 'false']).optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     async (params) => ok(await safe(() => apiGet('/api/infra/hosts', params))),
   );
 
-  server.tool(
+  server.registerTool(
     'infra-lookup-host',
-    'Full host intelligence: IP address, cloud provider, ASN, open ports, CDN origin records, DNS records, and last scan time. Use this to answer "what server is <hostname> on?"',
-    { hostname: z.string().describe('Hostname to look up, e.g. "aztec-labs.com"') },
-    { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    {
+      description: 'Full host intelligence: IP address, cloud provider, ASN, open ports, CDN origin records, DNS records, and last scan time. Use this to answer "what server is <hostname> on?"',
+      inputSchema: { hostname: z.string().describe('Hostname to look up, e.g. "aztec-labs.com"') },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
     async ({ hostname }) => ok(await safe(() => apiGet(`/api/infra/hosts/${encodeURIComponent(hostname)}`))),
   );
 
-  server.tool(
+  server.registerTool(
     'infra-get-origin',
-    'Return all CDN origin records for a host. Answers "what is the real server behind the CDN for <hostname>?"',
-    { hostname: z.string() },
-    { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    {
+      description: 'Return all CDN origin records for a host. Answers "what is the real server behind the CDN for <hostname>?"',
+      inputSchema: { hostname: z.string() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
     async ({ hostname }) => ok(await safe(() => apiGet(`/api/infra/hosts/${encodeURIComponent(hostname)}/origin`))),
   );
 
-  server.tool(
+  server.registerTool(
     'infra-dns-history',
-    'DNS change log for a host: add/modify/remove events per record type.',
     {
-      hostname: z.string(),
-      since: z.string().datetime().optional(),
+      description: 'DNS change log for a host: add/modify/remove events per record type.',
+      inputSchema: {
+        hostname: z.string(),
+        since: z.string().datetime().optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     async ({ hostname, since }) => ok(await safe(() => apiGet(`/api/infra/hosts/${encodeURIComponent(hostname)}/dns-history`, { since }))),
   );
 
-  server.tool(
+  server.registerTool(
     'infra-cert-expiry-report',
-    'Report of TLS certificates expiring within N days (default 30). Returns hostname, subject, issuer, and expiry date.',
-    { daysAhead: z.number().int().positive().default(30) },
-    { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    {
+      description: 'Report of TLS certificates expiring within N days (default 30). Returns hostname, subject, issuer, and expiry date.',
+      inputSchema: { daysAhead: z.number().int().positive().default(30) },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
     async (params) => ok(await safe(() => apiGet('/api/infra/cert-expiry', params))),
   );
 
-  server.tool(
+  server.registerTool(
     'infra-tls-analysis',
-    'Latest TLS analysis for a host: TLS versions supported, cipher suites, weak cipher flag.',
-    { hostname: z.string() },
-    { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    {
+      description: 'Latest TLS analysis for a host: TLS versions supported, cipher suites, weak cipher flag.',
+      inputSchema: { hostname: z.string() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
     async ({ hostname }) => ok(await safe(() => apiGet(`/api/infra/hosts/${encodeURIComponent(hostname)}/tls`))),
   );
 
-  server.tool(
+  server.registerTool(
     'infra-whois',
-    'Latest WHOIS record for a host: registrar, registration/expiry dates, name servers, EPP status.',
-    { hostname: z.string() },
-    { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    {
+      description: 'Latest WHOIS record for a host: registrar, registration/expiry dates, name servers, EPP status.',
+      inputSchema: { hostname: z.string() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
     async ({ hostname }) => ok(await safe(() => apiGet(`/api/infra/hosts/${encodeURIComponent(hostname)}/whois`))),
   );
 
-  server.tool(
+  server.registerTool(
     'infra-security-score',
-    'Security score history for a host with category breakdown and deduction reasons.',
     {
-      hostname: z.string(),
-      limit: z.number().int().positive().max(90).default(30),
+      description: 'Security score history for a host with category breakdown and deduction reasons.',
+      inputSchema: {
+        hostname: z.string(),
+        limit: z.number().int().positive().max(90).default(30),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     async ({ hostname, limit }) => ok(await safe(() => apiGet(`/api/infra/hosts/${encodeURIComponent(hostname)}/score`, { limit }))),
   );
 
-  server.tool(
+  server.registerTool(
     'infra-add-host',
-    'Add a new infrastructure host for monitoring. Hostname must be a valid domain (not a TLD). Enqueues an initial full scan immediately.',
     {
-      hostname: z.string().min(1).max(253).describe('Domain to monitor, e.g. "app.example.com"'),
-      scanIntervalMinutes: z.number().int().min(5).default(1440).describe('Scan interval in minutes (default 24h)'),
-      probeEnabled: z.boolean().default(false).describe('Enable uptime probing'),
-      probeIntervalMinutes: z.number().int().min(1).default(5),
+      description: 'Add a new infrastructure host for monitoring. Hostname must be a valid domain (not a TLD). Enqueues an initial full scan immediately.',
+      inputSchema: {
+        hostname: z.string().min(1).max(253).describe('Domain to monitor, e.g. "app.example.com"'),
+        scanIntervalMinutes: z.number().int().min(5).default(1440).describe('Scan interval in minutes (default 24h)'),
+        probeEnabled: z.boolean().default(false).describe('Enable uptime probing'),
+        probeIntervalMinutes: z.number().int().min(1).default(5),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    async (body) => ok(await safe(() => apiPost('/api/infra/hosts', body))),
+    async (body) => ok(await safe(() => apiPost('/modules/infra/hosts', body))),
   );
 
-  server.tool(
+  server.registerTool(
     'infra-trigger-scan',
-    'Trigger an immediate full scan for a monitored host. Returns a job ID for tracking.',
-    { id: z.string().uuid().describe('Host UUID') },
-    { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    async ({ id }) => ok(await safe(() => apiPost(`/api/infra/hosts/${id}/scan`, {}))),
+    {
+      description: 'Trigger an immediate full scan for a monitored host. Returns a job ID for tracking.',
+      inputSchema: { id: z.string().uuid().describe('Host UUID') },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async ({ id }) => ok(await safe(() => apiPost(`/modules/infra/hosts/${id}/scan`, {}))),
   );
 
   // --- Experimental: task-based variant of infra-trigger-scan ---
@@ -115,7 +135,7 @@ export function registerInfraTools(server: McpServer) {
         // Fire the scan in the background and store result when done
         (async () => {
           try {
-            const result = await safe(() => apiPost(`/api/infra/hosts/${id}/scan`, {}));
+            const result = await safe(() => apiPost(`/modules/infra/hosts/${id}/scan`, {}));
             await extra.taskStore.storeTaskResult(task.taskId, 'completed', {
               content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
             });
