@@ -419,6 +419,25 @@ resource "aws_iam_role_policy" "ca_sentinel_kms" {
   })
 }
 
+resource "aws_iam_role_policy" "ca_sentinel_s3" {
+  count = var.cloudtrail_s3_bucket_arn != null ? 1 : 0
+
+  name = "${var.name_prefix}-s3-read"
+  role = aws_iam_role.ca_sentinel.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "S3GetTrailObjects"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = ["${var.cloudtrail_s3_bucket_arn}/*"]
+      },
+    ]
+  })
+}
+
 # --------------------------------------------------------------------------
 # DLQ redrive — allow main queue to push to DLQ
 # --------------------------------------------------------------------------

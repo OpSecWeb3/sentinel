@@ -127,8 +127,9 @@ All member account events:  CloudTrail ──> S3 ──> SNS ──> SQS (5-15 
 Enable **both** EventBridge and SNS to get fast detection for management account activity (root logins, IAM changes, CloudTrail tampering) while still covering all member accounts via SNS. Sentinel deduplicates by `cloudTrailEventId`, so management account events won't double-count.
 
 ```hcl
-enable_eventbridge_rule  = true
-cloudtrail_sns_topic_arn = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
+enable_eventbridge_rule   = true
+cloudtrail_sns_topic_arn  = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
+cloudtrail_s3_bucket_arn  = "arn:aws:s3:::my-org-trail-bucket"
 ```
 
 ## Multi-account setup (AWS Organizations)
@@ -147,10 +148,11 @@ module "ca_sentinel" {
   name_prefix              = "ca-sentinel-org"
 
   # Fast path for management account (1-2 min)
-  enable_eventbridge_rule  = true
+  enable_eventbridge_rule   = true
 
   # Full org coverage via SNS (5-15 min)
-  cloudtrail_sns_topic_arn = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
+  cloudtrail_sns_topic_arn  = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
+  cloudtrail_s3_bucket_arn  = "arn:aws:s3:::my-org-trail-bucket"
 }
 ```
 
@@ -163,8 +165,9 @@ module "ca_sentinel" {
   ca_sentinel_account_id   = "111111111111"
   external_id              = "ca_sentinel:your-org-id:abc123..."  # from Sentinel UI
   name_prefix              = "ca-sentinel-org"
-  enable_eventbridge_rule  = false
-  cloudtrail_sns_topic_arn = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
+  enable_eventbridge_rule   = false
+  cloudtrail_sns_topic_arn  = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
+  cloudtrail_s3_bucket_arn  = "arn:aws:s3:::my-org-trail-bucket"
 }
 ```
 
@@ -207,6 +210,7 @@ If you rotate the external ID in Sentinel (via the **Rotate External ID** button
 | `create_kms_key` | Create a dedicated KMS key for SQS | `bool` | `true` | no |
 | `kms_key_arn` | ARN of an existing KMS key (when `create_kms_key = false`) | `string` | `null` | no |
 | `cloudtrail_sns_topic_arn` | ARN of existing CloudTrail SNS topic | `string` | `null` | no |
+| `cloudtrail_s3_bucket_arn` | ARN of S3 bucket where CloudTrail writes logs (required for SNS pattern) | `string` | `null` | no |
 
 ## Outputs
 

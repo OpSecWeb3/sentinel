@@ -132,3 +132,9 @@ variable "cloudtrail_sns_topic_arn" {
   type        = string
   default     = null
 }
+
+variable "cloudtrail_s3_bucket_arn" {
+  description = "ARN of the S3 bucket where CloudTrail writes log files. Required when using the SNS pattern so Sentinel can download and decompress trail files. Example: arn:aws:s3:::my-org-trail-bucket"
+  type        = string
+  default     = null
+}

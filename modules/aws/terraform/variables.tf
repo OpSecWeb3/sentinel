@@ -65,3 +65,8 @@ variable "cloudtrail_sns_topic_arn" {
   type    = string
   default = null
 }
+
+variable "cloudtrail_s3_bucket_arn" {
+  type    = string
+  default = null
+}

@@ -14,6 +14,7 @@ import { captureException } from '@sentinel/shared/sentry';
 import { decrypt } from '@sentinel/shared/crypto';
 import { logger as rootLogger } from '@sentinel/shared/logger';
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { normalizeCloudTrailEvent, extractPrincipal } from './normalizer.js';
 
 const log = rootLogger.child({ component: 'aws' });
@@ -82,58 +83,70 @@ async function getSentinelRoleCredentials(region: string) {
   return cachedSentinelCreds;
 }
 
-async function buildSqsClient(integration: IntegrationAuth) {
-  const { SQSClient } = await import('@aws-sdk/client-sqs');
-
+/**
+ * Resolve AWS credentials for a customer integration. Supports three modes:
+ *   1. IAM role assumption (two-hop STS chain)
+ *   2. Encrypted static credentials
+ *   3. Environment / instance profile (fallback)
+ */
+async function getCustomerCredentials(
+  integration: IntegrationAuth,
+  region: string,
+  sessionName: string,
+): Promise<{ accessKeyId: string; secretAccessKey: string; sessionToken?: string } | undefined> {
   if (integration.roleArn) {
     const { STSClient, AssumeRoleCommand } = await import('@aws-sdk/client-sts');
 
     // First hop: assume SentinelService role (if configured).
-    // Required when running off-AWS with IAM user env creds, because the
-    // customer's trust policy trusts the SentinelService role, not the user.
-    // When running on AWS with an instance profile that IS the SentinelService
-    // role, AWS_SENTINEL_ROLE_ARN is not set and this is a no-op.
-    const sentinelCreds = await getSentinelRoleCredentials(integration.sqsRegion);
+    const sentinelCreds = await getSentinelRoleCredentials(region);
 
     // Second hop: assume the customer's cross-account role.
     const stsClient = new STSClient({
-      region: integration.sqsRegion,
+      region,
       ...(sentinelCreds ? { credentials: sentinelCreds } : {}),
     });
 
     const assumed = await stsClient.send(new AssumeRoleCommand({
       RoleArn: integration.roleArn,
-      RoleSessionName: 'sentinel-aws-module',
+      RoleSessionName: sessionName,
       DurationSeconds: 3600,
       ...(integration.externalIdEnforced && integration.externalId ? { ExternalId: integration.externalId } : {}),
     }), { abortSignal: AbortSignal.timeout(AWS_STS_TIMEOUT_MS) });
     const creds = assumed.Credentials;
     if (!creds) throw new Error('Failed to assume customer IAM role — no credentials returned');
 
-    return new SQSClient({
-      region: integration.sqsRegion,
-      credentials: {
-        accessKeyId: creds.AccessKeyId!,
-        secretAccessKey: creds.SecretAccessKey!,
-        sessionToken: creds.SessionToken,
-      },
-    });
+    return {
+      accessKeyId: creds.AccessKeyId!,
+      secretAccessKey: creds.SecretAccessKey!,
+      sessionToken: creds.SessionToken,
+    };
   }
 
   if (integration.credentialsEncrypted) {
     const raw = decrypt(integration.credentialsEncrypted);
-    const parsed = JSON.parse(raw) as { accessKeyId: string; secretAccessKey: string };
-    return new SQSClient({
-      region: integration.sqsRegion,
-      credentials: {
-        accessKeyId: parsed.accessKeyId,
-        secretAccessKey: parsed.secretAccessKey,
-      },
-    });
+    return JSON.parse(raw) as { accessKeyId: string; secretAccessKey: string };
   }
 
   // Fall back to the environment / instance profile credentials
-  return new SQSClient({ region: integration.sqsRegion });
+  return undefined;
+}
+
+async function buildSqsClient(integration: IntegrationAuth) {
+  const { SQSClient } = await import('@aws-sdk/client-sqs');
+  const creds = await getCustomerCredentials(integration, integration.sqsRegion, 'sentinel-aws-module');
+  return new SQSClient({
+    region: integration.sqsRegion,
+    ...(creds ? { credentials: creds } : {}),
+  });
+}
+
+async function buildS3Client(integration: IntegrationAuth, region: string) {
+  const { S3Client } = await import('@aws-sdk/client-s3');
+  const creds = await getCustomerCredentials(integration, region, 'sentinel-aws-module-s3');
+  return new S3Client({
+    region,
+    ...(creds ? { credentials: creds } : {}),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -230,15 +243,17 @@ export const sqsPollHandler: JobHandler = {
       return;
     }
 
+    const integrationAuth: IntegrationAuth = {
+      roleArn: integration.roleArn,
+      credentialsEncrypted: integration.credentialsEncrypted,
+      externalId: integration.externalId,
+      externalIdEnforced: integration.externalIdEnforced,
+      sqsRegion: integration.sqsRegion,
+    };
+
     let client: Awaited<ReturnType<typeof buildSqsClient>>;
     try {
-      client = await buildSqsClient({
-        roleArn: integration.roleArn,
-        credentialsEncrypted: integration.credentialsEncrypted,
-        externalId: integration.externalId,
-        externalIdEnforced: integration.externalIdEnforced,
-        sqsRegion: integration.sqsRegion,
-      });
+      client = await buildSqsClient(integrationAuth);
     } catch (err) {
       log.error({ err, integrationId }, 'Failed to build SQS client');
       captureException(err, { integrationId, phase: 'aws.sqs.poll.build-client' });
@@ -250,6 +265,9 @@ export const sqsPollHandler: JobHandler = {
 
     const { ReceiveMessageCommand, DeleteMessageCommand } = await import('@aws-sdk/client-sqs');
 
+    // Lazily built on first S3 notification — reused across batches
+    let s3Client: Awaited<ReturnType<typeof buildS3Client>> | null = null;
+
     let processed = 0;
     let batchCount = 0;
     const maxBatches = 10; // max 100 messages per poll run
@@ -260,7 +278,7 @@ export const sqsPollHandler: JobHandler = {
           QueueUrl: integration.sqsQueueUrl,
           MaxNumberOfMessages: 10,
           WaitTimeSeconds: 0,
-          VisibilityTimeout: 30,
+          VisibilityTimeout: 120,
         }),
       );
 
@@ -273,7 +291,37 @@ export const sqsPollHandler: JobHandler = {
         if (!msg.Body || !msg.ReceiptHandle) continue;
 
         try {
-          const records = parseCloudTrailMessage(msg.Body);
+          const parsed = parseCloudTrailMessage(msg.Body);
+          let records: Record<string, unknown>[];
+
+          if (parsed.type === 's3-notification') {
+            // CloudTrail S3 notification — download .json.gz files
+            if (!s3Client) {
+              s3Client = await buildS3Client(integrationAuth, integration.sqsRegion);
+            }
+            records = [];
+            for (const key of parsed.keys) {
+              try {
+                const fileRecords = await downloadTrailFile(s3Client, parsed.bucket, key);
+                records.push(...fileRecords);
+              } catch (s3Err) {
+                log.warn({ err: s3Err, bucket: parsed.bucket, key }, 'Failed to download CloudTrail log file from S3');
+                captureException(s3Err, {
+                  integrationId,
+                  bucket: parsed.bucket,
+                  key,
+                  phase: 'aws.sqs.poll.s3-download',
+                });
+                // Re-throw so this message stays in the queue for retry
+                throw s3Err;
+              }
+            }
+            log.debug({ integrationId, bucket: parsed.bucket, keys: parsed.keys.length, records: records.length },
+              'Downloaded CloudTrail log files from S3');
+          } else {
+            records = parsed.records;
+          }
+
           for (const record of records) {
             await storeRawEvent(db, integrationId, orgId, record);
             const rawId = await getRawEventId(db, integrationId, record.eventID as string);
@@ -369,31 +417,84 @@ export const eventProcessHandler: JobHandler = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function parseCloudTrailMessage(body: string): Record<string, unknown>[] {
+// ---------------------------------------------------------------------------
+// CloudTrail S3 notification detection
+// ---------------------------------------------------------------------------
+
+interface S3NotificationPayload {
+  s3Bucket: string;
+  s3ObjectKey: string[];
+}
+
+function isCloudTrailS3Notification(obj: Record<string, unknown>): boolean {
+  return (
+    typeof obj.s3Bucket === 'string' &&
+    Array.isArray(obj.s3ObjectKey) &&
+    obj.s3ObjectKey.length > 0 &&
+    obj.s3ObjectKey.every((k: unknown) => typeof k === 'string')
+  );
+}
+
+/**
+ * Download a CloudTrail .json.gz log file from S3, decompress, and return
+ * the individual CloudTrail event records.
+ */
+async function downloadTrailFile(
+  s3Client: Awaited<ReturnType<typeof buildS3Client>>,
+  bucket: string,
+  key: string,
+): Promise<Record<string, unknown>[]> {
+  const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+  const response = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+
+  if (!response.Body) return [];
+
+  const compressed = Buffer.from(await response.Body.transformToByteArray());
+  const decompressed = gunzipSync(compressed);
+  const parsed = JSON.parse(decompressed.toString('utf-8')) as { Records?: Record<string, unknown>[] };
+
+  return parsed.Records ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// Message parsing
+// ---------------------------------------------------------------------------
+
+type ParseResult =
+  | { type: 'events'; records: Record<string, unknown>[] }
+  | { type: 's3-notification'; bucket: string; keys: string[] };
+
+function parseCloudTrailMessage(body: string): ParseResult {
   let outer: Record<string, unknown>;
   try {
     outer = JSON.parse(body) as Record<string, unknown>;
   } catch {
-    return [];
+    return { type: 'events', records: [] };
   }
 
-  // S3 event notification wrapping (SNS → SQS → CloudTrail S3 object key)
-  // For simplicity we handle the common EventBridge → SQS direct delivery pattern
-  // where the body IS the CloudTrail event object, or is an SNS notification
-  // with a Message field containing the event.
-
-  // SNS wrapper
+  // SNS wrapper — unwrap the envelope to get the inner message
   if (outer.Type === 'Notification' && typeof outer.Message === 'string') {
     try {
       outer = JSON.parse(outer.Message) as Record<string, unknown>;
     } catch {
-      return [];
+      return { type: 'events', records: [] };
     }
+  }
+
+  // CloudTrail S3 notification (from CloudTrail → S3 → SNS → SQS).
+  // The message contains an S3 bucket and list of object keys pointing to
+  // .json.gz log files that need to be downloaded and decompressed.
+  if (isCloudTrailS3Notification(outer)) {
+    return {
+      type: 's3-notification',
+      bucket: outer.s3Bucket as string,
+      keys: outer.s3ObjectKey as string[],
+    };
   }
 
   // CloudTrail API event delivered directly via EventBridge
   if (outer.eventName && outer.eventSource) {
-    return [outer];
+    return { type: 'events', records: [outer] };
   }
 
   // EventBridge envelope — two sub-cases:
@@ -403,25 +504,23 @@ function parseCloudTrailMessage(body: string): Record<string, unknown>[] {
   if (outer['detail-type'] && outer.source && outer.detail) {
     const detail = outer.detail as Record<string, unknown>;
     if (outer['detail-type'] === 'AWS API Call via CloudTrail' && detail.eventName && detail.eventSource) {
-      return [detail];
+      return { type: 'events', records: [detail] };
     }
     if (outer['detail-type'] === 'AWS Console Sign In via CloudTrail' && detail.eventName && detail.eventSource) {
-      return [detail];
+      return { type: 'events', records: [detail] };
     }
-    return [outer];
+    return { type: 'events', records: [outer] };
   }
 
-  // CloudTrail batch via S3 notification contains Records[] pointing to S3 keys.
-  // We don't download S3 objects here — that would require S3 access.
-  // Instead, users should configure EventBridge → SQS for direct delivery.
+  // Direct CloudTrail Records array (rare — some custom pipelines)
   if (Array.isArray(outer.Records)) {
     const direct = (outer.Records as Record<string, unknown>[]).filter(
       (r) => (r.eventName && r.eventSource) || (r['detail-type'] && r.source),
     );
-    if (direct.length > 0) return direct;
+    if (direct.length > 0) return { type: 'events', records: direct };
   }
 
-  return [];
+  return { type: 'events', records: [] };
 }
 
 async function storeRawEvent(

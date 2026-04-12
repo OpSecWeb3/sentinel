@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
     "@aws-sdk/client-sqs": "^3.0.0",
     "@aws-sdk/client-sts": "^3.0.0",
     "@sentinel/db": "workspace:*",

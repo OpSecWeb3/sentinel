@@ -24,5 +24,6 @@ module "sentinel" {
   create_kms_key = var.create_kms_key
   kms_key_arn    = var.kms_key_arn
 
-  cloudtrail_sns_topic_arn = var.cloudtrail_sns_topic_arn
+  cloudtrail_sns_topic_arn  = var.cloudtrail_sns_topic_arn
+  cloudtrail_s3_bucket_arn = var.cloudtrail_s3_bucket_arn
 }

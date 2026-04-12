@@ -186,10 +186,11 @@ external_id              = "ca_sentinel:your-org-id:abc123..."   # from Step 2
 name_prefix              = "ca-sentinel-org"
 
 # Fast path for management account events (1-2 min latency)
-enable_eventbridge_rule  = true
+enable_eventbridge_rule   = true
 
 # Full org coverage via SNS (5-15 min latency for member accounts)
-cloudtrail_sns_topic_arn = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
+cloudtrail_sns_topic_arn  = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
+cloudtrail_s3_bucket_arn  = "arn:aws:s3:::my-org-trail-bucket"
 ```
 
 **SNS-only (simpler, uniform latency):**
@@ -198,8 +199,9 @@ cloudtrail_sns_topic_arn = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
 ca_sentinel_account_id   = "111111111111"
 external_id              = "ca_sentinel:your-org-id:abc123..."
 name_prefix              = "ca-sentinel-org"
-enable_eventbridge_rule  = false
-cloudtrail_sns_topic_arn = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
+enable_eventbridge_rule   = false
+cloudtrail_sns_topic_arn  = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
+cloudtrail_s3_bucket_arn  = "arn:aws:s3:::my-org-trail-bucket"
 ```
 
 Deploy:
@@ -470,11 +472,17 @@ the following built-in templates:
 | `sqs:GetQueueAttributes` | SQS queue ARN | Check queue depth and configuration |
 | `sqs:GetQueueUrl` | SQS queue ARN | Resolve queue URL |
 
-If you use a customer-managed KMS key for SQS encryption, also grant:
+If using the SNS pattern (org trail), also grant:
 
 | Permission | Resource | Purpose |
 |---|---|---|
-| `kms:Decrypt` | KMS key ARN | Decrypt SQS messages |
+| `s3:GetObject` | S3 bucket ARN (`/*`) | Download CloudTrail .json.gz log files |
+
+If you use a customer-managed KMS key for SQS or S3 encryption, also grant:
+
+| Permission | Resource | Purpose |
+|---|---|---|
+| `kms:Decrypt` | KMS key ARN | Decrypt SQS messages or S3 objects |
 
 ## Managing integrations
 
