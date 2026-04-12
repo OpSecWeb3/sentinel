@@ -138,19 +138,34 @@ Organization through a single integration.
 ### How it works
 
 An organization trail in the management account captures management events
-from every member account. These events flow through a single SQS queue to
-Sentinel, which automatically tracks which member account generated each
-event. The **Connected Accounts** column on the integrations page shows all
-account IDs seen in ingested events.
+from every member account and writes them to a central S3 bucket. Sentinel
+automatically tracks which member account generated each event. The
+**Connected Accounts** column on the integrations page shows all account IDs
+seen in ingested events.
+
+### Important: EventBridge alone is not enough
+
+EventBridge in the management account only sees CloudTrail events from that
+account -- it does **not** receive member account events, even with an org
+trail enabled. To capture events from all member accounts, you must use SNS
+(which receives S3 notifications for every log file, covering all accounts).
+
+The recommended approach is the **hybrid pattern**: EventBridge for fast
+management account detection (1--2 min latency) plus SNS for full org-wide
+coverage (5--15 min latency). Sentinel deduplicates by `cloudTrailEventId`,
+so management account events won't double-count.
 
 ### Setup with Terraform (recommended)
 
-#### Step 1: Enable organization trail
+#### Step 1: Enable organization trail with SNS
 
 1. Open the CloudTrail console in the **management account**.
 2. Create or update a trail with **Enable for all accounts in my
    organization** checked.
 3. Ensure the trail captures **Management events** in **All regions**.
+4. Under the trail settings, enable **SNS notification delivery** and create
+   or select an SNS topic. CloudTrail will publish a notification for every
+   log file written to S3, covering all member accounts.
 
 #### Step 2: Initialize in Sentinel
 
@@ -163,18 +178,21 @@ account IDs seen in ingested events.
 
 #### Step 3: Deploy Terraform in the management account
 
-Using the EventBridge pattern (recommended):
+**Hybrid approach (recommended):**
 
 ```hcl
-ca_sentinel_account_id  = "111111111111"                        # Sentinel's AWS account
-external_id             = "ca_sentinel:your-org-id:abc123..."   # from Step 2
-name_prefix             = "ca-sentinel-org"
-enable_eventbridge_rule = true
-create_kms_key          = true
+ca_sentinel_account_id   = "111111111111"                        # Sentinel's AWS account
+external_id              = "ca_sentinel:your-org-id:abc123..."   # from Step 2
+name_prefix              = "ca-sentinel-org"
+
+# Fast path for management account events (1-2 min latency)
+enable_eventbridge_rule  = true
+
+# Full org coverage via SNS (5-15 min latency for member accounts)
+cloudtrail_sns_topic_arn = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
 ```
 
-If your org trail already publishes to an SNS topic, use the SNS pattern
-instead:
+**SNS-only (simpler, uniform latency):**
 
 ```hcl
 ca_sentinel_account_id   = "111111111111"
@@ -200,21 +218,34 @@ integration form and click **Finalize**.
 1. Check the integration status shows **Active** on the integrations page.
 2. Wait for the first poll cycle (default 60 seconds).
 3. Navigate to **AWS > Events** -- you should see CloudTrail events from
-   member accounts.
+   member accounts within 5--15 minutes (SNS path) or 1--2 minutes for
+   management account events (EventBridge path).
 4. The **Connected Accounts** column populates as events arrive from each
    member account.
+
+### Latency comparison
+
+| Path | Covers | Latency | How |
+|---|---|---|---|
+| EventBridge | Management account only | 1--2 min | CloudTrail emits directly to EventBridge |
+| SNS | All accounts (org-wide) | 5--15 min | CloudTrail batches S3 writes, S3 notifies SNS |
+| Hybrid (both) | All accounts | 1--2 min mgmt, 5--15 min members | Best of both; Sentinel deduplicates |
 
 ### Global event forwarding
 
 IAM, STS, and console sign-in events only appear in us-east-1 regardless of
-where the action was performed. When your primary region is different, the
-Terraform module automatically deploys a second EventBridge rule in us-east-1
-that forwards these global events to the primary region's event bus, where a
-catch rule routes them to the SQS queue.
+where the action was performed. When your primary region is different and
+EventBridge is enabled, the Terraform module automatically deploys a second
+EventBridge rule in us-east-1 that forwards these global events to the primary
+region's event bus, where a catch rule routes them to the SQS queue.
 
 This is enabled by default (`enable_global_event_forwarding = true`) and
 requires no additional configuration. If your primary region is us-east-1,
 no forwarding resources are created.
+
+Note: global event forwarding only applies to the EventBridge path. The SNS
+path already captures global events because the org trail writes all events
+(including global ones) to S3 regardless of region.
 
 ## Manual setup (without Terraform)
 

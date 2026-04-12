@@ -95,7 +95,7 @@ curl -X PATCH https://your-ca_sentinel/api/modules/aws/integrations/YOUR_INTEGRA
 
 ## Event delivery patterns
 
-### Pattern A: EventBridge (recommended)
+### Pattern A: EventBridge (single account)
 
 ```
 CloudTrail ──> EventBridge Rule ──> SQS Queue ──> Sentinel
@@ -103,38 +103,79 @@ CloudTrail ──> EventBridge Rule ──> SQS Queue ──> Sentinel
 
 Set `enable_eventbridge_rule = true` (default). This captures management events and console sign-in events in the primary region. Customize the pattern with `eventbridge_event_pattern`.
 
+**Important:** EventBridge only sees CloudTrail events from the account the rule is deployed in. For AWS Organizations, EventBridge in the management account will **not** see member account events — use Pattern B or C instead.
+
 **Global events:** IAM, STS, and console sign-in events only appear in us-east-1. When your primary region is different, the module automatically deploys a second EventBridge rule in us-east-1 that forwards these events to the primary region's event bus (bus-to-bus), where they're routed to the SQS queue. This is controlled by `enable_global_event_forwarding` (default: `true`).
 
-### Pattern B: Existing SNS topic
+### Pattern B: SNS (required for org-wide coverage)
 
 ```
 CloudTrail ──> S3 ──> SNS Topic ──> SQS Queue ──> Sentinel
 ```
 
-Set `enable_eventbridge_rule = false` and provide `cloudtrail_sns_topic_arn`. Use this if you already have a CloudTrail trail publishing to SNS.
+Set `enable_eventbridge_rule = false` and provide `cloudtrail_sns_topic_arn`. The org trail writes logs from **all** member accounts to S3, and S3 notifications go to SNS for every log file — giving you full org-wide coverage through a single queue.
 
-### Pattern C: Both
+Latency is 5–15 minutes (CloudTrail batches S3 writes) vs 1–2 minutes with EventBridge.
 
-You can enable both EventBridge and SNS subscription if you want to capture events from multiple sources. The SQS queue accepts messages from both.
+### Pattern C: Hybrid (recommended for Organizations)
 
-## Multi-account setup
+```
+Management account events:  CloudTrail ──> EventBridge ──> SQS (1-2 min latency)
+All member account events:  CloudTrail ──> S3 ──> SNS ──> SQS (5-15 min latency)
+```
 
-For AWS Organizations with a centralized CloudTrail org trail:
+Enable **both** EventBridge and SNS to get fast detection for management account activity (root logins, IAM changes, CloudTrail tampering) while still covering all member accounts via SNS. Sentinel deduplicates by `cloudTrailEventId`, so management account events won't double-count.
 
 ```hcl
-# In the management account — trail already sends to SNS
+enable_eventbridge_rule  = true
+cloudtrail_sns_topic_arn = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
+```
+
+## Multi-account setup (AWS Organizations)
+
+**EventBridge alone is not sufficient for org-wide coverage.** EventBridge in the management account only sees that account's events. You must use SNS (Pattern B) or the hybrid approach (Pattern C) to capture member account events.
+
+### Recommended: Hybrid approach
+
+```hcl
+# In the management account
 module "ca_sentinel" {
   source = "./aws"
 
-  ca_sentinel_account_id      = "111111111111"
+  ca_sentinel_account_id   = "111111111111"
   external_id              = "ca_sentinel:your-org-id:abc123..."  # from Sentinel UI
-  name_prefix              = "ca_sentinel-org"
+  name_prefix              = "ca-sentinel-org"
+
+  # Fast path for management account (1-2 min)
+  enable_eventbridge_rule  = true
+
+  # Full org coverage via SNS (5-15 min)
   cloudtrail_sns_topic_arn = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
-  enable_eventbridge_rule  = false
 }
 ```
 
-For per-account monitoring, run this module once in each account with a unique `name_prefix`.
+### SNS-only (simpler, slightly higher latency)
+
+```hcl
+module "ca_sentinel" {
+  source = "./aws"
+
+  ca_sentinel_account_id   = "111111111111"
+  external_id              = "ca_sentinel:your-org-id:abc123..."  # from Sentinel UI
+  name_prefix              = "ca-sentinel-org"
+  enable_eventbridge_rule  = false
+  cloudtrail_sns_topic_arn = "arn:aws:sns:us-east-1:222222222222:org-cloudtrail"
+}
+```
+
+### Setting up the SNS topic for org trails
+
+1. Open the **CloudTrail console** in the management account
+2. Select your org trail
+3. Enable **SNS notification delivery** and create or select a topic
+4. The trail will publish a notification to SNS for every log file written to S3 (covering all member accounts)
+
+For per-account monitoring without Organizations, run this module once in each account with a unique `name_prefix`.
 
 ## External ID rotation
 
