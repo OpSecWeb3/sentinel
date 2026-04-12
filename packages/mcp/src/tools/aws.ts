@@ -6,10 +6,11 @@ export function registerAwsTools(server: McpServer) {
   server.registerTool(
     'aws-query-events',
     {
-      description: 'Query raw CloudTrail events. Filter by eventName, eventSource, principalId, resourceArn (JSONB containment), region, errorCode, date range. Answers "who pushed to S3 recently?"',
+      description: 'Query raw CloudTrail events. Use "search" for free-text partial matching across eventName, eventSource, principalId, userArn, sourceIp, errorCode. Use exact filters for precise lookups. Answers "who pushed to S3 recently?"',
       inputSchema: {
-        eventName: z.string().optional().describe('e.g. "PutObject", "CreateUser"'),
-        eventSource: z.string().optional().describe('e.g. "s3.amazonaws.com", "iam.amazonaws.com"'),
+        search: z.string().max(255).optional().describe('Free-text search across eventName, eventSource, principalId, userArn, sourceIp, errorCode (ILIKE)'),
+        eventName: z.string().optional().describe('Exact match, e.g. "PutObject", "CreateUser"'),
+        eventSource: z.string().optional().describe('Exact match, e.g. "s3.amazonaws.com", "iam.amazonaws.com"'),
         principalId: z.string().optional(),
         resourceArn: z.string().optional().describe('Full ARN — uses JSONB containment query'),
         region: z.string().optional(),

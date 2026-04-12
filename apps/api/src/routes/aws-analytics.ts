@@ -20,6 +20,7 @@ router.use('*', requireAuth, requireOrg);
 // ---------------------------------------------------------------------------
 
 const awsEventsSchema = z.object({
+  search: z.string().max(255).optional(),
   eventName: z.string().optional(),
   eventSource: z.string().optional(),
   principalId: z.string().optional(),
@@ -38,6 +39,18 @@ router.get('/events', requireScope('api:read'), validate('query', awsEventsSchem
   const db = getDb();
 
   const conditions = [eq(awsRawEvents.orgId, orgId)];
+  if (query.search) {
+    const escaped = query.search.replace(/[%_\\]/g, (ch) => `\\${ch}`);
+    const term = `%${escaped}%`;
+    conditions.push(sql`(
+      ${awsRawEvents.eventName} ILIKE ${term}
+      OR ${awsRawEvents.eventSource} ILIKE ${term}
+      OR ${awsRawEvents.principalId} ILIKE ${term}
+      OR ${awsRawEvents.userArn} ILIKE ${term}
+      OR ${awsRawEvents.sourceIpAddress} ILIKE ${term}
+      OR ${awsRawEvents.errorCode} ILIKE ${term}
+    )`);
+  }
   if (query.eventName) conditions.push(eq(awsRawEvents.eventName, query.eventName));
   if (query.eventSource) conditions.push(eq(awsRawEvents.eventSource, query.eventSource));
   if (query.principalId) conditions.push(eq(awsRawEvents.principalId, query.principalId));

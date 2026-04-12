@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { apiGet, apiPost, apiPatch, apiDelete, safe, ok, structured } from '../client.js';
+import { apiGet, apiPost, apiPatch, apiDelete, safe, ok, safeStructured } from '../client.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 export function registerDetectionTools(server: McpServer) {
@@ -40,8 +40,7 @@ export function registerDetectionTools(server: McpServer) {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async (params) => {
-      const result = await safe(() => apiGet('/api/detections', params));
-      return structured(result as Record<string, unknown>);
+      return safeStructured(() => apiGet('/api/detections', params));
     },
   );
 

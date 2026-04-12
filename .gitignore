@@ -8,6 +8,7 @@ backups/
 *.tsbuildinfo
 coverage/
 .DS_Store
+.mcp.json
 
 # Next.js build output
 apps/web/.next/

@@ -156,7 +156,7 @@ export default function AwsEventsPage() {
         page: String(page),
         limit: String(PAGE_SIZE),
       });
-      if (eventNameFilter) params.set("eventName", eventNameFilter);
+      if (eventNameFilter) params.set("search", eventNameFilter);
 
       const res = await apiGet<EventsResponse>(`/modules/aws/events?${params}`);
       setEvents(res.data);
@@ -200,11 +200,11 @@ export default function AwsEventsPage() {
 
       {/* Filter */}
       <div className="flex items-center gap-3 text-xs">
-        <span className="text-muted-foreground w-20">--event</span>
+        <span className="text-muted-foreground w-20">--search</span>
         <input
           value={eventNameFilter}
           onChange={(e) => { setEventNameFilter(e.target.value); setPage(1); }}
-          placeholder="filter by event name..."
+          placeholder="search events, services, principals, IPs..."
           className="rounded border border-border bg-background px-3 py-1 text-xs font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary w-56"
         />
         {eventNameFilter && (

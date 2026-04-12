@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { apiGet, safe, ok, structured } from '../client.js';
+import { apiGet, safe, ok, safeStructured } from '../client.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 export function registerEventTools(server: McpServer) {
@@ -57,8 +57,7 @@ export function registerEventTools(server: McpServer) {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
     async (params) => {
-      const result = await safe(() => apiGet('/api/events/timeline', params));
-      return structured(result as Record<string, unknown>);
+      return safeStructured(() => apiGet('/api/events/timeline', params));
     },
   );
 

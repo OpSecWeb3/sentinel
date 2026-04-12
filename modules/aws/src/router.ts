@@ -477,11 +477,24 @@ awsRouter.get('/events', async (c) => {
   const limit = Math.min(100, Math.max(1, Number(c.req.query('limit') ?? 50)));
   const integrationId = c.req.query('integrationId');
   const eventNameFilter = c.req.query('eventName');
+  const searchFilter = c.req.query('search');
 
   const db = getDb();
   const conditions = [eq(awsRawEvents.orgId, orgId)];
   if (integrationId) conditions.push(eq(awsRawEvents.integrationId, integrationId));
   if (eventNameFilter) conditions.push(eq(awsRawEvents.eventName, eventNameFilter));
+  if (searchFilter) {
+    const escaped = searchFilter.replace(/[%_\\]/g, (ch) => `\\${ch}`);
+    const term = `%${escaped}%`;
+    conditions.push(sql`(
+      ${awsRawEvents.eventName} ILIKE ${term}
+      OR ${awsRawEvents.eventSource} ILIKE ${term}
+      OR ${awsRawEvents.principalId} ILIKE ${term}
+      OR ${awsRawEvents.userArn} ILIKE ${term}
+      OR ${awsRawEvents.sourceIpAddress} ILIKE ${term}
+      OR ${awsRawEvents.errorCode} ILIKE ${term}
+    )`);
+  }
 
   const whereClause = and(...conditions);
 

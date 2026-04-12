@@ -108,3 +108,15 @@ export function structured(data: Record<string, unknown>): { structuredContent: 
     content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
   };
 }
+
+/** Call an API function and return structured content on success, plain text on error.
+ *  Use this instead of `safe()` + `structured()` for tools that declare an outputSchema. */
+export async function safeStructured(fn: () => Promise<unknown>): Promise<{ structuredContent?: Record<string, unknown>; content: [{ type: 'text'; text: string }]; isError?: boolean }> {
+  try {
+    const data = await fn();
+    return structured(data as Record<string, unknown>);
+  } catch (err) {
+    const message = err instanceof ApiError ? err.message : String(err);
+    return { content: [{ type: 'text' as const, text: message }], isError: true };
+  }
+}

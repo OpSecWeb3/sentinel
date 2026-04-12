@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { apiGet, safe, ok, structured } from '../client.js';
+import { apiGet, safe, ok, safeStructured } from '../client.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 // --- Shared output schemas ---
@@ -49,8 +49,7 @@ export function registerAlertTools(server: McpServer) {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async (params) => {
-      const result = await safe(() => apiGet('/api/alerts', params));
-      return structured(result as Record<string, unknown>);
+      return safeStructured(() => apiGet('/api/alerts', params));
     },
   );
 
@@ -89,8 +88,7 @@ export function registerAlertTools(server: McpServer) {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ id }) => {
-      const result = await safe(() => apiGet(`/api/alerts/${id}`));
-      return structured(result as Record<string, unknown>);
+      return safeStructured(() => apiGet(`/api/alerts/${id}`));
     },
   );
 
@@ -115,8 +113,7 @@ export function registerAlertTools(server: McpServer) {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async () => {
-      const result = await safe(() => apiGet('/api/alerts/stats'));
-      return structured(result as Record<string, unknown>);
+      return safeStructured(() => apiGet('/api/alerts/stats'));
     },
   );
 }
