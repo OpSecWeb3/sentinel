@@ -34,6 +34,7 @@ import { registryAnalyticsRouter } from './routes/registry-analytics.js';
 import { githubAnalyticsRouter } from './routes/github-analytics.js';
 import { queryRouter } from './routes/query.js';
 import { fieldCatalogRouter } from './routes/field-catalog.js';
+import { adminLogsRouter } from './routes/admin-logs.js';
 
 // Module imports
 import { GitHubModule, setWebhookRateLimitRedis } from '@sentinel/module-github';
@@ -219,6 +220,7 @@ app.route('/api/registry', registryAnalyticsRouter);
 app.route('/api/github', githubAnalyticsRouter);
 app.route('/api/query', queryRouter);
 app.route('/api/field-catalog', fieldCatalogRouter);
+app.route('/api/admin/logs', adminLogsRouter);
 
 // ── Module routes ───────────────────────────────────────────────────────
 

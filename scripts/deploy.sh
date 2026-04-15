@@ -152,7 +152,7 @@ for i in $(seq 1 $MAX_RETRIES); do
 done
 
 echo "==> Reloading Nginx gateway..."
-docker exec gateway nginx -s reload || echo "    WARNING: Gateway reload failed (may not be running)"
+docker exec shared-nginx-1 nginx -s reload || echo "    WARNING: Gateway reload failed (may not be running)"
 
 # Record successful deploy so the next run diffs against this SHA.
 echo "$NEW_SHA" > "$LAST_SUCCESS_FILE"

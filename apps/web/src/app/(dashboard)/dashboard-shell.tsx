@@ -82,6 +82,10 @@ const bottomNav: NavItem[] = [
   { title: "settings", href: "/settings", icon: "=" },
 ];
 
+const adminNav: NavItem[] = [
+  { title: "logs", href: "/admin/logs", icon: "L" },
+];
+
 /* ── user types ──────────────────────────────────────────────── */
 
 interface AuthUser {
@@ -405,6 +409,18 @@ export function DashboardShell({
           </div>
           {bottomNav.map((item, idx) =>
             renderNavItem(item, idx === bottomNav.length - 1),
+          )}
+
+          {user?.role === "admin" && (
+            <>
+              <div className="my-3 border-t border-border" />
+              <div className="mb-2 px-2 text-xs text-muted-foreground">
+                admin/
+              </div>
+              {adminNav.map((item, idx) =>
+                renderNavItem(item, idx === adminNav.length - 1),
+              )}
+            </>
           )}
 
           <div className="px-2 py-1.5 text-sm text-muted-foreground">

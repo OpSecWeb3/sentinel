@@ -6,14 +6,18 @@
 x-logging: &default-logging
   driver: json-file
   options:
-    max-size: "10m"
-    max-file: "3"
+    max-size: "75m"
+    max-file: "5"
 
 networks:
   gateway:
     external: true
   shared-infra:
     external: true
+  # Internal-only bridge so api can reach docker-proxy without exposing it.
+  docker-proxy:
+    driver: bridge
+    internal: true
 
 services:
   # One-shot: `docker compose --profile migrate run --rm --no-deps migrate`
@@ -36,13 +40,21 @@ services:
     container_name: sentinel-api
     restart: unless-stopped
     env_file: .env
+    # Admin log viewer talks to docker-proxy (filtered, GET-only) instead of
+    # mounting the raw docker.sock. See apps/api/src/lib/docker.ts.
     environment:
       - PORT=4100
+      - DOCKER_API_URL=http://docker-proxy:2375
+      # Explicit list keeps the admin log dropdown tight to sentinel's own
+      # app containers. Excludes sentinel-docker-proxy (HAProxy access log
+      # leaks internal call volume) and shared_* / contfuzzer-* containers.
+      - ADMIN_LOGS_ALLOWED_PREFIXES=sentinel-api,sentinel-web,sentinel-worker
     ports:
       - "4100:4100"
     networks:
       - gateway
       - shared-infra
+      - docker-proxy
     logging: *default-logging
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4100/health"]
@@ -111,3 +123,44 @@ services:
         limits:
           memory: 384M
           cpus: "0.5"
+
+  # Filtering proxy in front of docker.sock. Only allows the read-only
+  # endpoints the admin log viewer needs (GET /containers/json and
+  # /containers/{id}/logs). Blocks POST, exec, create, etc., so even an
+  # RCE in api cannot pivot to host root via the Docker API.
+  # See https://github.com/Tecnativa/docker-socket-proxy for the full
+  # endpoint matrix — any env var left at 0 (the default) is denied.
+  docker-proxy:
+    # Pinned to the latest stable release (2025-12-16). v0.4.x upgraded the
+    # underlying HAProxy from 2.2 to 3.2.4; env var interface (CONTAINERS,
+    # POST, PING, etc.) is unchanged from 0.3.x.
+    image: tecnativa/docker-socket-proxy:v0.4.2
+    container_name: sentinel-docker-proxy
+    restart: unless-stopped
+    environment:
+      # Allow GET /containers/*
+      CONTAINERS: 1
+      # Allow GET /_ping so we can healthcheck the full proxy→socket path
+      PING: 1
+      # Explicitly deny mutating methods (0 is the default but we set it
+      # to make the deny posture legible and linter-friendly).
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-proxy
+    logging: *default-logging
+    # wget is part of busybox in the Alpine base. /_ping returns "OK" only
+    # when the socket is reachable AND HAProxy is routing — a true end-to-end
+    # liveness signal.
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:2375/_ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.25"
