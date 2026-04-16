@@ -14,7 +14,7 @@
 # ────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-CONTAINER="${CONTAINER:-chainalert-postgres-1}"
+CONTAINER="${CONTAINER:-shared-postgres-1}"
 DB_USER="${DB_USER:-sentinel}"
 DB_NAME="${DB_NAME:-sentinel}"
 
