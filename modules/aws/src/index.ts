@@ -24,12 +24,26 @@ export const AwsModule: DetectionModule = {
   eventTypes,
   templates,
   retentionPolicies: [
-    // Raw CloudTrail event buffer: 7-day retention (short, as per design intent).
-    // Only events that triggered detections are promoted to the platform events table.
+    // Raw CloudTrail event buffer: 7-day hot buffer. Every incoming CloudTrail
+    // event lives here so that new detections can backfill across the last week.
     { table: 'aws_raw_events', timestampColumn: 'received_at', retentionDays: 7 },
-    // Platform-level events for this module: shorter than the 90-day default
-    // because CloudTrail volumes can be very high. Alerts (365 days) still
-    // retain the full incident context.
-    { table: 'events', timestampColumn: 'received_at', retentionDays: 14, filter: "module_id = 'aws'" },
+    // Platform events for AWS: value-driven retention. The floor TTL is 1 day
+    // for high-volume CloudTrail noise, but we preserve two classes of rows
+    // indefinitely (within the broader 365-day alerts retention):
+    //   1. Events that produced an alert (referenced_by alerts.event_id) so
+    //      that the full incident context survives as long as the alert does.
+    //   2. Events still inside the active correlation rules' lookback window,
+    //      so absence / sequence / aggregation evaluators always see their
+    //      substrate regardless of whether any single event matched a rule.
+    {
+      table: 'events',
+      timestampColumn: 'received_at',
+      retentionDays: 1,
+      filter: "module_id = 'aws'",
+      preserveIf: [
+        { kind: 'referenced_by', table: 'alerts', column: 'event_id' },
+        { kind: 'within_correlation_window' },
+      ],
+    },
   ],
 };

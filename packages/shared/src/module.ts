@@ -8,6 +8,25 @@ import type { AppEnv } from './hono-types.js';
 // Retention policy
 // ---------------------------------------------------------------------------
 
+/**
+ * A preserve rule keeps rows from being deleted by retention even when they are
+ * older than retentionDays. This lets retention express the idea "keep data
+ * only as long as something still needs it" — alerts keep their trigger event,
+ * correlation rules keep the substrate inside their lookback window.
+ *
+ * Each variant is matched against a small allowlist inside the retention
+ * handler; unknown variants are ignored (fail-safe = more preservation).
+ */
+export type PreserveRule =
+  /** Keep rows that a foreign table references via `column = <this-table>.id`. */
+  | { kind: 'referenced_by'; table: string; column: string }
+  /**
+   * Keep rows whose timestampColumn is newer than `now - max(windowMinutes +
+   * graceMinutes)` across all active correlation rules. Used to protect the
+   * substrate that absence / sequence / aggregation rules need.
+   */
+  | { kind: 'within_correlation_window' };
+
 export interface RetentionPolicy {
   table: string;
   timestampColumn: string;
@@ -16,6 +35,16 @@ export interface RetentionPolicy {
   filter?: string;
   /** Use ctid for batched deletes on tables without an `id` column (e.g. composite PKs). */
   useCtid?: boolean;
+  /**
+   * Additional preservation rules: a row is only deleted if every preserveIf
+   * rule says it is safe to delete. Empty / omitted means pure TTL semantics.
+   */
+  preserveIf?: PreserveRule[];
+  /**
+   * Count rows that would be deleted but do not delete them. For validating a
+   * new policy before flipping it to destructive mode.
+   */
+  dryRun?: boolean;
 }
 
 // ---------------------------------------------------------------------------

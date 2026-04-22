@@ -79,7 +79,11 @@ vi.mock('@sentinel/db', () => ({
   getDb: vi.fn(() => mockDb),
   eq: vi.fn((...args: unknown[]) => args),
   and: vi.fn((...args: unknown[]) => args),
-  sql: Object.assign(vi.fn(), { identifier: vi.fn(), raw: vi.fn() }),
+  sql: Object.assign(vi.fn(), {
+    identifier: vi.fn(),
+    raw: vi.fn(),
+    join: vi.fn((fragments: unknown[], _sep: unknown) => fragments),
+  }),
   count: vi.fn(),
   inArray: vi.fn(),
   isNull: vi.fn(),
@@ -152,8 +156,11 @@ function resetDbMock() {
   for (const key of Object.keys(mockDb)) {
     if (key.startsWith('_')) continue; // skip helpers
     const fn = mockDb[key];
-    if (typeof fn === 'function' && 'mockClear' in fn) {
-      fn.mockClear();
+    if (typeof fn === 'function' && 'mockReset' in fn) {
+      // mockReset clears BOTH call history and queued mockImplementationOnce
+      // values — otherwise leftover Once queues from a failing test leak into
+      // the next test and cause mysterious wrong-return-value failures.
+      fn.mockReset();
     }
   }
   // Restore default chain behaviour — most methods return mockDb for chaining
@@ -339,6 +346,147 @@ describe('data-retention handler', () => {
       expect(['events', 'alerts', 'notification_deliveries']).toContain(policy.table);
       expect(['received_at', 'created_at']).toContain(policy.timestampColumn);
     }
+  });
+
+  // ── preserveIf / dryRun ──────────────────────────────────────────────
+
+  it('executes DELETE with preserveIf referenced_by (allowlisted)', async () => {
+    const job = mockJob({
+      policies: [{
+        table: 'events',
+        timestampColumn: 'received_at',
+        retentionDays: 1,
+        filter: "module_id = 'aws'",
+        preserveIf: [{ kind: 'referenced_by', table: 'alerts', column: 'event_id' }],
+      }],
+    });
+
+    await dataRetentionHandler.process(job);
+
+    // Should still issue the DELETE — the preserve clause is ANDed into the WHERE
+    expect(mockDb.execute).toHaveBeenCalled();
+    // No warning about skipping
+    expect(mockChildLogger.warn).not.toHaveBeenCalled();
+  });
+
+  it('skips referenced_by preserve rule that is not in the allowlist', async () => {
+    const job = mockJob({
+      policies: [{
+        table: 'events',
+        timestampColumn: 'received_at',
+        retentionDays: 1,
+        preserveIf: [{ kind: 'referenced_by', table: 'users', column: 'id' }],
+      }],
+    });
+
+    await dataRetentionHandler.process(job);
+
+    expect(mockChildLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ referencedBy: 'users.id' }),
+      expect.stringContaining('referenced_by preserve rule not in allowlist'),
+    );
+    // Policy still runs — just without the skipped clause
+    expect(mockDb.execute).toHaveBeenCalled();
+  });
+
+  it('skips unknown preserveIf kind with a warning', async () => {
+    const job = mockJob({
+      policies: [{
+        table: 'events',
+        timestampColumn: 'received_at',
+        retentionDays: 1,
+        preserveIf: [{ kind: 'made_up_rule' } as unknown as import('../handlers/data-retention.js').RetentionPolicy['preserveIf'] extends (infer U)[] | undefined ? U : never],
+      }],
+    });
+
+    await dataRetentionHandler.process(job);
+
+    expect(mockChildLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ rule: expect.objectContaining({ kind: 'made_up_rule' }) }),
+      expect.stringContaining('unknown preserveIf rule kind'),
+    );
+  });
+
+  it('queries correlation window when within_correlation_window is present', async () => {
+    // First execute call is the SELECT MAX(...), second is the DELETE
+    mockDb.execute
+      .mockResolvedValueOnce([{ maxWindowMinutes: 30 }])
+      .mockResolvedValueOnce({ rowCount: 0 });
+
+    const job = mockJob({
+      policies: [{
+        table: 'events',
+        timestampColumn: 'received_at',
+        retentionDays: 1,
+        preserveIf: [{ kind: 'within_correlation_window' }],
+      }],
+    });
+
+    await dataRetentionHandler.process(job);
+
+    expect(mockDb.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips within_correlation_window clause when no active correlation rules', async () => {
+    // MAX returns 0 → no preservation clause emitted → just the DELETE
+    mockDb.execute
+      .mockResolvedValueOnce([{ maxWindowMinutes: 0 }])
+      .mockResolvedValueOnce({ rowCount: 0 });
+
+    const job = mockJob({
+      policies: [{
+        table: 'events',
+        timestampColumn: 'received_at',
+        retentionDays: 1,
+        preserveIf: [{ kind: 'within_correlation_window' }],
+      }],
+    });
+
+    await dataRetentionHandler.process(job);
+
+    expect(mockDb.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('dryRun issues SELECT COUNT and does not DELETE', async () => {
+    mockDb.execute.mockResolvedValueOnce([{ c: 42 }]);
+
+    const job = mockJob({
+      policies: [{
+        table: 'events',
+        timestampColumn: 'received_at',
+        retentionDays: 1,
+        filter: "module_id = 'aws'",
+        dryRun: true,
+      }],
+    });
+
+    await dataRetentionHandler.process(job);
+
+    expect(mockDb.execute).toHaveBeenCalledTimes(1); // just the SELECT, no DELETE
+    expect(mockChildLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ table: 'events', wouldDelete: 42, dryRun: true }),
+      expect.stringContaining('dry-run'),
+    );
+  });
+
+  it('rejects preserveIf combined with useCtid', async () => {
+    const job = mockJob({
+      policies: [{
+        table: 'aws_raw_events',
+        timestampColumn: 'received_at',
+        retentionDays: 1,
+        useCtid: true,
+        preserveIf: [{ kind: 'referenced_by', table: 'alerts', column: 'event_id' }],
+      }],
+    });
+
+    await dataRetentionHandler.process(job);
+
+    expect(mockDb.execute).not.toHaveBeenCalled();
+    expect(mockChildLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ table: 'aws_raw_events' }),
+      expect.stringContaining('preserveIf is not supported with useCtid'),
+    );
   });
 });
 

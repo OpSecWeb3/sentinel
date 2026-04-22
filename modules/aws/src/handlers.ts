@@ -6,8 +6,8 @@
  * aws.poll-sweep     — scheduled sweep that enqueues poll jobs for due integrations
  */
 import type { Job } from 'bullmq';
-import { getDb, eq, sql, and, lte, or, isNull, count } from '@sentinel/db';
-import { events, detections, rules } from '@sentinel/db/schema/core';
+import { getDb, eq, sql, and, lte, or, isNull } from '@sentinel/db';
+import { events } from '@sentinel/db/schema/core';
 import { awsIntegrations, awsRawEvents } from '@sentinel/db/schema/aws';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { captureException } from '@sentinel/shared/sentry';
@@ -383,23 +383,12 @@ export const eventProcessHandler: JobHandler = {
 
     if (!raw || raw.promoted) return;
 
-    // Only promote events when at least one active AWS detection rule exists.
-    // Without this check, every CloudTrail event gets written to the platform
-    // events table (14-day retention) even when no rules are configured —
-    // wasting storage. Non-promoted events stay in aws_raw_events (7-day).
-    const [{ activeRuleCount }] = await db
-      .select({ activeRuleCount: count() })
-      .from(rules)
-      .innerJoin(detections, eq(rules.detectionId, detections.id))
-      .where(and(
-        eq(rules.orgId, orgId),
-        eq(rules.moduleId, 'aws'),
-        eq(rules.status, 'active'),
-        eq(detections.status, 'active'),
-      ));
-
-    if (activeRuleCount === 0) return;
-
+    // Every raw CloudTrail event is forwarded to the platform `events` table so
+    // that detection rules, correlation rules, and retroactive backfills all see
+    // the full substrate. Lifecycle (how long this row survives) is owned by
+    // the retention layer: AWS events default to a 1-day TTL but are preserved
+    // when referenced by an alert or still inside an active correlation rule's
+    // lookback window. See modules/aws/src/index.ts retentionPolicies.
     const payload = raw.rawPayload as Record<string, unknown>;
     const normalized = normalizeCloudTrailEvent(payload, orgId);
     if (!normalized) {

@@ -56,12 +56,14 @@ export const awsIntegrations = pgTable('aws_integrations', {
 ]);
 
 // ---------------------------------------------------------------------------
-// AWS raw CloudTrail events — short-retention buffer (7 days by default)
+// AWS raw CloudTrail events — 7-day hot buffer
 //
-// ALL ingested CloudTrail events land here first. Only events that match an
-// active detection rule get promoted to the platform events table.  The
-// module's retentionPolicy cleans this table at 7 days, so non-alerting
-// events are ephemeral.
+// ALL ingested CloudTrail events land here first and are then normalized into
+// the platform `events` table for rule / correlation evaluation. Lifecycle in
+// the platform table is owned by the retention layer (see modules/aws/src/
+// index.ts): 1-day floor, but rows referenced by an alert or still inside an
+// active correlation window are preserved. The 7-day buffer here exists so
+// new detections can backfill over recent raw history.
 // ---------------------------------------------------------------------------
 
 export const awsRawEvents = pgTable('aws_raw_events', {
