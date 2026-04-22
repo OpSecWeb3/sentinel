@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { JetBrains_Mono } from "next/font/google";
+import { JetBrains_Mono, Inter } from "next/font/google";
 import "./globals.css";
 
 const mono = JetBrains_Mono({
@@ -7,8 +7,13 @@ const mono = JetBrains_Mono({
   variable: "--font-mono",
 });
 
+const sans = Inter({
+  subsets: ["latin"],
+  variable: "--font-sans",
+});
+
 export const metadata: Metadata = {
-  metadataBase: new URL("https://sentinel.dev"),
+  metadataBase: new URL("https://sentinel.chainalert.dev"),
   title: {
     default: "Sentinel — Security Monitoring & Threat Detection",
     template: "%s — Sentinel",
@@ -68,8 +73,8 @@ const jsonLd = {
   "@context": "https://schema.org",
   "@type": "Organization",
   name: "Sentinel",
-  url: "https://sentinel.dev",
-  logo: "https://sentinel.dev/favicon.svg",
+  url: "https://sentinel.chainalert.dev",
+  logo: "https://sentinel.chainalert.dev/favicon.svg",
   description:
     "Real-time security monitoring and threat detection across blockchain, infrastructure, GitHub, and AWS.",
 };
@@ -81,7 +86,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className={`${mono.variable} font-mono antialiased`}>
+      <body className={`${mono.variable} ${sans.variable} font-mono antialiased`}>
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
