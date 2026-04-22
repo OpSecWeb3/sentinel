@@ -365,13 +365,13 @@ export default function DetectionsPage() {
             <div className="min-w-[700px]">
               <Table>
                 <colgroup>
-                  <col className="w-[180px]" />
-                  <col className="w-20" />
-                  <col className="w-[70px]" />
-                  <col className="w-[70px]" />
-                  <col className="w-[60px]" />
-                  <col className="w-20" />
                   <col />
+                  <col className="w-24" />
+                  <col className="w-24" />
+                  <col className="w-24" />
+                  <col className="w-16" />
+                  <col className="w-28" />
+                  <col className="w-[220px]" />
                 </colgroup>
                 <TableHeader>
                   <TableRow className="border-b border-border hover:bg-transparent">

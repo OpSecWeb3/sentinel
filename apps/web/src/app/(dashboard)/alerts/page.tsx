@@ -407,12 +407,12 @@ function AlertsPageInner() {
             <div className="min-w-[800px]">
               <Table>
                 <colgroup>
-                  <col className="w-[50px]" />
+                  <col className="w-14" />
                   <col />
                   <col />
-                  <col className="w-[100px]" />
-                  <col className="w-[120px]" />
-                  <col className="w-[80px]" />
+                  <col className="w-24" />
+                  <col className="w-36" />
+                  <col className="w-24" />
                 </colgroup>
                 <TableHeader>
                   <TableRow className="border-b border-border hover:bg-transparent">
