@@ -7,6 +7,7 @@ import { deployKeyEvaluator } from '../evaluators/deploy-key.js';
 import { secretScanningEvaluator } from '../evaluators/secret-scanning.js';
 import { forcePushEvaluator } from '../evaluators/force-push.js';
 import { orgSettingsEvaluator } from '../evaluators/org-settings.js';
+import { repositoryAdvisoryEvaluator } from '../evaluators/repository-advisory.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -875,5 +876,115 @@ describe('orgSettingsEvaluator', () => {
 
     expect(result).not.toBeNull();
     expect(result!.severity).toBe('high');
+  });
+});
+
+// ===========================================================================
+// repository-advisory evaluator
+// ===========================================================================
+
+describe('repositoryAdvisoryEvaluator', () => {
+  function makeAdvisoryEvent(overrides: { action?: string; severity?: string; ghsa_id?: string | null; cve_id?: string } = {}) {
+    const action = overrides.action ?? 'published';
+    const advisory: Record<string, unknown> = {
+      summary: 'Prototype pollution in acme-lib',
+      severity: overrides.severity ?? 'critical',
+      cvss: { score: 9.8 },
+    };
+    // Only attach ghsa_id if not explicitly nulled (lets tests exercise the CVE fallback).
+    if (overrides.ghsa_id !== null) {
+      advisory.ghsa_id = overrides.ghsa_id ?? 'GHSA-xxxx-yyyy-zzzz';
+    }
+    if (overrides.cve_id) advisory.cve_id = overrides.cve_id;
+    return makeEvent({
+      eventType: `github.repository_advisory.${action}`,
+      payload: {
+        action,
+        advisory,
+        repository: { full_name: 'acme/core' },
+        sender: { login: 'alice', id: 42 },
+      },
+    });
+  }
+
+  it('triggers on published action with default config', async () => {
+    const event = makeAdvisoryEvent({ action: 'published' });
+    const rule = makeRule({ ruleType: 'github.repository_advisory', config: {} });
+    const result = await repositoryAdvisoryEvaluator.evaluate(makeCtx(event, rule));
+
+    expect(result).not.toBeNull();
+    expect(result!.severity).toBe('critical');
+    expect(result!.title).toContain('published');
+    expect(result!.title).toContain('acme/core');
+    expect(result!.description).toContain('GHSA-xxxx-yyyy-zzzz');
+  });
+
+  it('does not trigger on reported when config is published-only', async () => {
+    const event = makeAdvisoryEvent({ action: 'reported' });
+    const rule = makeRule({
+      ruleType: 'github.repository_advisory',
+      config: { alertOnActions: ['published'] },
+    });
+    const result = await repositoryAdvisoryEvaluator.evaluate(makeCtx(event, rule));
+    expect(result).toBeNull();
+  });
+
+  it('treats empty alertOnActions as "all actions"', async () => {
+    const event = makeAdvisoryEvent({ action: 'reported' });
+    const rule = makeRule({
+      ruleType: 'github.repository_advisory',
+      config: { alertOnActions: [] },
+    });
+    const result = await repositoryAdvisoryEvaluator.evaluate(makeCtx(event, rule));
+    expect(result).not.toBeNull();
+  });
+
+  it('filters below minSeverity', async () => {
+    const event = makeAdvisoryEvent({ severity: 'low' });
+    const rule = makeRule({
+      ruleType: 'github.repository_advisory',
+      config: { alertOnActions: ['published'], minSeverity: 'high' },
+    });
+    const result = await repositoryAdvisoryEvaluator.evaluate(makeCtx(event, rule));
+    expect(result).toBeNull();
+  });
+
+  it('passes at-or-above minSeverity', async () => {
+    const event = makeAdvisoryEvent({ severity: 'high' });
+    const rule = makeRule({
+      ruleType: 'github.repository_advisory',
+      config: { alertOnActions: ['published'], minSeverity: 'high' },
+    });
+    const result = await repositoryAdvisoryEvaluator.evaluate(makeCtx(event, rule));
+    expect(result).not.toBeNull();
+    expect(result!.severity).toBe('high');
+  });
+
+  it('lets advisories through when severity is unknown', async () => {
+    // Unknown severities are not filtered (fail-open for rare shapes).
+    const event = makeAdvisoryEvent({ severity: 'moderate' });
+    const rule = makeRule({
+      ruleType: 'github.repository_advisory',
+      config: { alertOnActions: ['published'], minSeverity: 'high' },
+    });
+    const result = await repositoryAdvisoryEvaluator.evaluate(makeCtx(event, rule));
+    expect(result).not.toBeNull();
+    // Falls back to 'high' when advisory severity is not one of the known tiers.
+    expect(result!.severity).toBe('high');
+  });
+
+  it('falls back to CVE id when GHSA id is missing', async () => {
+    const event = makeAdvisoryEvent({ ghsa_id: null, cve_id: 'CVE-2026-1234' });
+    const rule = makeRule({ ruleType: 'github.repository_advisory', config: {} });
+    const result = await repositoryAdvisoryEvaluator.evaluate(makeCtx(event, rule));
+    expect(result).not.toBeNull();
+    expect(result!.description).toContain('CVE-2026-1234');
+  });
+
+  it('returns null for unrelated event types', async () => {
+    const event = makeEvent({ eventType: 'github.push', payload: {} });
+    const rule = makeRule({ ruleType: 'github.repository_advisory', config: {} });
+    const result = await repositoryAdvisoryEvaluator.evaluate(makeCtx(event, rule));
+    expect(result).toBeNull();
   });
 });

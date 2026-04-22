@@ -27,6 +27,7 @@ graph TB
         MC["member_change"]
         DK["deploy_key"]
         SS["secret_scanning"]
+        RA["repository_advisory"]
         FP["force_push"]
         OS["org_settings"]
     end
@@ -40,7 +41,7 @@ graph TB
     WH --> HMAC
     HMAC -->|verified| Proc
     Proc -->|normalized events| PG
-    Proc --> RV & BP & MC & DK & SS & FP & OS
+    Proc --> RV & BP & MC & DK & SS & RA & FP & OS
     OAuth -->|store installation| PG
     OAuth -->|trigger| Sync
     Sync -->|GitHub API| GitHub
@@ -53,8 +54,10 @@ graph TB
 - Organization and team membership changes
 - Deploy key creation and removal
 - GitHub Secret Scanning alert lifecycle
+- Repository security advisory publication and reporting
 - Force pushes to protected branches
 - Organization and team settings changes
+- Deployment creation and deployment status updates (success/failure/pending/etc.) — ingested for use in correlation rules (e.g. retrospective absence)
 
 ## Setup
 
@@ -68,9 +71,11 @@ The GitHub module requires a registered GitHub App with the following configurat
 |---|---|---|
 | Administration | Read | Branch protection webhooks |
 | Contents | Read | Repository metadata sync |
+| Deployments | Read | Deployment and deployment_status webhooks |
 | Members | Read | Member change webhooks |
 | Metadata | Read | Required for all App installations |
 | Secret scanning alerts | Read | Secret scanning webhooks |
+| Security advisories | Read | Repository advisory webhooks |
 
 **Permissions (organization):**
 
@@ -84,12 +89,15 @@ The GitHub module requires a registered GitHub App with the following configurat
 - `create`
 - `delete`
 - `deploy_key`
+- `deployment`
+- `deployment_status`
 - `installation`
 - `installation_repositories`
 - `member`
 - `organization`
 - `push`
 - `repository`
+- `repository_advisory`
 - `secret_scanning_alert`
 - `team`
 - `team_add`
@@ -248,6 +256,31 @@ Triggers on GitHub Secret Scanning alert lifecycle events: when a secret is firs
 
 ---
 
+### repository_advisory
+
+**Rule type:** `github.repository_advisory`
+
+Triggers on GitHub repository security advisory events: when an advisory is published or reported.
+
+| Config field | Type | Default | Description |
+|---|---|---|---|
+| `alertOnActions` | `('published' \| 'reported')[]` | `['published']` | Advisory lifecycle actions to alert on. |
+| `minSeverity` | `'critical' \| 'high' \| 'medium' \| 'low'` | (none) | Minimum advisory severity to fire an alert. Leave empty to alert on all severities. |
+
+Alert severity is derived from the advisory's own severity field (`critical`, `high`, `medium`, `low`), defaulting to `high` when the advisory does not specify one.
+
+**Example trigger:** A maintainer publishes a critical security advisory on a repository your organization depends on.
+
+**Example config:**
+```json
+{
+  "alertOnActions": ["published"],
+  "minSeverity": "high"
+}
+```
+
+---
+
 ### force_push
 
 **Rule type:** `github.force_push`
@@ -354,6 +387,8 @@ All routes are mounted under `/modules/github/`.
 | `github.deploy_key.deleted` | A deploy key was removed from a repository. |
 | `github.secret_scanning.created` | A secret scanning alert was created (secret detected). |
 | `github.secret_scanning.resolved` | A secret scanning alert was resolved. |
+| `github.repository_advisory.published` | A security advisory was published on a repository. |
+| `github.repository_advisory.reported` | A new security advisory was reported on a repository. |
 | `github.push` | A push event occurred on a repository. |
 | `github.installation.created` | A GitHub App installation was created. |
 | `github.installation.deleted` | A GitHub App installation was deleted. |
@@ -372,6 +407,7 @@ All routes are mounted under `/modules/github/`.
 | `github-branch-protection` | Branch Protection Monitor | code-protection | high |
 | `github-force-push-protection` | Force Push Protection | code-protection | high |
 | `github-secret-scanning` | Secret Scanning Alert | secrets | critical |
+| `github-security-advisories` | Security Advisory Monitor | security | high |
 | `github-org-changes` | Organization Change Monitor | access-control | high |
 | `github-full-security` | Full GitHub Security Suite | comprehensive | high |
 

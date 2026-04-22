@@ -378,3 +378,188 @@ describe('normalizeGitHubEvent — missing fields', () => {
     expect(result!.payload.repository).toBeUndefined();
   });
 });
+
+// ===========================================================================
+// repository_advisory events
+// ===========================================================================
+
+describe('normalizeGitHubEvent — repository_advisory', () => {
+  it('normalizes advisory published from security_advisory field', () => {
+    const result = normalizeGitHubEvent(
+      'repository_advisory',
+      {
+        action: 'published',
+        security_advisory: {
+          ghsa_id: 'GHSA-aaaa-bbbb-cccc',
+          cve_id: 'CVE-2026-0001',
+          summary: 'Prototype pollution',
+          severity: 'critical',
+          cvss: { score: 9.8 },
+        },
+        repository: baseRepo(),
+        sender: baseSender(),
+      },
+      DELIVERY,
+      ORG_ID,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.eventType).toBe('github.repository_advisory.published');
+    expect((result!.payload.advisory as Record<string, unknown>).ghsa_id).toBe('GHSA-aaaa-bbbb-cccc');
+    expect((result!.payload.advisory as Record<string, unknown>).severity).toBe('critical');
+  });
+
+  it('falls back to the advisory field when security_advisory is absent', () => {
+    const result = normalizeGitHubEvent(
+      'repository_advisory',
+      {
+        action: 'reported',
+        advisory: { ghsa_id: 'GHSA-1111-2222-3333', summary: 'RCE', severity: 'high' },
+        repository: baseRepo(),
+        sender: baseSender(),
+      },
+      DELIVERY,
+      ORG_ID,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.eventType).toBe('github.repository_advisory.reported');
+    expect((result!.payload.advisory as Record<string, unknown>).ghsa_id).toBe('GHSA-1111-2222-3333');
+  });
+
+  it('returns null on missing action', () => {
+    const result = normalizeGitHubEvent(
+      'repository_advisory',
+      { security_advisory: {}, repository: baseRepo(), sender: baseSender() },
+      DELIVERY,
+      ORG_ID,
+    );
+    expect(result).toBeNull();
+  });
+});
+
+// ===========================================================================
+// deployment events
+// ===========================================================================
+
+describe('normalizeGitHubEvent — deployment', () => {
+  it('normalizes deployment created', () => {
+    const result = normalizeGitHubEvent(
+      'deployment',
+      {
+        action: 'created',
+        deployment: {
+          id: 987,
+          sha: 'deadbeef',
+          ref: 'refs/heads/main',
+          task: 'deploy',
+          environment: 'production',
+          production_environment: true,
+          transient_environment: false,
+          description: 'Ship it',
+          created_at: '2026-04-22T11:30:00Z',
+          updated_at: '2026-04-22T11:30:00Z',
+          creator: { login: 'alice', id: 42 },
+        },
+        repository: baseRepo(),
+        sender: baseSender(),
+      },
+      DELIVERY,
+      ORG_ID,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.eventType).toBe('github.deployment.created');
+    expect(result!.payload.resourceId).toBe('acme/core');
+    expect((result!.payload.deployment as Record<string, unknown>).environment).toBe('production');
+    expect((result!.payload.deployment as Record<string, unknown>).production_environment).toBe(true);
+    expect(result!.payload.creator).toEqual({ login: 'alice', id: 42 });
+    expect(result!.occurredAt.toISOString()).toBe('2026-04-22T11:30:00.000Z');
+  });
+
+  it('returns null when action is missing', () => {
+    const result = normalizeGitHubEvent(
+      'deployment',
+      { deployment: {}, repository: baseRepo(), sender: baseSender() },
+      DELIVERY,
+      ORG_ID,
+    );
+    expect(result).toBeNull();
+  });
+});
+
+// ===========================================================================
+// deployment_status events
+// ===========================================================================
+
+describe('normalizeGitHubEvent — deployment_status', () => {
+  it('normalizes deployment_status created with state=success', () => {
+    const result = normalizeGitHubEvent(
+      'deployment_status',
+      {
+        action: 'created',
+        deployment_status: {
+          id: 555,
+          state: 'success',
+          environment: 'production',
+          target_url: 'https://ci.example.com/job/42',
+          log_url: 'https://ci.example.com/job/42/log',
+          description: 'Deployment finished',
+          created_at: '2026-04-22T11:32:00Z',
+          updated_at: '2026-04-22T11:32:10Z',
+          creator: { login: 'ci-bot', id: 99 },
+        },
+        deployment: {
+          id: 987,
+          sha: 'deadbeef',
+          ref: 'refs/heads/main',
+          task: 'deploy',
+          environment: 'production',
+          production_environment: true,
+        },
+        repository: baseRepo(),
+        sender: baseSender(),
+      },
+      DELIVERY,
+      ORG_ID,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.eventType).toBe('github.deployment_status.created');
+    expect(result!.payload.state).toBe('success');
+    expect(result!.payload.environment).toBe('production');
+    expect((result!.payload.deployment_status as Record<string, unknown>).target_url).toBe('https://ci.example.com/job/42');
+    expect((result!.payload.deployment as Record<string, unknown>).sha).toBe('deadbeef');
+    expect(result!.payload.creator).toEqual({ login: 'ci-bot', id: 99 });
+    expect(result!.occurredAt.toISOString()).toBe('2026-04-22T11:32:10.000Z');
+  });
+
+  it('falls back to deployment.environment when deployment_status has none', () => {
+    const result = normalizeGitHubEvent(
+      'deployment_status',
+      {
+        action: 'created',
+        deployment_status: { id: 1, state: 'failure', created_at: '2026-04-22T12:00:00Z' },
+        deployment: { id: 2, environment: 'staging' },
+        repository: baseRepo(),
+        sender: baseSender(),
+      },
+      DELIVERY,
+      ORG_ID,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.payload.state).toBe('failure');
+    expect(result!.payload.environment).toBe('staging');
+  });
+
+  it('returns null when action is missing', () => {
+    const result = normalizeGitHubEvent(
+      'deployment_status',
+      { deployment_status: { state: 'success' }, repository: baseRepo(), sender: baseSender() },
+      DELIVERY,
+      ORG_ID,
+    );
+    expect(result).toBeNull();
+  });
+});

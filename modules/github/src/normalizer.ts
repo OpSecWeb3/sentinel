@@ -173,6 +173,89 @@ const EVENT_MAP: Record<string, EventHandler> = {
     },
   }),
 
+  repository_advisory: (p) => {
+    const action = validateAction(p.action);
+    if (!action) return null;
+    return {
+      eventType: `github.repository_advisory.${action}`,
+      payload: {
+        resourceId: (p.repository as Record<string, unknown>)?.full_name,
+        action,
+        advisory: pick(p.security_advisory ?? p.advisory, [
+          'ghsa_id', 'cve_id', 'summary', 'severity', 'cvss',
+        ]),
+        repository: pick(p.repository, ['full_name']),
+        sender: pick(p.sender, ['login', 'id']),
+      },
+    };
+  },
+
+  // TODO(deployment-evaluator): deployments are currently ingested purely as
+  // correlation fodder (e.g. retrospective-absence rules like "S3 write must
+  // be preceded by a successful prod deploy"). If we later want single-event
+  // detections — non-allowlisted actor deploying to production, prod deploy
+  // with state=failure, out-of-band deploys whose sha has no matching push,
+  // transient_environment=false on suspicious env names — add a dedicated
+  // evaluator under modules/github/src/evaluators/ and wire it into the
+  // evaluator registry + templates.
+
+  // A deployment was created. GitHub always sends action='created' for this
+  // event as of the current webhook schema; we still validate rather than
+  // assuming. The payload mirrors the REST shape documented at
+  // https://docs.github.com/en/webhooks/webhook-events-and-payloads#deployment
+  deployment: (p) => {
+    const action = validateAction(p.action);
+    if (!action) return null;
+    const deployment = p.deployment as Record<string, unknown> | undefined;
+    return {
+      eventType: `github.deployment.${action}`,
+      payload: {
+        resourceId: (p.repository as Record<string, unknown>)?.full_name,
+        action,
+        deployment: pick(deployment, [
+          'id', 'sha', 'ref', 'task', 'environment', 'production_environment',
+          'transient_environment', 'description', 'created_at', 'updated_at',
+        ]),
+        creator: pick(deployment?.creator, ['login', 'id']),
+        repository: pick(p.repository, ['full_name']),
+        sender: pick(p.sender, ['login', 'id']),
+      },
+    };
+  },
+
+  // A deployment_status webhook is sent whenever a new status is appended to a
+  // deployment. The key security-relevant field is `deployment_status.state`
+  // (success | failure | error | pending | in_progress | queued | inactive).
+  // https://docs.github.com/en/webhooks/webhook-events-and-payloads#deployment_status
+  deployment_status: (p) => {
+    const action = validateAction(p.action);
+    if (!action) return null;
+    const status = p.deployment_status as Record<string, unknown> | undefined;
+    const deployment = p.deployment as Record<string, unknown> | undefined;
+    return {
+      eventType: `github.deployment_status.${action}`,
+      payload: {
+        resourceId: (p.repository as Record<string, unknown>)?.full_name,
+        action,
+        deployment_status: pick(status, [
+          'id', 'state', 'environment', 'target_url', 'log_url',
+          'description', 'created_at', 'updated_at',
+        ]),
+        // Denormalize state to the top level so correlation-rule conditions
+        // can reference `state` directly (matching the idiom used in the
+        // retrospective-absence example in CLAUDE context).
+        state: status?.state,
+        environment: status?.environment ?? deployment?.environment,
+        deployment: pick(deployment, [
+          'id', 'sha', 'ref', 'task', 'environment', 'production_environment',
+        ]),
+        creator: pick(status?.creator, ['login', 'id']),
+        repository: pick(p.repository, ['full_name']),
+        sender: pick(p.sender, ['login', 'id']),
+      },
+    };
+  },
+
   installation: (p) => {
     const action = validateAction(p.action);
     if (!action) return null;
@@ -201,6 +284,25 @@ function extractEventTimestamp(eventType: string, payload: Record<string, unknow
     const repo = payload.repository as Record<string, unknown> | undefined;
     if (repo?.pushed_at && typeof repo.pushed_at === 'number') {
       return new Date((repo.pushed_at as number) * 1000);
+    }
+  }
+
+  // Deployment events carry the timestamp on the nested deployment object;
+  // deployment_status carries it on deployment_status.
+  if (eventType === 'deployment') {
+    const d = payload.deployment as Record<string, unknown> | undefined;
+    const ts = typeof d?.updated_at === 'string' ? d.updated_at : typeof d?.created_at === 'string' ? d.created_at : null;
+    if (ts) {
+      const parsed = new Date(ts);
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
+  }
+  if (eventType === 'deployment_status') {
+    const s = payload.deployment_status as Record<string, unknown> | undefined;
+    const ts = typeof s?.updated_at === 'string' ? s.updated_at : typeof s?.created_at === 'string' ? s.created_at : null;
+    if (ts) {
+      const parsed = new Date(ts);
+      if (!isNaN(parsed.getTime())) return parsed;
     }
   }
 

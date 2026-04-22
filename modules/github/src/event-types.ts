@@ -162,6 +162,16 @@ export const eventTypes: EventTypeDefinition[] = [
     description: 'A user was invited to the organization',
   },
   {
+    type: 'github.repository_advisory.published',
+    label: 'Security advisory published',
+    description: 'A security advisory was published on a repository',
+  },
+  {
+    type: 'github.repository_advisory.reported',
+    label: 'Security advisory reported',
+    description: 'A new security advisory was reported on a repository',
+  },
+  {
     type: 'github.installation.deleted',
     label: 'Installation deleted',
     description: 'The GitHub App installation was removed',
@@ -180,5 +190,15 @@ export const eventTypes: EventTypeDefinition[] = [
     type: 'github.installation.created',
     label: 'Installation created',
     description: 'A new GitHub App installation was created',
+  },
+  {
+    type: 'github.deployment.created',
+    label: 'Deployment created',
+    description: 'A deployment was created for a repository',
+  },
+  {
+    type: 'github.deployment_status.created',
+    label: 'Deployment status updated',
+    description: 'A deployment status (success, failure, pending, in_progress, etc.) was reported',
   },
 ];

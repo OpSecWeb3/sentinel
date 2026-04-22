@@ -11,6 +11,7 @@ import { events, alerts } from '@sentinel/db/schema/core';
 import { correlationRules } from '@sentinel/db/schema/correlation';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { CorrelationEngine } from '@sentinel/shared/correlation-engine';
+import { createDbEventQuerier } from '@sentinel/shared/event-querier-db';
 import type { NormalizedEvent } from '@sentinel/shared/rules';
 import type { CorrelatedAlertCandidate } from '@sentinel/shared/correlation-types';
 import { logger as rootLogger, type Logger } from '@sentinel/shared/logger';
@@ -23,7 +24,12 @@ const CorrelationPayload = z.object({
 export function createCorrelationHandler(redis: Redis, log?: Logger): JobHandler {
   const db = getDb();
   const _log = log ?? rootLogger.child({ component: 'correlation-evaluate' });
-  const engine = new CorrelationEngine({ redis, db, logger: _log });
+  const engine = new CorrelationEngine({
+    redis,
+    db,
+    logger: _log,
+    eventQuerier: createDbEventQuerier(db),
+  });
 
   return {
     jobName: 'correlation.evaluate',

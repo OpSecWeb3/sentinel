@@ -14,5 +14,7 @@ export * from './hono-types.js';
 export * from './auto-rules.js';
 export * from './correlation-types.js';
 export * from './correlation-engine.js';
+export * from './event-querier.js';
+export * from './event-querier-db.js';
 export * from './query.js';
 export * from './payload-catalog.js';

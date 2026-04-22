@@ -78,6 +78,17 @@ export function formatSlackBlocks(alert: SlackAlertPayload): object[] {
     if (forced) lines.push(`*Forced:* ${forced}`);
     if (pusher) lines.push(`*Pusher:* ${pusher}`);
     if (lines.length) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') } });
+  } else if (et.includes('repository_advisory')) {
+    const ghsa = getField(alert.fields, 'advisory.ghsa_id');
+    const cve = getField(alert.fields, 'advisory.cve_id');
+    const severity = getField(alert.fields, 'advisory.severity');
+    const cvss = getField(alert.fields, 'advisory.cvss.score');
+    const lines: string[] = [];
+    if (ghsa) lines.push(`*GHSA:* ${ghsa}`);
+    if (cve) lines.push(`*CVE:* ${cve}`);
+    if (severity) lines.push(`*Severity:* ${severity}`);
+    if (cvss !== undefined && cvss !== null) lines.push(`*CVSS:* ${cvss}`);
+    if (lines.length) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') } });
   } else if (et.includes('team')) {
     const teamName = getField(alert.fields, 'team.name');
     const teamPerm = getField(alert.fields, 'team.permission');

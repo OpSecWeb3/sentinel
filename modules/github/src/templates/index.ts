@@ -157,6 +157,45 @@ export const templates: DetectionTemplate[] = [
     ],
   },
 
+  // ── Security Advisories ─────────────────────────────────────────────
+  {
+    slug: 'github-security-advisories',
+    name: 'Security Advisory Monitor',
+    description: 'Alert when security advisories are published on your repositories. Critical for tracking vulnerabilities disclosed against your code.',
+    category: 'security',
+    severity: 'high',
+    inputs: [
+      {
+        key: 'alertOnActions',
+        label: 'Alert on actions',
+        type: 'string-array',
+        required: false,
+        placeholder: 'published\nreported',
+        help: 'Leave empty to alert on all advisory actions (published, reported).',
+      },
+      {
+        key: 'minSeverity',
+        label: 'Minimum advisory severity',
+        type: 'select',
+        required: false,
+        options: [
+          { value: 'critical', label: 'Critical' },
+          { value: 'high', label: 'High' },
+          { value: 'medium', label: 'Medium' },
+          { value: 'low', label: 'Low' },
+        ],
+        help: 'Only alert when the advisory severity meets or exceeds this threshold.',
+      },
+    ],
+    rules: [
+      {
+        ruleType: 'github.repository_advisory',
+        config: { alertOnActions: ['published'], minSeverity: undefined },
+        action: 'alert',
+      },
+    ],
+  },
+
   // ── Organization ────────────────────────────────────────────────────
   {
     slug: 'github-org-changes',
@@ -235,6 +274,12 @@ export const templates: DetectionTemplate[] = [
         config: { alertOnActions: ['added', 'removed'], watchRoles: [] },
         action: 'alert',
         priority: 40,
+      },
+      {
+        ruleType: 'github.repository_advisory',
+        config: { alertOnActions: ['published'] },
+        action: 'alert',
+        priority: 15,
       },
       {
         ruleType: 'github.org_settings',

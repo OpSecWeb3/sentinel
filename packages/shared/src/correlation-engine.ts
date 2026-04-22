@@ -28,6 +28,7 @@ import type {
   AbsenceMatchCondition,
 } from './correlation-types.js';
 import { logger as rootLogger, type Logger } from './logger.js';
+import type { EventQuerier } from './event-querier.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -195,6 +196,12 @@ export interface CorrelationEngineConfig {
   redis: Redis;
   db: Db;
   logger?: Logger;
+  /**
+   * Optional retrospective event querier. Required for absence rules with
+   * `lookbackMinutes > 0`; if absent, the engine logs a warning and falls
+   * back to forward-only behavior for those rules.
+   */
+  eventQuerier?: EventQuerier;
 }
 
 export interface CorrelationEvaluationResult {
@@ -243,11 +250,13 @@ export class CorrelationEngine {
   private readonly redis: Redis;
   private readonly db: Db;
   private readonly log: Logger;
+  private readonly eventQuerier: EventQuerier | null;
 
   constructor(config: CorrelationEngineConfig) {
     this.redis = config.redis;
     this.db = config.db;
     this.log = config.logger ?? rootLogger.child({ component: COMPONENT });
+    this.eventQuerier = config.eventQuerier ?? null;
   }
 
   // -------------------------------------------------------------------------
@@ -680,37 +689,118 @@ export class CorrelationEngine {
     const redisKey = `${ABSENCE_PREFIX}:${rule.id}:${keyHash}`;
     const isTrigger = this.matchesEventFilter(absence.trigger.eventFilter, event);
     const isExpected = this.matchesEventFilter(absence.expected.eventFilter, event);
+    const graceMinutes = absence.graceMinutes ?? 0;
+    const lookbackMinutes = absence.lookbackMinutes ?? 0;
 
-    // Handle trigger event — start the absence timer
+    // Handle trigger event
     if (isTrigger) {
-      const graceMs = absence.graceMinutes * 60_000;
-      const now = Date.now();
-      const instance: CorrelationInstance = {
-        ruleId: rule.id,
-        orgId: event.orgId,
-        correlationKeyHash: keyHash,
-        correlationKeyValues: keyValues,
-        currentStepIndex: 0,
-        startedAt: now,
-        expiresAt: now + graceMs,
-        matchedSteps: [this.buildMatchedStep('trigger', event)],
-      };
-
-      // Store with TTL slightly longer than grace period so the expiry handler can find it
-      // The expiry handler checks expiresAt, not the Redis TTL directly
-      const ttlMs = graceMs + 60_000; // grace + 1 min buffer
-
-      // Atomic SET NX — prevents TOCTOU race where two workers both see no
-      // existing trigger and both create one, losing the first trigger event.
-      const res = await this.redis.set(redisKey, JSON.stringify(instance), 'PX', ttlMs, 'NX');
-      if (res !== null) {
-        // Index the absence key by expiresAt so the expiry handler can use
-        // ZRANGEBYSCORE instead of SCAN to find expired keys efficiently.
-        await this.redis.zadd(ABSENCE_INDEX_KEY, instance.expiresAt, redisKey);
-
-        return { candidate: null, advanced: false, started: true };
+      // Retrospective check: if the rule specifies a lookback window, query
+      // the event store for a prior matching expected event. A hit satisfies
+      // the rule and suppresses any forward instance.
+      let lookbackResult: { queried: boolean; matched: boolean; candidatesScanned: number } | undefined;
+      if (lookbackMinutes > 0) {
+        if (!this.eventQuerier) {
+          this.log.warn(
+            { ruleId: rule.id, lookbackMinutes },
+            'Absence rule requests lookback but CorrelationEngine has no EventQuerier — falling back to forward-only',
+          );
+        } else {
+          const triggerMs = event.occurredAt.getTime();
+          const windowStart = new Date(triggerMs - lookbackMinutes * 60_000);
+          const windowEnd = event.occurredAt;
+          const queryStart = Date.now();
+          let candidates: NormalizedEvent[] = [];
+          try {
+            candidates = await this.eventQuerier.findEvents(
+              event.orgId,
+              absence.expected.eventFilter,
+              windowStart,
+              windowEnd,
+              100,
+            );
+          } catch (err) {
+            this.log.error(
+              { err, ruleId: rule.id, orgId: event.orgId },
+              'EventQuerier.findEvents failed — treating lookback as miss',
+            );
+          }
+          const matchConditions = absence.expected.matchConditions ?? [];
+          // Stand-in trigger instance used only for matchConditions resolution.
+          const triggerStub: CorrelationInstance = {
+            ruleId: rule.id,
+            orgId: event.orgId,
+            correlationKeyHash: keyHash,
+            correlationKeyValues: keyValues,
+            currentStepIndex: 0,
+            startedAt: triggerMs,
+            expiresAt: triggerMs,
+            matchedSteps: [this.buildMatchedStep('trigger', event)],
+          };
+          const matched = candidates.some((c) =>
+            this.checkAbsenceMatchConditions(matchConditions, c, triggerStub),
+          );
+          lookbackResult = { queried: true, matched, candidatesScanned: candidates.length };
+          this.log.info(
+            {
+              ruleId: rule.id,
+              orgId: event.orgId,
+              windowStart: windowStart.toISOString(),
+              windowEnd: windowEnd.toISOString(),
+              candidateCount: candidates.length,
+              matched,
+              durationMs: Date.now() - queryStart,
+            },
+            'Absence lookback query complete',
+          );
+          if (matched) {
+            // Prerequisite satisfied — no alert, no forward instance.
+            return { candidate: null, advanced: false, started: false };
+          }
+        }
       }
-      // NX failed — another worker already created the trigger, skip
+
+      // Forward path — if graceMinutes > 0, set a timer and wait for cancellation.
+      if (graceMinutes > 0) {
+        const graceMs = graceMinutes * 60_000;
+        const now = Date.now();
+        const instance: CorrelationInstance = {
+          ruleId: rule.id,
+          orgId: event.orgId,
+          correlationKeyHash: keyHash,
+          correlationKeyValues: keyValues,
+          currentStepIndex: 0,
+          startedAt: now,
+          expiresAt: now + graceMs,
+          matchedSteps: [this.buildMatchedStep('trigger', event)],
+        };
+
+        const ttlMs = graceMs + 60_000; // grace + 1 min buffer
+        const res = await this.redis.set(redisKey, JSON.stringify(instance), 'PX', ttlMs, 'NX');
+        if (res !== null) {
+          await this.redis.zadd(ABSENCE_INDEX_KEY, instance.expiresAt, redisKey);
+          return { candidate: null, advanced: false, started: true };
+        }
+        // NX failed — another worker already created the trigger
+      } else if (lookbackMinutes > 0) {
+        // Pure retrospective miss — fire immediately (subject to cooldown).
+        const passed = await this.checkCooldown(rule);
+        if (passed) {
+          const stub: CorrelationInstance = {
+            ruleId: rule.id,
+            orgId: event.orgId,
+            correlationKeyHash: keyHash,
+            correlationKeyValues: keyValues,
+            currentStepIndex: 0,
+            startedAt: event.occurredAt.getTime(),
+            expiresAt: event.occurredAt.getTime(),
+            matchedSteps: [this.buildMatchedStep('trigger', event)],
+          };
+          const candidate = this.buildCandidate(rule, config, stub);
+          if (lookbackResult) candidate.triggerData.lookbackResult = lookbackResult;
+          return { candidate, advanced: false, started: false };
+        }
+        return { candidate: null, advanced: false, started: false };
+      }
     }
 
     // Handle expected event — cancel the timer if matchConditions pass
@@ -853,13 +943,20 @@ export class CorrelationEngine {
     const parts: string[] = [];
 
     for (const keyDef of keyFields) {
-      const raw = getField(event.payload, keyDef.field);
-      if (raw == null) {
-        // Required correlation key field is missing — skip this rule for this event
-        return null;
+      let strVal: string;
+      let alias: string;
+      if ('literal' in keyDef) {
+        strVal = keyDef.literal;
+        alias = keyDef.alias ?? `_literal_${keyDef.literal}`;
+      } else {
+        const raw = getField(event.payload, keyDef.field);
+        if (raw == null) {
+          // Required correlation key field is missing — skip this rule for this event
+          return null;
+        }
+        strVal = String(raw);
+        alias = keyDef.alias ?? keyDef.field;
       }
-      const strVal = String(raw);
-      const alias = keyDef.alias ?? keyDef.field;
       values[alias] = strVal;
       parts.push(`${alias}=${strVal}`);
     }

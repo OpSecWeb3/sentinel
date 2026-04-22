@@ -34,11 +34,20 @@ const correlationStepSchema = z.object({
   matchConditions: z.array(crossStepConditionSchema).default([]),
 });
 
-// Correlation key field — defines which payload fields events must share
-const correlationKeyFieldSchema = z.object({
-  field: z.string(),         // JSON path in event payload (e.g., "repository.full_name")
-  alias: z.string().optional(),
-});
+// Correlation key field — a single entry must be either a payload field reference
+// or a literal constant value. Literals let rules whose events are already pinned
+// via `eventFilter.conditions` group into a single instance without sharing a
+// common payload field across event types.
+const correlationKeyFieldSchema = z.union([
+  z.object({
+    field: z.string(),
+    alias: z.string().optional(),
+  }),
+  z.object({
+    literal: z.string().min(1),
+    alias: z.string().optional(),
+  }),
+]);
 
 // Aggregation config (Phase 2)
 const aggregationConfigSchema = z.object({
@@ -56,14 +65,29 @@ const absenceMatchConditionSchema = z.object({
 });
 
 // Absence config (Phase 3)
+//
+// Semantics:
+//   - graceMinutes   (forward window)  : on trigger, wait up to N minutes for an
+//                                        expected event; if none arrives, fire.
+//   - lookbackMinutes (retrospective)  : on trigger, query the event store for
+//                                        a matching expected event in the prior
+//                                        N minutes; if none exists, fire.
+//   - both set                         : bidirectional ±window semantics — fire
+//                                        only if no expected event exists either
+//                                        in the lookback OR within the grace.
+//   - exactly one must be > 0          : enforced by refine below.
 const absenceConfigSchema = z.object({
   trigger: z.object({ eventFilter: eventFilterSchema }),
   expected: z.object({
     eventFilter: eventFilterSchema,
     matchConditions: z.array(absenceMatchConditionSchema).default([]),
   }),
-  graceMinutes: z.number().positive(),
-});
+  graceMinutes: z.number().min(0).max(1440).optional(),
+  lookbackMinutes: z.number().int().min(0).max(1440).optional(),
+}).refine(
+  (data) => (data.graceMinutes ?? 0) > 0 || (data.lookbackMinutes ?? 0) > 0,
+  { message: 'absence config must set graceMinutes > 0, lookbackMinutes > 0, or both' },
+);
 
 // Full correlation rule config (stored in JSONB)
 export const correlationRuleConfigSchema = z.object({
@@ -81,6 +105,28 @@ export const correlationRuleConfigSchema = z.object({
     return false;
   },
   { message: 'Config must include the appropriate field for the correlation type' },
+).refine(
+  (data) => {
+    // Literal correlation keys collapse every event for the rule into one
+    // instance. That's only safe if every eventFilter the rule references is
+    // pinned via `conditions`; otherwise an unrelated event could wander in
+    // and poison the instance. Enforce conditions.length >= 1 on every
+    // referenced filter when any correlationKey entry is a literal.
+    const hasLiteral = data.correlationKey.some((k) => 'literal' in k);
+    if (!hasLiteral) return true;
+
+    const filters: Array<{ conditions?: unknown[] }> = [];
+    if (data.type === 'sequence' && data.steps) {
+      for (const step of data.steps) filters.push(step.eventFilter);
+    } else if (data.type === 'aggregation' && data.aggregation) {
+      filters.push(data.aggregation.eventFilter);
+    } else if (data.type === 'absence' && data.absence) {
+      filters.push(data.absence.trigger.eventFilter);
+      filters.push(data.absence.expected.eventFilter);
+    }
+    return filters.every((f) => Array.isArray(f.conditions) && f.conditions.length >= 1);
+  },
+  { message: 'literal correlationKey requires every eventFilter to have conditions.length >= 1' },
 );
 
 export type CorrelationRuleConfig = z.infer<typeof correlationRuleConfigSchema>;
@@ -156,5 +202,10 @@ export interface CorrelatedAlertCandidate {
     actors: string[];
     timeSpanMinutes: number;
     modules: string[];
+    lookbackResult?: {
+      queried: boolean;
+      matched: boolean;
+      candidatesScanned: number;
+    };
   };
 }

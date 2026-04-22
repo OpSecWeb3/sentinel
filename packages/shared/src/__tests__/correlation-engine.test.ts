@@ -1782,3 +1782,131 @@ describe('Step Index Key Management', () => {
     expect(redis.pipeline).toHaveBeenCalled();
   });
 });
+
+// ===========================================================================
+// Retrospective absence + literal correlationKey
+// ===========================================================================
+
+describe('Retrospective absence + literal correlationKey', () => {
+  function makeRetroRule(opts: { graceMinutes?: number; lookbackMinutes?: number }): CorrelationRuleRow {
+    return makeRule({
+      config: {
+        type: 'absence',
+        correlationKey: [{ literal: 's3-deploy-pair', alias: 'pair' }],
+        windowMinutes: 60,
+        absence: {
+          trigger: {
+            eventFilter: {
+              moduleId: 'aws',
+              eventType: 's3.PutObject',
+              conditions: [{ field: 'bucket', operator: '==', value: 'acme-prod-assets' }],
+            },
+          },
+          expected: {
+            eventFilter: {
+              moduleId: 'github',
+              eventType: 'deployment_status',
+              conditions: [{ field: 'repo', operator: '==', value: 'acme/web' }],
+            },
+            matchConditions: [],
+          },
+          graceMinutes: opts.graceMinutes,
+          lookbackMinutes: opts.lookbackMinutes,
+        },
+      } as unknown as CorrelationRuleConfig,
+    });
+  }
+
+  function makeTriggerEvent(): NormalizedEvent {
+    return makeEvent({
+      id: 'evt-trigger',
+      moduleId: 'aws',
+      eventType: 's3.PutObject',
+      payload: { bucket: 'acme-prod-assets' },
+      occurredAt: new Date('2026-04-22T12:00:00Z'),
+    });
+  }
+
+  it('literal correlationKey produces a stable hash without requiring payload fields', async () => {
+    const rule = makeRetroRule({ graceMinutes: 5 });
+    db._selectChain.orderBy.mockResolvedValue([rule]);
+
+    const event = makeTriggerEvent();
+    const result = await engine.evaluate(event);
+
+    expect(result.startedRuleIds.has('rule-1')).toBe(true);
+    // Should have written an absence key even though no shared payload field exists.
+    const keys = Array.from(redis._store.keys()).filter((k) => k.startsWith('sentinel:corr:absence:rule-1:'));
+    expect(keys.length).toBe(1);
+  });
+
+  it('retrospective hit suppresses the alert and does not create a forward instance', async () => {
+    const rule = makeRetroRule({ lookbackMinutes: 60 });
+    db._selectChain.orderBy.mockResolvedValue([rule]);
+
+    const priorDeploy: NormalizedEvent = {
+      id: 'evt-dep',
+      orgId: 'org-1',
+      moduleId: 'github',
+      eventType: 'deployment_status',
+      externalId: null,
+      payload: { repo: 'acme/web', state: 'success' },
+      occurredAt: new Date('2026-04-22T11:30:00Z'),
+      receivedAt: new Date('2026-04-22T11:30:01Z'),
+    };
+
+    const querier = { findEvents: vi.fn(async () => [priorDeploy]) };
+    engine = new CorrelationEngine({
+      redis, db, eventQuerier: querier,
+    } as unknown as CorrelationEngineConfig);
+    engine.invalidateCache('org-1');
+
+    const result = await engine.evaluate(makeTriggerEvent());
+
+    expect(querier.findEvents).toHaveBeenCalledOnce();
+    expect(result.candidates).toHaveLength(0);
+    expect(result.startedRuleIds.size).toBe(0);
+    const absenceKeys = Array.from(redis._store.keys()).filter((k) => k.startsWith('sentinel:corr:absence:'));
+    expect(absenceKeys).toHaveLength(0);
+  });
+
+  it('retrospective miss fires an alert immediately when graceMinutes is absent', async () => {
+    const rule = makeRetroRule({ lookbackMinutes: 60 });
+    db._selectChain.orderBy.mockResolvedValue([rule]);
+
+    const querier = { findEvents: vi.fn(async () => []) };
+    engine = new CorrelationEngine({
+      redis, db, eventQuerier: querier,
+    } as unknown as CorrelationEngineConfig);
+    engine.invalidateCache('org-1');
+
+    const result = await engine.evaluate(makeTriggerEvent());
+
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0].triggerData.lookbackResult).toEqual({
+      queried: true,
+      matched: false,
+      candidatesScanned: 0,
+    });
+    const absenceKeys = Array.from(redis._store.keys()).filter((k) => k.startsWith('sentinel:corr:absence:'));
+    expect(absenceKeys).toHaveLength(0);
+  });
+
+  it('bidirectional miss falls back to forward absence timer', async () => {
+    const rule = makeRetroRule({ graceMinutes: 10, lookbackMinutes: 60 });
+    db._selectChain.orderBy.mockResolvedValue([rule]);
+
+    const querier = { findEvents: vi.fn(async () => []) };
+    engine = new CorrelationEngine({
+      redis, db, eventQuerier: querier,
+    } as unknown as CorrelationEngineConfig);
+    engine.invalidateCache('org-1');
+
+    const result = await engine.evaluate(makeTriggerEvent());
+
+    expect(result.candidates).toHaveLength(0);
+    expect(result.startedRuleIds.has('rule-1')).toBe(true);
+    const absenceKeys = Array.from(redis._store.keys()).filter((k) => k.startsWith('sentinel:corr:absence:rule-1:'));
+    expect(absenceKeys).toHaveLength(1);
+  });
+});

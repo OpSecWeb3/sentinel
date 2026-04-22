@@ -8,6 +8,7 @@ import { deployKeyEvaluator } from './evaluators/deploy-key.js';
 import { secretScanningEvaluator } from './evaluators/secret-scanning.js';
 import { forcePushEvaluator } from './evaluators/force-push.js';
 import { orgSettingsEvaluator } from './evaluators/org-settings.js';
+import { repositoryAdvisoryEvaluator } from './evaluators/repository-advisory.js';
 import { webhookProcessHandler, repoSyncHandler } from './handlers.js';
 import { eventTypes } from './event-types.js';
 import { templates } from './templates/index.js';
@@ -26,6 +27,7 @@ export const GitHubModule: DetectionModule = {
     secretScanningEvaluator,
     forcePushEvaluator,
     orgSettingsEvaluator,
+    repositoryAdvisoryEvaluator,
   ],
   jobHandlers: [webhookProcessHandler, repoSyncHandler],
   eventTypes,

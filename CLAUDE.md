@@ -2,6 +2,10 @@
 
 Security monitoring platform — monorepo with pnpm workspaces.
 
+## General Philosophy
+
+When doing an analysis or evaluation, make 0 assumptions. Make sure every logical step is full backed by concrete code references and do not make any inference from variable/function/filenames without a full code backed guarantee. This is IMPORTANT for this project so etch it in your memory. Every bug path should be fully retraced in code and full path should be proven. All implementations should fully consider upstream and downstream impact of any state modifications/transistions.  
+
 ## Stack
 
 - **Web:** Next.js 15, React 19, TypeScript, Tailwind (apps/web)
@@ -54,8 +58,3 @@ directory), not in this repo's compose files. Sentinel's `docker-compose.prod.ym
 connects to them via external `shared-infra` and `gateway` Docker networks.
 Do not add Postgres/Redis services to Sentinel's production compose.
 
-
-# Voice Feedback Protocol
-After completing any significant tasks instead of the typicall text summary dumps in the cli, do this:
-1. Condense a more brief (<=5 sentences) summary of your work.
-2. Execute the shell command: say "[Summary text here]"
