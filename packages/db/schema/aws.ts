@@ -1,6 +1,6 @@
 import {
-  pgTable, text, uuid, timestamp, boolean, jsonb, integer,
-  bigserial, index, uniqueIndex,
+  pgTable, text, uuid, timestamp, boolean, integer,
+  index, uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organizations } from './core';
@@ -55,58 +55,3 @@ export const awsIntegrations = pgTable('aws_integrations', {
   uniqueIndex('uq_aws_integration_account').on(t.orgId, t.accountId),
 ]);
 
-// ---------------------------------------------------------------------------
-// AWS raw CloudTrail events — 7-day hot buffer
-//
-// ALL ingested CloudTrail events land here first and are then normalized into
-// the platform `events` table for rule / correlation evaluation. Lifecycle in
-// the platform table is owned by the retention layer (see modules/aws/src/
-// index.ts): 1-day floor, but rows referenced by an alert or still inside an
-// active correlation window are preserved. The 7-day buffer here exists so
-// new detections can backfill over recent raw history.
-// ---------------------------------------------------------------------------
-
-export const awsRawEvents = pgTable('aws_raw_events', {
-  id: bigserial('id', { mode: 'bigint' }).primaryKey(),
-  orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
-  integrationId: uuid('integration_id').notNull().references(() => awsIntegrations.id, { onDelete: 'cascade' }),
-
-  // CloudTrail event identity
-  cloudTrailEventId: text('cloudtrail_event_id').notNull(),
-  eventName: text('event_name').notNull(),
-  eventSource: text('event_source').notNull(),   // e.g. "iam.amazonaws.com"
-  eventVersion: text('event_version'),
-  awsRegion: text('aws_region').notNull(),
-
-  // Who did it
-  principalId: text('principal_id'),
-  userArn: text('user_arn'),
-  accountId: text('account_id'),
-  userType: text('user_type'),  // Root | IAMUser | AssumedRole | FederatedUser | AWSService
-
-  // What happened
-  sourceIpAddress: text('source_ip_address'),
-  userAgent: text('user_agent'),
-  errorCode: text('error_code'),
-  errorMessage: text('error_message'),
-
-  // Resources affected (JSONB array: [{ARN, accountId, type}])
-  resources: jsonb('resources'),
-
-  // Full raw CloudTrail event record
-  rawPayload: jsonb('raw_payload').notNull(),
-
-  // Timestamps
-  eventTime: timestamp('event_time', { withTimezone: true }).notNull(),
-  receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow().notNull(),
-
-  // Promotion flag: true once this event has been written to the platform events table
-  promoted: boolean('promoted').notNull().default(false),
-  platformEventId: uuid('platform_event_id'),
-}, (t) => [
-  index('idx_aws_raw_org').on(t.orgId),
-  index('idx_aws_raw_integration').on(t.integrationId),
-  index('idx_aws_raw_received_at').on(t.receivedAt),
-  index('idx_aws_raw_event_name').on(t.eventName),
-  uniqueIndex('uq_aws_raw_cloudtrail_id').on(t.integrationId, t.cloudTrailEventId),
-]);

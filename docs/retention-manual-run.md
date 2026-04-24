@@ -1,339 +1,55 @@
-# Manually run AWS retention
+# AWS retention + aws_raw_events collapse — runbook
 
-The `daily-retention` scheduler fires once every 24h; first post-deploy
-fire is `deploy_time + 24h`. To force a run immediately — e.g. to verify
-the predicate after shipping `feat(retention): value-driven pruning for
-AWS events` (commit `7e0ff37`) — enqueue a one-shot
-`platform.data.retention` job via the worker's installed `bullmq`.
+Operational runbook for the two-deploy collapse of the AWS raw-events
+table into the platform `events` table.
+
+- **PR #1** (commit `cce3d4a`): `rowCount → count` retention bug fix,
+  recursive `PayloadTree` on `/events`, `aws_raw_events` TTL 7d → 3d.
+- **PR #2a** (commit `e43ecfc`): inlined CloudTrail ingestion straight
+  into `events`, `eventProcessHandler` becomes a drain shim, all read
+  paths rewired, Migration 0005 adds dedup unique index + GIN on
+  `payload->'resources'`. Schema for `aws_raw_events` left in place.
+- **PR #2b** (pending): drops the `aws_raw_events` table.
 
 ## Containers
 
 - Redis: `shared-redis-1` (external, in `chainalert` compose, project `-p shared`)
-- Worker: `sentinel-worker-1` / `sentinel-worker-2` (two replicas, no
-  `container_name`, from `docker-compose.prod.yml`)
-- Postgres: `shared-postgres-1`
+- Postgres: `shared-postgres-1` (hosts multiple DBs; `POSTGRES_DB`
+  defaults to `chainalert`, NOT sentinel's DB)
+- Worker: `sentinel-worker-1` / `sentinel-worker-2` (replicas: 2)
 
-## 0. Bootstrap — capture Redis password
+## 0. Bootstrap — capture creds (run once per shell session)
 
-`docker exec` does not inherit host env vars. Source the password
-once from the worker's `REDIS_URL` and keep it in a host shell var
-`PW`. Re-inject it into every redis-cli call with `-e PW="$PW"`.
+`docker exec` does not inherit host env vars. Source the secrets from
+the worker once and keep them in host shell vars; re-inject with
+`-e VAR="$VAR"` on each `docker exec`.
 
 ```bash
 export PW=$(docker exec sentinel-worker-1 sh -lc '
   node -e "const u=new URL(process.env.REDIS_URL); \
            process.stdout.write(decodeURIComponent(u.password||\"\"))"')
-echo "password length: ${#PW}"   # sanity: non-zero
-
-# Sentinel's Postgres db + user (shared-postgres-1 hosts multiple DBs;
-# POSTGRES_DB inside the container defaults to chainalert, not ours)
 export DB_NAME=$(docker exec sentinel-worker-1 sh -lc '
   node -e "const u=new URL(process.env.DATABASE_URL); \
            process.stdout.write(u.pathname.replace(/^\//,\"\"))"')
 export DB_USER=$(docker exec sentinel-worker-1 sh -lc '
   node -e "const u=new URL(process.env.DATABASE_URL); \
            process.stdout.write(decodeURIComponent(u.username||\"\"))"')
-echo "db: $DB_NAME  user: $DB_USER"
-```
+echo "redis-pw len: ${#PW}  db: $DB_NAME  user: $DB_USER"
 
-Sanity ping:
-
-```bash
+# Sanity ping
 docker exec -e PW="$PW" shared-redis-1 sh -lc \
   'redis-cli -a "$PW" --no-auth-warning PING'
 ```
 
-Must print `PONG`. If it prints `WRONGPASS`, the worker's `REDIS_URL`
-and the redis container's `--requirepass` disagree — fix deployment
-before going further.
+## 1. PR #1 post-deploy verification — retention drains in one job
 
-## 1. Dry-run (counts rows, deletes nothing)
+The handler used to read `rowCount` (pg-driver field) on a
+postgres-js result that exposes `count`. `batchDeleted` was always 0,
+the loop exited after one iteration, `Retention cleanup complete`
+never logged. The fix at `apps/worker/src/handlers/data-retention.ts:313-314`
+reads `count` first with a `rowCount` fallback for test compat.
 
-> **Why `-w /app/apps/worker`?** The prod image uses pnpm, which does
-> not hoist `bullmq` to `/app/node_modules`. It lives at
-> `/app/apps/worker/node_modules/bullmq`. Running `node` from the
-> worker package directory puts that path on Node's resolution chain.
-
-```bash
-docker exec -w /app/apps/worker sentinel-worker-1 node -e '
-const { Queue } = require("bullmq");
-const u = new URL(process.env.REDIS_URL);
-const q = new Queue("deferred", { connection: {
-  host: u.hostname,
-  port: Number(u.port) || 6379,
-  username: u.username || undefined,
-  password: decodeURIComponent(u.password || "") || undefined,
-  tls: u.protocol === "rediss:" ? {} : undefined,
-}});
-q.add("platform.data.retention", {
-  policies: [{
-    table: "events",
-    timestampColumn: "received_at",
-    retentionDays: 1,
-    filter: "module_id = \x27aws\x27",
-    preserveIf: [
-      { kind: "referenced_by", table: "alerts", column: "event_id" },
-      { kind: "within_correlation_window" }
-    ],
-    dryRun: true
-  }]
-}, { removeOnComplete: true, removeOnFail: 100 })
-  .then(j => { console.log("enqueued", j.id); return q.close(); })
-  .then(() => process.exit(0))
-  .catch(e => { console.error(e); process.exit(1); });
-'
-```
-
-Tail both replicas:
-
-```bash
-docker logs sentinel-worker-1 --since 2m -f 2>&1 | grep -iE 'retention|wouldDelete'
-docker logs sentinel-worker-2 --since 2m -f 2>&1 | grep -iE 'retention|wouldDelete'
-```
-
-## 2. Real run
-
-Same command as §1 with the `dryRun: true` line removed. On success
-the handler emits `Retention cleanup complete` with `deleted: N` —
-**only if N > 0** (`data-retention.ts:317`).
-
-## 3. Tailing the real run
-
-```bash
-docker logs sentinel-worker-1 --since 10m -f 2>&1 | grep -iE 'retention|data-retention'
-docker logs sentinel-worker-2 --since 10m -f 2>&1 | grep -iE 'retention|data-retention'
-```
-
-Success line:
-
-```
-{"level":30,"component":"data-retention","table":"events","deleted":<N>,"retentionDays":1,"msg":"Retention cleanup complete"}
-```
-
-Widen grep if nothing shows:
-
-```bash
-docker logs sentinel-worker-1 --since 10m 2>&1 | grep -iE 'retention|failed|error'
-docker logs sentinel-worker-2 --since 10m 2>&1 | grep -iE 'retention|failed|error'
-```
-
-## 4. Is the job being processed?
-
-Run `§0` first to set `$PW`. Then the full triage block — paste
-verbatim:
-
-```bash
-echo '== queue state =='
-docker exec -e PW="$PW" shared-redis-1 sh -lc '
-  for s in wait active; do
-    echo -n "$s: "; redis-cli -a "$PW" --no-auth-warning LLEN bull:deferred:$s
-  done
-  for s in completed failed delayed; do
-    echo -n "$s: "; redis-cli -a "$PW" --no-auth-warning ZCARD bull:deferred:$s
-  done'
-
-echo
-echo '== job id counter (last enqueued) =='
-docker exec -e PW="$PW" shared-redis-1 sh -lc \
-  'redis-cli -a "$PW" --no-auth-warning GET bull:deferred:id'
-
-echo
-echo '== active job ids =='
-docker exec -e PW="$PW" shared-redis-1 sh -lc \
-  'redis-cli -a "$PW" --no-auth-warning LRANGE bull:deferred:active 0 -1'
-
-echo
-echo '== recent failures (id + ts) =='
-docker exec -e PW="$PW" shared-redis-1 sh -lc \
-  'redis-cli -a "$PW" --no-auth-warning ZRANGE bull:deferred:failed 0 -1 WITHSCORES'
-```
-
-To inspect a specific job (substitute `<ID>`):
-
-```bash
-docker exec -e PW="$PW" shared-redis-1 sh -lc \
-  'redis-cli -a "$PW" --no-auth-warning HGETALL bull:deferred:<ID>'
-```
-
-Interpretation:
-
-- `wait > 0` → enqueued, no worker has pulled it.
-- `active > 0` → running now. `HGETALL` on the id shows `processedOn`.
-- all zero and counter advanced past the dry-run id → completed and
-  auto-removed (`removeOnComplete: true`).
-- all zero and counter **unchanged** → `q.add` never executed. Re-run
-  §1/§2 and confirm stdout prints `enqueued <N>`.
-- `failed > 0` → `HGETALL bull:deferred:<ID>` and read `failedReason`.
-
-### Postgres side
-
-Live DELETEs in flight:
-
-```bash
-docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
-  'psql -U "$DBU" -d "$DB" -c "
-     SELECT pid, state, now() - query_start AS age, left(query, 120) AS q
-     FROM pg_stat_activity
-     WHERE query ILIKE '\''%DELETE FROM%events%'\''
-        OR query ILIKE '\''%events%module_id%aws%'\''
-     ORDER BY query_start;"'
-```
-
-Row count sanity:
-
-```bash
-docker exec shared-postgres-1 sh -lc \
-  'psql -U $POSTGRES_USER -d $POSTGRES_DB -c "
-     SELECT count(*) FROM events WHERE module_id='\''aws'\'';"'
-```
-
-### Worker-level pickup
-
-```bash
-docker logs sentinel-worker-1 --since 15m 2>&1 | grep -iE 'deferred|job|platform\.data'
-docker logs sentinel-worker-2 --since 15m 2>&1 | grep -iE 'deferred|job|platform\.data'
-```
-
-## 5. Atomic re-run + observe
-
-`removeOnComplete: true` erases a succeeded job on finish, so if we
-enqueue, look away, and then check state, a silent deleted-zero run
-looks identical to "never enqueued". Swap `removeOnComplete` off for
-this run so the completed entry sticks around for inspection.
-
-Run §0 first (exports `PW`). Then paste this block whole:
-
-```bash
-echo '== before: row count =='
-docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
-  'psql -U "$DBU" -d "$DB" -tAc "
-     SELECT count(*) FROM events WHERE module_id='\''aws'\'';"'
-
-echo '== before: counter =='
-docker exec -e PW="$PW" shared-redis-1 sh -lc \
-  'redis-cli -a "$PW" --no-auth-warning GET bull:deferred:id'
-
-echo '== enqueue real job =='
-ENQ_OUT=$(docker exec -w /app/apps/worker sentinel-worker-1 node -e '
-const { Queue } = require("bullmq");
-const u = new URL(process.env.REDIS_URL);
-const q = new Queue("deferred", { connection: {
-  host: u.hostname, port: Number(u.port) || 6379,
-  username: u.username || undefined,
-  password: decodeURIComponent(u.password || "") || undefined,
-  tls: u.protocol === "rediss:" ? {} : undefined,
-}});
-q.add("platform.data.retention", {
-  policies: [{
-    table: "events",
-    timestampColumn: "received_at",
-    retentionDays: 1,
-    filter: "module_id = \x27aws\x27",
-    preserveIf: [
-      { kind: "referenced_by", table: "alerts", column: "event_id" },
-      { kind: "within_correlation_window" }
-    ]
-  }]
-}, { removeOnComplete: false, removeOnFail: false })
-  .then(j => { console.log(j.id); return q.close(); })
-  .then(() => process.exit(0))
-  .catch(e => { console.error(e); process.exit(1); });
-' 2>&1)
-echo "enqueue output: $ENQ_OUT"
-JOB_ID=$(echo "$ENQ_OUT" | tail -1)
-
-echo
-echo "== waiting 30s for processing =="
-sleep 30
-
-echo '== queue state =='
-docker exec -e PW="$PW" shared-redis-1 sh -lc '
-  for s in wait active; do
-    echo -n "$s: "; redis-cli -a "$PW" --no-auth-warning LLEN bull:deferred:$s
-  done
-  for s in completed failed delayed; do
-    echo -n "$s: "; redis-cli -a "$PW" --no-auth-warning ZCARD bull:deferred:$s
-  done'
-
-echo
-echo "== job $JOB_ID full state =="
-docker exec -e PW="$PW" shared-redis-1 sh -lc \
-  "redis-cli -a \"\$PW\" --no-auth-warning HGETALL bull:deferred:$JOB_ID"
-
-echo
-echo '== after: row count =='
-docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
-  'psql -U "$DBU" -d "$DB" -tAc "
-     SELECT count(*) FROM events WHERE module_id='\''aws'\'';"'
-
-echo
-echo '== worker logs for this job =='
-docker logs sentinel-worker-1 --since 2m 2>&1 | grep -iE "retention|data-retention|$JOB_ID"
-docker logs sentinel-worker-2 --since 2m 2>&1 | grep -iE "retention|data-retention|$JOB_ID"
-```
-
-Interpreting `HGETALL bull:deferred:<id>`:
-
-- `processedOn` present, `finishedOn` present, `returnvalue` set,
-  `failedReason` absent → job completed successfully. If row count
-  didn't drop, the handler ran the DELETE and matched zero rows —
-  that's a real divergence from dry-run, dig into the predicate.
-- `failedReason` present → the error message is the whole story.
-- `processedOn` absent → worker never picked it up. Check
-  `docker ps` that both workers are healthy and that the `deferred`
-  Worker in `apps/worker/src/index.ts` is registered.
-
-## Pre-PR-#2 check — duplicate `(orgId, moduleId, externalId)` in `events`
-
-Before PR #2 adds a partial unique index on
-`(orgId, moduleId, externalId) WHERE external_id IS NOT NULL`, confirm
-no existing rows violate it. Run §0 to export `DB_NAME`/`DB_USER`,
-then on the prod host:
-
-```bash
-docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
-  'psql -U "$DBU" -d "$DB" -c "
-     SELECT org_id, module_id, external_id, COUNT(*) AS dup_count
-     FROM events
-     WHERE external_id IS NOT NULL
-     GROUP BY org_id, module_id, external_id
-     HAVING COUNT(*) > 1
-     ORDER BY dup_count DESC
-     LIMIT 50;"'
-```
-
-Zero rows returned → safe to add the unique index in PR #2 as-is.
-
-Non-zero → decide dedupe strategy (keep `MIN(id)` per group? newest?
-merge?) and clean up before the migration, or fold the cleanup into
-Migration A as a pre-step before `CREATE UNIQUE INDEX`.
-
-Total-duplicate-rows count (one number, useful for sizing):
-
-```bash
-docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
-  'psql -U "$DBU" -d "$DB" -tAc "
-     SELECT COUNT(*) - COUNT(DISTINCT (org_id, module_id, external_id))
-     FROM events WHERE external_id IS NOT NULL;"'
-```
-
-Per-module breakdown (which modules have the problem, if any):
-
-```bash
-docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
-  'psql -U "$DBU" -d "$DB" -c "
-     SELECT module_id,
-            COUNT(*) - COUNT(DISTINCT (org_id, external_id)) AS extra_rows
-     FROM events WHERE external_id IS NOT NULL
-     GROUP BY module_id
-     ORDER BY extra_rows DESC;"'
-```
-
-## Post-deploy smoke — confirm the `count` fix landed
-
-After the PR #1 deploy, a single retention job should drain the **full
-eligible set** in one run (not just one 1000-row batch). On the prod
-host, run §0 to export `PW`/`DB_NAME`/`DB_USER`, then:
+Confirm by enqueueing one job and watching it drain a full backlog:
 
 ```bash
 BEFORE=$(docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
@@ -364,111 +80,125 @@ q.add("platform.data.retention", {
   .catch(e => { console.error(e); process.exit(1); });
 '
 
-# Job may run for minutes on large backlogs; poll every 10s until row
-# count stops dropping or the job leaves `active`.
+# Wait for the job to leave `active`, then check both replicas for the
+# completion log (only fires when deleted > 0 — pre-fix it never fired).
 for i in $(seq 1 60); do
   sleep 10
-  NOW=$(docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
-    'psql -U "$DBU" -d "$DB" -tAc "SELECT count(*) FROM events WHERE module_id='\''aws'\'';"' | tr -d ' ')
   ACTIVE=$(docker exec -e PW="$PW" shared-redis-1 sh -lc \
     'redis-cli -a "$PW" --no-auth-warning LLEN bull:deferred:active' | tr -d ' ')
+  NOW=$(docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
+    'psql -U "$DBU" -d "$DB" -tAc "SELECT count(*) FROM events WHERE module_id='\''aws'\'';"' | tr -d ' ')
   echo "t+$((i*10))s rows=$NOW active=$ACTIVE"
-  [ "$ACTIVE" = "0" ] && [ "$NOW" != "$BEFORE" ] && break
+  [ "$ACTIVE" = "0" ] && break
 done
 
-echo
-echo "== completion log (scan both replicas) =="
 docker logs sentinel-worker-1 --since 10m 2>&1 | grep -i 'Retention cleanup complete'
 docker logs sentinel-worker-2 --since 10m 2>&1 | grep -i 'Retention cleanup complete'
 ```
 
-Expected: one job, `deleted: <big number>` in the completion log
-(fix landed means the log fires at all), row count drops by the full
-eligible set (dry-run said 784k earlier; after §6 ran earlier it'll be
-smaller, but whatever's eligible should go in this one run).
+**Expected:** completion log fires with `deleted: <large N>`, row count
+drops by far more than 1000 in a single job. If the log doesn't fire
+or only ~1000 rows go, the deploy didn't pick up the handler change —
+check `docker inspect -f '{{.Created}}' sentinel-worker-1`.
 
-If instead you see row count drop by exactly 1000 and the completion
-log doesn't fire, the deploy didn't pick up the handler change —
-check that `sentinel-worker-1`/`-2` were recreated by the deploy
-(`docker inspect -f '{{.Created}}' sentinel-worker-1`).
+## 2. PR #2a post-deploy soak — three checks before PR #2b
 
-## 6. Drain loop — keep firing until row count stabilises
+Soak goal isn't "wait 24h" — it's verifying these three things. ~1-2h
+if you actively check; can be done overnight if you'd rather.
 
-Symptom: handler terminates after one batch (~959 rows) despite
-dry-run reporting 784k eligible. Likely cause: the `while
-(batchDeleted >= 1000)` loop condition in `data-retention.ts:315`
-is sensitive to any batch that returns fewer than 1000 rows (driver
-`rowCount` quirks with `DELETE…WHERE id IN (…)` under postgres-js, or
-MVCC visibility on concurrent inserts). Easy workaround while you
-investigate the handler: fire the job repeatedly from the host side
-until the row count stops dropping.
+### 2.1 No code path still writes to `aws_raw_events`
 
-Run §0 first (sets `PW`, `DB_NAME`, `DB_USER`). Then:
+After the deploy, `received_at` on `aws_raw_events` should never
+advance. Sample twice ~30 min apart:
 
 ```bash
-PREV=-1
-for i in $(seq 1 700); do
-  NOW=$(docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
-    'psql -U "$DBU" -d "$DB" -tAc "SELECT count(*) FROM events WHERE module_id='\''aws'\'';"')
-  echo "iter $i rows=$NOW"
-  if [ "$NOW" = "$PREV" ]; then
-    echo "stable — stopping"
-    break
-  fi
-  PREV=$NOW
-
-  docker exec -w /app/apps/worker sentinel-worker-1 node -e '
-const { Queue } = require("bullmq");
-const u = new URL(process.env.REDIS_URL);
-const q = new Queue("deferred", { connection: {
-  host: u.hostname, port: Number(u.port) || 6379,
-  username: u.username || undefined,
-  password: decodeURIComponent(u.password || "") || undefined,
-  tls: u.protocol === "rediss:" ? {} : undefined,
-}});
-q.add("platform.data.retention", {
-  policies: [{
-    table: "events", timestampColumn: "received_at", retentionDays: 1,
-    filter: "module_id = \x27aws\x27",
-    preserveIf: [
-      { kind: "referenced_by", table: "alerts", column: "event_id" },
-      { kind: "within_correlation_window" }
-    ]
-  }]
-}, { removeOnComplete: true, removeOnFail: 100 })
-  .then(() => q.close()).then(() => process.exit(0))
-  .catch(e => { console.error(e); process.exit(1); });
-' >/dev/null
-  sleep 2
-done
+docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
+  'psql -U "$DBU" -d "$DB" -tAc "
+     SELECT MAX(received_at) AS last_write,
+            NOW() - MAX(received_at) AS age,
+            COUNT(*) FILTER (WHERE received_at > NOW() - INTERVAL '\''5 minutes'\'') AS recent
+     FROM aws_raw_events;"'
 ```
 
-Each iteration enqueues one retention job, waits 2s for it to
-process, then re-counts. Stops when the count stops dropping (or hits
-200 iterations). If each iteration deletes ~959 you've confirmed the
-per-batch termination bug — fix in the handler afterwards (simplest:
-cap by a fixed iteration count, or re-query eligible count and loop
-while it's > 0).
+`recent = 0` and `last_write` not advancing between samples = no
+writers. If `recent > 0` after deploy time, something we missed is
+still inserting and PR #2b must not ship.
 
-## Inspecting the scheduler
+### 2.2 In-flight `aws.event.process` jobs have drained
+
+The new code stops enqueuing them; the drain shim in
+`modules/aws/src/handlers.ts:393-403` completes any that were already
+in the queue. Watch the `module-jobs` queue empty out:
 
 ```bash
-docker exec -e PW="$PW" shared-redis-1 sh -lc \
-  'redis-cli -a "$PW" --no-auth-warning ZRANGE bull:deferred:repeat 0 -1 WITHSCORES'
+docker exec -e PW="$PW" shared-redis-1 sh -lc '
+  for s in wait active; do
+    echo -n "module-jobs $s: "; redis-cli -a "$PW" --no-auth-warning LLEN bull:module-jobs:$s
+  done
+  for s in completed failed delayed; do
+    echo -n "module-jobs $s: "; redis-cli -a "$PW" --no-auth-warning ZCARD bull:module-jobs:$s
+  done'
 ```
 
-Score = next-fire epoch-ms. Stale
-`bull:deferred:repeat:daily-retention:<ts>` keys predating commit
-`7e0ff37` are orphan payload entries from the old scheduler template
-and safe to `DEL`.
+`wait` and `active` near 0 (other modules' jobs may still be there —
+check the failed list for any new `aws.event.process` failures with
+`ZRANGE bull:module-jobs:failed 0 -1 WITHSCORES`; should be none).
 
-## Notes
+### 2.3 Read paths don't regress
 
-- **Single-policy payload.** The scheduled job carries ~14 policies;
-  this manual job runs only the AWS-events policy.
-- **Filter escaping.** `\x27` is `'`; avoids nested-quote issues in
-  `-e '…'`.
-- **`removeOnComplete: true`** keeps the diagnostic out of the
-  completed list.
-- **No total row cap.** 1000-row batches in a tight `do…while` loop
-  until drained — holds the `deferred` slot the whole time.
+Click through these in the UI (all should return data and respond
+fast):
+
+- `/aws/events` — list, filter by integration, search by event name
+- `/aws/integrations` — accounts shown per integration
+- `/aws/overview` — total events + error counts non-zero
+- `/events` (global) — AWS rows render, payload tree expands
+- MCP tools (or the analytics endpoints they wrap):
+  - `aws-query-events`, `aws-principal-activity`, `aws-resource-history`,
+    `aws-error-patterns`, `aws-top-actors`, `aws-account-summary`
+
+```bash
+# Check API error rate over the last hour
+docker logs sentinel-api --since 1h 2>&1 | grep -iE 'aws.*error|aws.*500|aws-analytics' | head -20
+```
+
+## 3. PR #2b — drop the table
+
+After section 2 passes, PR #2b is mechanical:
+
+1. Delete `awsRawEvents` table definition from
+   `packages/db/schema/aws.ts:69-112` (the `pgTable` block + indexes).
+2. Remove `'aws_raw_events'` from `test/helpers/setup.ts:708`.
+3. `pnpm db:generate` → produces a `DROP INDEX … DROP TABLE
+   aws_raw_events;` migration.
+4. Review the SQL diff (should only touch `aws_raw_events` and its
+   indexes, nothing else).
+5. Commit. Wait for explicit push instruction.
+
+No code changes needed — handlers/router/analytics already off it as
+of PR #2a.
+
+## Pre-PR-#2 duplicate check (already cleared, kept for record)
+
+Before Migration 0005's partial unique index could apply, we
+confirmed no existing `(orgId, moduleId, externalId)` duplicates in
+`events`. Re-runnable sanity check:
+
+```bash
+docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
+  'psql -U "$DBU" -d "$DB" -tAc "
+     SELECT COUNT(*) - COUNT(DISTINCT (org_id, module_id, external_id))
+     FROM events WHERE external_id IS NOT NULL;"'
+```
+
+Returns `0` = no dupes. If non-zero appears later, the new
+`onConflictDoNothing()` ingest path is silently dropping a real event
+somewhere (or the index is being violated somehow).
+
+## Authentication note for redis-cli
+
+Every `redis-cli` invocation in this doc relies on `$PW` being
+exported by §0 and re-injected via `-e PW="$PW"`. `docker exec` does
+not inherit host env. Without `-e`, `redis-cli -a "$PW"` sees an
+empty/unset password inside the container and fails with
+`WRONGPASS`. Same pattern for `$DB_NAME` / `$DB_USER`.

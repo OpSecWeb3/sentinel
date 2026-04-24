@@ -705,7 +705,6 @@ end of dead code block */
  */
 const ALL_DATA_TABLES = [
   // AWS module
-  'aws_raw_events',
   'aws_integrations',
   // Chain module
   'chain_state_snapshots',
