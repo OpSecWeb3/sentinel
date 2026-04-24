@@ -310,7 +310,8 @@ export const dataRetentionHandler: JobHandler = {
             LIMIT 1000
           )
         `);
-        batchDeleted = Number((result as unknown as { rowCount?: number })?.rowCount ?? 0);
+        const rc = result as unknown as { count?: number; rowCount?: number };
+        batchDeleted = Number(rc.count ?? rc.rowCount ?? 0);
         totalDeleted += batchDeleted;
       } while (batchDeleted >= 1000);
 

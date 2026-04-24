@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { SearchInput } from "@/components/ui/search-input";
+import { PayloadTree } from "@/components/event-payload-tree";
 import {
   Table,
   TableBody,
@@ -450,9 +451,12 @@ function EventsPageInner() {
                                 [copy]
                               </button>
                             </div>
-                            <pre className="max-h-64 overflow-y-auto overflow-x-auto text-xs text-foreground">
-                              {JSON.stringify(event.payload, null, 2)}
-                            </pre>
+                            <div className="max-h-64 overflow-y-auto overflow-x-auto">
+                              <PayloadTree
+                                payload={event.payload}
+                                rootLabel={`event/${event.id.slice(0, 8)}/`}
+                              />
+                            </div>
                           </TableCell>
                         </TableRow>
                       )}
