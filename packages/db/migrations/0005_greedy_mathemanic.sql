@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "uq_events_org_module_external" ON "events" USING btree ("org_id","module_id","external_id") WHERE external_id IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "idx_events_aws_resources_gin" ON "events" USING gin ((payload -> 'resources') jsonb_path_ops) WHERE module_id = 'aws';

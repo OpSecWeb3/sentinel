@@ -472,8 +472,8 @@ describe('data-retention handler', () => {
   it('rejects preserveIf combined with useCtid', async () => {
     const job = mockJob({
       policies: [{
-        table: 'aws_raw_events',
-        timestampColumn: 'received_at',
+        table: 'chain_rpc_usage_hourly',
+        timestampColumn: 'bucket',
         retentionDays: 1,
         useCtid: true,
         preserveIf: [{ kind: 'referenced_by', table: 'alerts', column: 'event_id' }],
@@ -484,7 +484,7 @@ describe('data-retention handler', () => {
 
     expect(mockDb.execute).not.toHaveBeenCalled();
     expect(mockChildLogger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ table: 'aws_raw_events' }),
+      expect.objectContaining({ table: 'chain_rpc_usage_hourly' }),
       expect.stringContaining('preserveIf is not supported with useCtid'),
     );
   });

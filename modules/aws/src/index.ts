@@ -24,11 +24,6 @@ export const AwsModule: DetectionModule = {
   eventTypes,
   templates,
   retentionPolicies: [
-    // Raw CloudTrail event buffer: short-lived drill-down buffer backing the
-    // /aws/events UI. Slated for removal once the main /events payload view is
-    // sufficient; until then, 3 days is enough for alert drill-down without
-    // unbounded growth.
-    { table: 'aws_raw_events', timestampColumn: 'received_at', retentionDays: 3 },
     // Platform events for AWS: value-driven retention. The floor TTL is 1 day
     // for high-volume CloudTrail noise, but we preserve two classes of rows
     // indefinitely (within the broader 365-day alerts retention):

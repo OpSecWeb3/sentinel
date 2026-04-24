@@ -1,21 +1,22 @@
 /**
  * AWS module BullMQ job handlers.
  *
- * aws.sqs.poll       — polls an SQS queue for CloudTrail event notifications
- * aws.event.process  — parses and promotes a raw event to the platform events table
+ * aws.sqs.poll       — polls an SQS queue; normalises records and inserts
+ *                      directly into the platform `events` table
+ * aws.event.process  — drain shim for jobs enqueued by the prior raw-events
+ *                      pipeline; removed in a follow-up release
  * aws.poll-sweep     — scheduled sweep that enqueues poll jobs for due integrations
  */
 import type { Job } from 'bullmq';
 import { getDb, eq, sql, and, lte, or, isNull } from '@sentinel/db';
 import { events } from '@sentinel/db/schema/core';
-import { awsIntegrations, awsRawEvents } from '@sentinel/db/schema/aws';
+import { awsIntegrations } from '@sentinel/db/schema/aws';
 import { getQueue, QUEUE_NAMES, type JobHandler } from '@sentinel/shared/queue';
 import { captureException } from '@sentinel/shared/sentry';
 import { decrypt } from '@sentinel/shared/crypto';
 import { logger as rootLogger } from '@sentinel/shared/logger';
-import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
-import { normalizeCloudTrailEvent, extractPrincipal } from './normalizer.js';
+import { normalizeCloudTrailEvent } from './normalizer.js';
 
 const log = rootLogger.child({ component: 'aws' });
 
@@ -285,8 +286,6 @@ export const sqsPollHandler: JobHandler = {
       const messages = response.Messages ?? [];
       if (messages.length === 0) break;
 
-      const queue = getQueue(QUEUE_NAMES.MODULE_JOBS);
-
       for (const msg of messages) {
         if (!msg.Body || !msg.ReceiptHandle) continue;
 
@@ -322,17 +321,37 @@ export const sqsPollHandler: JobHandler = {
             records = parsed.records;
           }
 
+          const eventsQueue = getQueue(QUEUE_NAMES.EVENTS);
           for (const record of records) {
-            await storeRawEvent(db, integrationId, orgId, record);
-            const rawId = await getRawEventId(db, integrationId, record.eventID as string);
-            if (rawId) {
-              // BullMQ JSON-serializes job data; bigint is not JSON-serializable.
-              await queue.add('aws.event.process', { rawEventId: rawId.toString(), orgId }, {
-                removeOnComplete: { age: 3600 },
-                removeOnFail: { age: 86400 },
-              });
+            const normalized = normalizeCloudTrailEvent(record, orgId);
+            if (!normalized) continue;
+
+            // Stash the Sentinel-side integration id into the payload so
+            // /modules/aws/events can still filter by integration after the
+            // raw-events table was dropped. Underscore prefix to flag this as
+            // a Sentinel internal field rather than a CloudTrail one.
+            const payloadWithIntegration = {
+              ...(normalized.payload as Record<string, unknown>),
+              _integrationId: integrationId,
+            };
+
+            // Insert directly into the platform events table. SQS redeliveries
+            // land on the partial unique index (orgId, moduleId, externalId)
+            // and do nothing on conflict; `returning()` yields no row in that
+            // case, so we skip re-enqueueing `event.evaluate`.
+            const [event] = await db.insert(events).values({
+              orgId: normalized.orgId,
+              moduleId: normalized.moduleId,
+              eventType: normalized.eventType,
+              externalId: normalized.externalId,
+              payload: payloadWithIntegration,
+              occurredAt: normalized.occurredAt,
+            }).onConflictDoNothing().returning();
+
+            if (event) {
+              await eventsQueue.add('event.evaluate', { eventId: event.id });
+              processed++;
             }
-            processed++;
           }
 
           // Delete the message from the queue after successful processing
@@ -364,58 +383,23 @@ export const sqsPollHandler: JobHandler = {
 };
 
 // ---------------------------------------------------------------------------
-// aws.event.process — normalizes a raw event and promotes it to platform
+// aws.event.process — drain shim
 // ---------------------------------------------------------------------------
-
+// Prior to the aws_raw_events collapse, SQS poll enqueued one of these jobs
+// per record to read the raw row and promote it into the events table. New
+// ingestion inlines normalise+insert directly on the poll path, so the job
+// is no longer enqueued. This shim completes any jobs queued by the previous
+// worker version so they drain cleanly instead of failing into the DLQ.
+// Remove in a follow-up release after the table-drop migration ships.
 export const eventProcessHandler: JobHandler = {
   jobName: 'aws.event.process',
   queueName: QUEUE_NAMES.MODULE_JOBS,
 
   async process(job: Job) {
-    const { rawEventId, orgId } = job.data as { rawEventId: bigint | string; orgId: string };
-    const db = getDb();
-
-    const [raw] = await db
-      .select()
-      .from(awsRawEvents)
-      .where(eq(awsRawEvents.id, BigInt(rawEventId)))
-      .limit(1);
-
-    if (!raw || raw.promoted) return;
-
-    // Every raw CloudTrail event is forwarded to the platform `events` table so
-    // that detection rules, correlation rules, and retroactive backfills all see
-    // the full substrate. Lifecycle (how long this row survives) is owned by
-    // the retention layer: AWS events default to a 1-day TTL but are preserved
-    // when referenced by an alert or still inside an active correlation rule's
-    // lookback window. See modules/aws/src/index.ts retentionPolicies.
-    const payload = raw.rawPayload as Record<string, unknown>;
-    const normalized = normalizeCloudTrailEvent(payload, orgId);
-    if (!normalized) {
-      log.debug({ rawEventId }, 'Could not normalize CloudTrail event — skipping');
-      return;
-    }
-
-    // Write to platform events table for rule evaluation
-    const [event] = await db.insert(events).values({
-      orgId: normalized.orgId,
-      moduleId: normalized.moduleId,
-      eventType: normalized.eventType,
-      externalId: normalized.externalId,
-      payload: normalized.payload,
-      occurredAt: normalized.occurredAt,
-    }).returning();
-
-    // Mark raw event as promoted
-    await db.update(awsRawEvents)
-      .set({ promoted: true, platformEventId: event.id })
-      .where(eq(awsRawEvents.id, BigInt(rawEventId)));
-
-    // Enqueue rule evaluation
-    const eventsQueue = getQueue(QUEUE_NAMES.EVENTS);
-    await eventsQueue.add('event.evaluate', { eventId: event.id });
-
-    log.debug({ rawEventId, eventId: event.id, eventType: event.eventType }, 'Promoted CloudTrail event');
+    log.debug(
+      { rawEventId: (job.data as { rawEventId?: string } | null)?.rawEventId },
+      'aws.event.process drain shim — no-op',
+    );
   },
 };
 
@@ -529,88 +513,3 @@ function parseCloudTrailMessage(body: string): ParseResult {
   return { type: 'events', records: [] };
 }
 
-async function storeRawEvent(
-  db: ReturnType<typeof getDb>,
-  integrationId: string,
-  orgId: string,
-  record: Record<string, unknown>,
-): Promise<void> {
-  const principal = extractPrincipal(record);
-  // Native EventBridge events use 'id'; CloudTrail events use 'eventID'
-  // Deterministic fallback: derive an ID from content so duplicate processing
-  // of the same event hits the onConflictDoNothing() dedup correctly.
-  // Previously used `Date.now()-Math.random()` which created a new ID every time.
-  const eventId = (record.eventID ?? record.id ?? deterministicEventId(record)) as string;
-
-  // Upsert — skip if already stored (idempotent)
-  // Support both CloudTrail events and native EventBridge events
-  const isEventBridge = !record.eventName && record['detail-type'];
-  const eventName = isEventBridge
-    ? (record['detail-type'] as string)
-    : (record.eventName as string);
-  const eventSource = isEventBridge
-    ? (record.source as string ?? 'aws.events')
-    : (record.eventSource as string);
-  const awsRegion = (record.awsRegion ?? record.region ?? '') as string;
-  const eventTime = record.eventTime
-    ? new Date(record.eventTime as string)
-    : record.time
-      ? new Date(record.time as string)
-      : new Date();
-
-  await db.insert(awsRawEvents).values({
-    orgId,
-    integrationId,
-    cloudTrailEventId: eventId,
-    eventName,
-    eventSource,
-    eventVersion: record.eventVersion as string ?? null,
-    awsRegion,
-    principalId: principal.principalId,
-    userArn: principal.userArn,
-    accountId: (principal.accountId ?? record.account) as string ?? null,
-    userType: principal.userType,
-    sourceIpAddress: record.sourceIPAddress as string ?? null,
-    userAgent: record.userAgent as string ?? null,
-    errorCode: record.errorCode as string ?? null,
-    errorMessage: record.errorMessage as string ?? null,
-    resources: (record.resources as object) ?? null,
-    rawPayload: record,
-    eventTime,
-  }).onConflictDoNothing();
-}
-
-/**
- * Build a deterministic event ID from the record content so that duplicate
- * deliveries of the same event are de-duplicated by the DB unique constraint.
- */
-function deterministicEventId(record: Record<string, unknown>): string {
-  // Use fields that uniquely identify an EventBridge event even when 'id' is missing
-  const source = (record.source ?? record['detail-type'] ?? '') as string;
-  const time = (record.time ?? record.eventTime ?? '') as string;
-  const account = (record.account ?? '') as string;
-  const detail = record.detail ? JSON.stringify(record.detail) : '';
-  const hash = createHash('sha256')
-    .update(`${source}|${time}|${account}|${detail}`)
-    .digest('hex')
-    .slice(0, 24);
-  return `eb-${hash}`;
-}
-
-async function getRawEventId(
-  db: ReturnType<typeof getDb>,
-  integrationId: string,
-  cloudTrailEventId: string,
-): Promise<bigint | null> {
-  const [row] = await db
-    .select({ id: awsRawEvents.id })
-    .from(awsRawEvents)
-    .where(
-      and(
-        eq(awsRawEvents.integrationId, integrationId),
-        eq(awsRawEvents.cloudTrailEventId, cloudTrailEventId),
-      ),
-    )
-    .limit(1);
-  return row?.id ?? null;
-}

@@ -33,7 +33,6 @@ const BASE_ALLOWED_TABLES: ReadonlySet<string> = new Set([
   'alerts',
   'notification_deliveries',
   'sessions',
-  'aws_raw_events',
   // Infra module tables
   'infra_reachability_checks',
   'infra_snapshots',

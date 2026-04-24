@@ -146,6 +146,17 @@ export const events = pgTable('events', {
   index('idx_events_type').on(t.eventType),
   index('idx_events_external').on(t.externalId),
   index('idx_events_received_at').on(t.receivedAt),
+  // Dedup guard: SQS / webhook redeliveries must not double-insert. Partial
+  // because not every module populates external_id.
+  uniqueIndex('uq_events_org_module_external')
+    .on(t.orgId, t.moduleId, t.externalId)
+    .where(sql`external_id IS NOT NULL`),
+  // Backs AWS analytics `payload->'resources' @> '[{"ARN":…}]'` containment
+  // queries after the aws_raw_events collapse. Scoped to AWS to keep the
+  // index lean — other modules don't use a `resources` key.
+  index('idx_events_aws_resources_gin')
+    .using('gin', sql`(payload -> 'resources') jsonb_path_ops`)
+    .where(sql`module_id = 'aws'`),
 ]);
 
 export const alerts = pgTable('alerts', {

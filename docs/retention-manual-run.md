@@ -283,6 +283,115 @@ Interpreting `HGETALL bull:deferred:<id>`:
   `docker ps` that both workers are healthy and that the `deferred`
   Worker in `apps/worker/src/index.ts` is registered.
 
+## Pre-PR-#2 check — duplicate `(orgId, moduleId, externalId)` in `events`
+
+Before PR #2 adds a partial unique index on
+`(orgId, moduleId, externalId) WHERE external_id IS NOT NULL`, confirm
+no existing rows violate it. Run §0 to export `DB_NAME`/`DB_USER`,
+then on the prod host:
+
+```bash
+docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
+  'psql -U "$DBU" -d "$DB" -c "
+     SELECT org_id, module_id, external_id, COUNT(*) AS dup_count
+     FROM events
+     WHERE external_id IS NOT NULL
+     GROUP BY org_id, module_id, external_id
+     HAVING COUNT(*) > 1
+     ORDER BY dup_count DESC
+     LIMIT 50;"'
+```
+
+Zero rows returned → safe to add the unique index in PR #2 as-is.
+
+Non-zero → decide dedupe strategy (keep `MIN(id)` per group? newest?
+merge?) and clean up before the migration, or fold the cleanup into
+Migration A as a pre-step before `CREATE UNIQUE INDEX`.
+
+Total-duplicate-rows count (one number, useful for sizing):
+
+```bash
+docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
+  'psql -U "$DBU" -d "$DB" -tAc "
+     SELECT COUNT(*) - COUNT(DISTINCT (org_id, module_id, external_id))
+     FROM events WHERE external_id IS NOT NULL;"'
+```
+
+Per-module breakdown (which modules have the problem, if any):
+
+```bash
+docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
+  'psql -U "$DBU" -d "$DB" -c "
+     SELECT module_id,
+            COUNT(*) - COUNT(DISTINCT (org_id, external_id)) AS extra_rows
+     FROM events WHERE external_id IS NOT NULL
+     GROUP BY module_id
+     ORDER BY extra_rows DESC;"'
+```
+
+## Post-deploy smoke — confirm the `count` fix landed
+
+After the PR #1 deploy, a single retention job should drain the **full
+eligible set** in one run (not just one 1000-row batch). On the prod
+host, run §0 to export `PW`/`DB_NAME`/`DB_USER`, then:
+
+```bash
+BEFORE=$(docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
+  'psql -U "$DBU" -d "$DB" -tAc "SELECT count(*) FROM events WHERE module_id='\''aws'\'';"' | tr -d ' ')
+echo "before: $BEFORE"
+
+docker exec -w /app/apps/worker sentinel-worker-1 node -e '
+const { Queue } = require("bullmq");
+const u = new URL(process.env.REDIS_URL);
+const q = new Queue("deferred", { connection: {
+  host: u.hostname, port: Number(u.port) || 6379,
+  username: u.username || undefined,
+  password: decodeURIComponent(u.password || "") || undefined,
+  tls: u.protocol === "rediss:" ? {} : undefined,
+}});
+q.add("platform.data.retention", {
+  policies: [{
+    table: "events", timestampColumn: "received_at", retentionDays: 1,
+    filter: "module_id = \x27aws\x27",
+    preserveIf: [
+      { kind: "referenced_by", table: "alerts", column: "event_id" },
+      { kind: "within_correlation_window" }
+    ]
+  }]
+}, { removeOnComplete: true, removeOnFail: 100 })
+  .then(j => { console.log("enqueued", j.id); return q.close(); })
+  .then(() => process.exit(0))
+  .catch(e => { console.error(e); process.exit(1); });
+'
+
+# Job may run for minutes on large backlogs; poll every 10s until row
+# count stops dropping or the job leaves `active`.
+for i in $(seq 1 60); do
+  sleep 10
+  NOW=$(docker exec -e DB="$DB_NAME" -e DBU="$DB_USER" shared-postgres-1 sh -lc \
+    'psql -U "$DBU" -d "$DB" -tAc "SELECT count(*) FROM events WHERE module_id='\''aws'\'';"' | tr -d ' ')
+  ACTIVE=$(docker exec -e PW="$PW" shared-redis-1 sh -lc \
+    'redis-cli -a "$PW" --no-auth-warning LLEN bull:deferred:active' | tr -d ' ')
+  echo "t+$((i*10))s rows=$NOW active=$ACTIVE"
+  [ "$ACTIVE" = "0" ] && [ "$NOW" != "$BEFORE" ] && break
+done
+
+echo
+echo "== completion log (scan both replicas) =="
+docker logs sentinel-worker-1 --since 10m 2>&1 | grep -i 'Retention cleanup complete'
+docker logs sentinel-worker-2 --since 10m 2>&1 | grep -i 'Retention cleanup complete'
+```
+
+Expected: one job, `deleted: <big number>` in the completion log
+(fix landed means the log fires at all), row count drops by the full
+eligible set (dry-run said 784k earlier; after §6 ran earlier it'll be
+smaller, but whatever's eligible should go in this one run).
+
+If instead you see row count drop by exactly 1000 and the completion
+log doesn't fire, the deploy didn't pick up the handler change —
+check that `sentinel-worker-1`/`-2` were recreated by the deploy
+(`docker inspect -f '{{.Created}}' sentinel-worker-1`).
+
 ## 6. Drain loop — keep firing until row count stabilises
 
 Symptom: handler terminates after one batch (~959 rows) despite

@@ -1,12 +1,14 @@
 /**
  * AWS analytics routes — read-only CloudTrail intelligence for MCP tools.
- * All queries scope by orgId on aws_raw_events.org_id.
+ * Reads the platform `events` table scoped to module_id='aws'. After the
+ * aws_raw_events collapse all CloudTrail JSON lives in `events.payload`.
  */
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '@sentinel/db';
-import { eq, and, gte, lte, sql, desc, count, isNotNull } from '@sentinel/db';
-import { awsRawEvents, awsIntegrations } from '@sentinel/db/schema/aws';
+import { eq, and, gte, lte, sql, desc, count } from '@sentinel/db';
+import { events } from '@sentinel/db/schema/core';
+import { awsIntegrations } from '@sentinel/db/schema/aws';
 import type { AppEnv } from '@sentinel/shared/hono-types';
 import { requireAuth, requireOrg } from '../middleware/rbac.js';
 import { requireScope } from '../middleware/scope.js';
@@ -16,7 +18,25 @@ const router = new Hono<AppEnv>();
 router.use('*', requireAuth, requireOrg);
 
 // ---------------------------------------------------------------------------
-// GET /aws/events — query raw CloudTrail events
+// JSONB extraction helpers — keep field paths in one place so route handlers
+// stay readable and CloudTrail/EventBridge dual-shape handling lives here.
+// ---------------------------------------------------------------------------
+
+const F = {
+  eventName: sql<string | null>`COALESCE(${events.payload}->>'eventName', ${events.payload}->>'detail-type')`,
+  eventSource: sql<string | null>`COALESCE(${events.payload}->>'eventSource', ${events.payload}->>'source')`,
+  awsRegion: sql<string | null>`COALESCE(${events.payload}->>'awsRegion', ${events.payload}->>'region')`,
+  principalId: sql<string | null>`${events.payload}->'userIdentity'->>'principalId'`,
+  userArn: sql<string | null>`${events.payload}->'userIdentity'->>'arn'`,
+  userType: sql<string | null>`${events.payload}->'userIdentity'->>'type'`,
+  accountId: sql<string | null>`COALESCE(${events.payload}->>'recipientAccountId', ${events.payload}->>'account')`,
+  sourceIpAddress: sql<string | null>`${events.payload}->>'sourceIPAddress'`,
+  errorCode: sql<string | null>`${events.payload}->>'errorCode'`,
+  resources: sql<unknown>`${events.payload}->'resources'`,
+};
+
+// ---------------------------------------------------------------------------
+// GET /aws/events — query AWS CloudTrail events
 // ---------------------------------------------------------------------------
 
 const awsEventsSchema = z.object({
@@ -38,52 +58,56 @@ router.get('/events', requireScope('api:read'), validate('query', awsEventsSchem
   const orgId = c.get('orgId');
   const db = getDb();
 
-  const conditions = [eq(awsRawEvents.orgId, orgId)];
+  const conditions = [eq(events.orgId, orgId), eq(events.moduleId, 'aws')];
   if (query.search) {
     const escaped = query.search.replace(/[%_\\]/g, (ch) => `\\${ch}`);
     const term = `%${escaped}%`;
     conditions.push(sql`(
-      ${awsRawEvents.eventName} ILIKE ${term}
-      OR ${awsRawEvents.eventSource} ILIKE ${term}
-      OR ${awsRawEvents.principalId} ILIKE ${term}
-      OR ${awsRawEvents.userArn} ILIKE ${term}
-      OR ${awsRawEvents.sourceIpAddress} ILIKE ${term}
-      OR ${awsRawEvents.errorCode} ILIKE ${term}
+      ${events.payload}->>'eventName' ILIKE ${term}
+      OR ${events.payload}->>'eventSource' ILIKE ${term}
+      OR ${events.payload}->'userIdentity'->>'principalId' ILIKE ${term}
+      OR ${events.payload}->'userIdentity'->>'arn' ILIKE ${term}
+      OR ${events.payload}->>'sourceIPAddress' ILIKE ${term}
+      OR ${events.payload}->>'errorCode' ILIKE ${term}
     )`);
   }
-  if (query.eventName) conditions.push(eq(awsRawEvents.eventName, query.eventName));
-  if (query.eventSource) conditions.push(eq(awsRawEvents.eventSource, query.eventSource));
-  if (query.principalId) conditions.push(eq(awsRawEvents.principalId, query.principalId));
-  if (query.region) conditions.push(eq(awsRawEvents.awsRegion, query.region));
-  if (query.errorCode) conditions.push(eq(awsRawEvents.errorCode, query.errorCode));
-  if (query.from) conditions.push(gte(awsRawEvents.eventTime, new Date(query.from)));
-  if (query.to) conditions.push(lte(awsRawEvents.eventTime, new Date(query.to)));
+  if (query.eventName) conditions.push(sql`${events.payload}->>'eventName' = ${query.eventName}`);
+  if (query.eventSource) conditions.push(sql`${events.payload}->>'eventSource' = ${query.eventSource}`);
+  if (query.principalId) {
+    conditions.push(sql`${events.payload}->'userIdentity'->>'principalId' = ${query.principalId}`);
+  }
+  if (query.region) conditions.push(sql`${events.payload}->>'awsRegion' = ${query.region}`);
+  if (query.errorCode) conditions.push(sql`${events.payload}->>'errorCode' = ${query.errorCode}`);
+  if (query.from) conditions.push(gte(events.occurredAt, new Date(query.from)));
+  if (query.to) conditions.push(lte(events.occurredAt, new Date(query.to)));
   if (query.resourceArn) {
-    conditions.push(sql`${awsRawEvents.resources} @> ${JSON.stringify([{ ARN: query.resourceArn }])}`);
+    conditions.push(
+      sql`(${events.payload}->'resources') @> ${JSON.stringify([{ ARN: query.resourceArn }])}::jsonb`,
+    );
   }
 
   const offset = (query.page - 1) * query.limit;
   const [rows, [{ total }]] = await Promise.all([
     db.select({
-      id: awsRawEvents.id,
-      cloudTrailEventId: awsRawEvents.cloudTrailEventId,
-      eventName: awsRawEvents.eventName,
-      eventSource: awsRawEvents.eventSource,
-      awsRegion: awsRawEvents.awsRegion,
-      principalId: awsRawEvents.principalId,
-      userArn: awsRawEvents.userArn,
-      accountId: awsRawEvents.accountId,
-      sourceIpAddress: awsRawEvents.sourceIpAddress,
-      errorCode: awsRawEvents.errorCode,
-      resources: awsRawEvents.resources,
-      eventTime: awsRawEvents.eventTime,
+      id: events.id,
+      cloudTrailEventId: events.externalId,
+      eventName: F.eventName,
+      eventSource: F.eventSource,
+      awsRegion: F.awsRegion,
+      principalId: F.principalId,
+      userArn: F.userArn,
+      accountId: F.accountId,
+      sourceIpAddress: F.sourceIpAddress,
+      errorCode: F.errorCode,
+      resources: F.resources,
+      eventTime: events.occurredAt,
     })
-      .from(awsRawEvents)
+      .from(events)
       .where(and(...conditions))
-      .orderBy(desc(awsRawEvents.eventTime))
+      .orderBy(desc(events.occurredAt))
       .limit(query.limit)
       .offset(offset),
-    db.select({ total: count() }).from(awsRawEvents).where(and(...conditions)),
+    db.select({ total: count() }).from(events).where(and(...conditions)),
   ]);
 
   return c.json({ data: rows, meta: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) } });
@@ -104,33 +128,37 @@ router.get('/principal/:principalId/activity', requireScope('api:read'), validat
   const orgId = c.get('orgId');
   const db = getDb();
 
-  const conditions = [eq(awsRawEvents.orgId, orgId), eq(awsRawEvents.principalId, principalId)];
-  if (query.from) conditions.push(gte(awsRawEvents.eventTime, new Date(query.from)));
-  if (query.to) conditions.push(lte(awsRawEvents.eventTime, new Date(query.to)));
+  const conditions = [
+    eq(events.orgId, orgId),
+    eq(events.moduleId, 'aws'),
+    sql`${events.payload}->'userIdentity'->>'principalId' = ${principalId}`,
+  ];
+  if (query.from) conditions.push(gte(events.occurredAt, new Date(query.from)));
+  if (query.to) conditions.push(lte(events.occurredAt, new Date(query.to)));
 
   const [timeline, summary] = await Promise.all([
     db.select({
-      id: awsRawEvents.id,
-      eventName: awsRawEvents.eventName,
-      eventSource: awsRawEvents.eventSource,
-      awsRegion: awsRawEvents.awsRegion,
-      sourceIpAddress: awsRawEvents.sourceIpAddress,
-      errorCode: awsRawEvents.errorCode,
-      resources: awsRawEvents.resources,
-      eventTime: awsRawEvents.eventTime,
+      id: events.id,
+      eventName: F.eventName,
+      eventSource: F.eventSource,
+      awsRegion: F.awsRegion,
+      sourceIpAddress: F.sourceIpAddress,
+      errorCode: F.errorCode,
+      resources: F.resources,
+      eventTime: events.occurredAt,
     })
-      .from(awsRawEvents)
+      .from(events)
       .where(and(...conditions))
-      .orderBy(desc(awsRawEvents.eventTime))
+      .orderBy(desc(events.occurredAt))
       .limit(200),
     db.select({
-      eventName: awsRawEvents.eventName,
-      errorCode: awsRawEvents.errorCode,
+      eventName: F.eventName,
+      errorCode: F.errorCode,
       count: count(),
     })
-      .from(awsRawEvents)
+      .from(events)
       .where(and(...conditions))
-      .groupBy(awsRawEvents.eventName, awsRawEvents.errorCode)
+      .groupBy(F.eventName, F.errorCode)
       .orderBy(desc(count()))
       .limit(1000),
   ]);
@@ -155,26 +183,27 @@ router.get('/resource-history', requireScope('api:read'), validate('query', reso
   const db = getDb();
 
   const conditions = [
-    eq(awsRawEvents.orgId, orgId),
-    sql`${awsRawEvents.resources} @> ${JSON.stringify([{ ARN: query.resourceArn }])}`,
+    eq(events.orgId, orgId),
+    eq(events.moduleId, 'aws'),
+    sql`(${events.payload}->'resources') @> ${JSON.stringify([{ ARN: query.resourceArn }])}::jsonb`,
   ];
-  if (query.from) conditions.push(gte(awsRawEvents.eventTime, new Date(query.from)));
-  if (query.to) conditions.push(lte(awsRawEvents.eventTime, new Date(query.to)));
+  if (query.from) conditions.push(gte(events.occurredAt, new Date(query.from)));
+  if (query.to) conditions.push(lte(events.occurredAt, new Date(query.to)));
 
   const rows = await db.select({
-    id: awsRawEvents.id,
-    eventName: awsRawEvents.eventName,
-    eventSource: awsRawEvents.eventSource,
-    principalId: awsRawEvents.principalId,
-    userArn: awsRawEvents.userArn,
-    awsRegion: awsRawEvents.awsRegion,
-    sourceIpAddress: awsRawEvents.sourceIpAddress,
-    errorCode: awsRawEvents.errorCode,
-    eventTime: awsRawEvents.eventTime,
+    id: events.id,
+    eventName: F.eventName,
+    eventSource: F.eventSource,
+    principalId: F.principalId,
+    userArn: F.userArn,
+    awsRegion: F.awsRegion,
+    sourceIpAddress: F.sourceIpAddress,
+    errorCode: F.errorCode,
+    eventTime: events.occurredAt,
   })
-    .from(awsRawEvents)
+    .from(events)
     .where(and(...conditions))
-    .orderBy(desc(awsRawEvents.eventTime))
+    .orderBy(desc(events.occurredAt))
     .limit(query.limit);
 
   return c.json({ resourceArn: query.resourceArn, count: rows.length, data: rows });
@@ -196,21 +225,22 @@ router.get('/error-patterns', requireScope('api:read'), validate('query', errorP
   const db = getDb();
 
   const conditions = [
-    eq(awsRawEvents.orgId, orgId),
-    isNotNull(awsRawEvents.errorCode),
+    eq(events.orgId, orgId),
+    eq(events.moduleId, 'aws'),
+    sql`${events.payload}->>'errorCode' IS NOT NULL`,
   ];
-  if (query.from) conditions.push(gte(awsRawEvents.eventTime, new Date(query.from)));
-  if (query.to) conditions.push(lte(awsRawEvents.eventTime, new Date(query.to)));
+  if (query.from) conditions.push(gte(events.occurredAt, new Date(query.from)));
+  if (query.to) conditions.push(lte(events.occurredAt, new Date(query.to)));
 
   const rows = await db.select({
-    principalId: awsRawEvents.principalId,
-    eventName: awsRawEvents.eventName,
-    errorCode: awsRawEvents.errorCode,
+    principalId: F.principalId,
+    eventName: F.eventName,
+    errorCode: F.errorCode,
     count: count(),
   })
-    .from(awsRawEvents)
+    .from(events)
     .where(and(...conditions))
-    .groupBy(awsRawEvents.principalId, awsRawEvents.eventName, awsRawEvents.errorCode)
+    .groupBy(F.principalId, F.eventName, F.errorCode)
     .orderBy(desc(count()))
     .limit(query.limit);
 
@@ -232,18 +262,18 @@ router.get('/top-actors', requireScope('api:read'), validate('query', topActorsS
   const orgId = c.get('orgId');
   const db = getDb();
 
-  const conditions = [eq(awsRawEvents.orgId, orgId)];
-  if (query.from) conditions.push(gte(awsRawEvents.eventTime, new Date(query.from)));
-  if (query.to) conditions.push(lte(awsRawEvents.eventTime, new Date(query.to)));
+  const conditions = [eq(events.orgId, orgId), eq(events.moduleId, 'aws')];
+  if (query.from) conditions.push(gte(events.occurredAt, new Date(query.from)));
+  if (query.to) conditions.push(lte(events.occurredAt, new Date(query.to)));
 
   const rows = await db.select({
-    principalId: awsRawEvents.principalId,
-    userType: awsRawEvents.userType,
+    principalId: F.principalId,
+    userType: F.userType,
     eventCount: count(),
   })
-    .from(awsRawEvents)
+    .from(events)
     .where(and(...conditions))
-    .groupBy(awsRawEvents.principalId, awsRawEvents.userType)
+    .groupBy(F.principalId, F.userType)
     .orderBy(desc(count()))
     .limit(query.limit);
 

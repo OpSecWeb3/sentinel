@@ -6,8 +6,8 @@ import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
 import { getDb, eq, and, desc, count, sql } from '@sentinel/db';
-import { awsIntegrations, awsRawEvents } from '@sentinel/db/schema/aws';
-import { detections } from '@sentinel/db/schema/core';
+import { awsIntegrations } from '@sentinel/db/schema/aws';
+import { detections, events } from '@sentinel/db/schema/core';
 import { encrypt, generateExternalId } from '@sentinel/shared/crypto';
 import { getQueue, QUEUE_NAMES } from '@sentinel/shared/queue';
 import { logger as rootLogger } from '@sentinel/shared/logger';
@@ -51,22 +51,34 @@ awsRouter.get('/integrations', async (c) => {
     .orderBy(desc(awsIntegrations.createdAt))
     .limit(1000);
 
-  // Fetch distinct account IDs seen in raw events per integration
-  const seenAccounts = await db
-    .select({
-      integrationId: awsRawEvents.integrationId,
-      accountId: awsRawEvents.accountId,
-    })
-    .from(awsRawEvents)
-    .where(and(eq(awsRawEvents.orgId, orgId), sql`${awsRawEvents.accountId} IS NOT NULL`))
-    .groupBy(awsRawEvents.integrationId, awsRawEvents.accountId)
-    .limit(1000);
+  // Distinct (integrationId, accountId) pairs seen in the events table.
+  // `_integrationId` is injected into payload at ingestion time
+  // (modules/aws/src/handlers.ts SQS poll loop) since the platform events
+  // schema has no native column for it. accountId comes from CloudTrail's
+  // `recipientAccountId` or EventBridge's `account`.
+  const seenAccounts = await db.execute<{ integration_id: string | null; account_id: string | null }>(sql`
+    SELECT DISTINCT
+      ${events.payload}->>'_integrationId' AS integration_id,
+      COALESCE(
+        ${events.payload}->>'recipientAccountId',
+        ${events.payload}->>'account'
+      ) AS account_id
+    FROM ${events}
+    WHERE ${events.orgId} = ${orgId}
+      AND ${events.moduleId} = 'aws'
+      AND COALESCE(
+        ${events.payload}->>'recipientAccountId',
+        ${events.payload}->>'account'
+      ) IS NOT NULL
+    LIMIT 1000
+  `);
 
-  const accountsByIntegration = seenAccounts.reduce<Record<string, string[]>>((acc, row) => {
-    if (!acc[row.integrationId]) acc[row.integrationId] = [];
-    if (row.accountId) acc[row.integrationId].push(row.accountId);
-    return acc;
-  }, {});
+  const accountsByIntegration: Record<string, string[]> = {};
+  for (const row of seenAccounts as Iterable<{ integration_id: string | null; account_id: string | null }>) {
+    if (!row.integration_id || !row.account_id) continue;
+    if (!accountsByIntegration[row.integration_id]) accountsByIntegration[row.integration_id] = [];
+    accountsByIntegration[row.integration_id].push(row.account_id);
+  }
 
   return c.json({
     data: rows.map((r) => ({
@@ -468,7 +480,9 @@ awsRouter.post('/integrations/:id/poll', async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /modules/aws/events — list raw CloudTrail events (short-retention buffer)
+// GET /modules/aws/events — list AWS events from the platform events table.
+// JSONB projections pull display fields out of `payload`. After the
+// aws_raw_events collapse this is the only AWS event store.
 // ---------------------------------------------------------------------------
 
 awsRouter.get('/events', async (c) => {
@@ -480,19 +494,23 @@ awsRouter.get('/events', async (c) => {
   const searchFilter = c.req.query('search');
 
   const db = getDb();
-  const conditions = [eq(awsRawEvents.orgId, orgId)];
-  if (integrationId) conditions.push(eq(awsRawEvents.integrationId, integrationId));
-  if (eventNameFilter) conditions.push(eq(awsRawEvents.eventName, eventNameFilter));
+  const conditions = [eq(events.orgId, orgId), eq(events.moduleId, 'aws')];
+  if (integrationId) {
+    conditions.push(sql`${events.payload}->>'_integrationId' = ${integrationId}`);
+  }
+  if (eventNameFilter) {
+    conditions.push(sql`${events.payload}->>'eventName' = ${eventNameFilter}`);
+  }
   if (searchFilter) {
     const escaped = searchFilter.replace(/[%_\\]/g, (ch) => `\\${ch}`);
     const term = `%${escaped}%`;
     conditions.push(sql`(
-      ${awsRawEvents.eventName} ILIKE ${term}
-      OR ${awsRawEvents.eventSource} ILIKE ${term}
-      OR ${awsRawEvents.principalId} ILIKE ${term}
-      OR ${awsRawEvents.userArn} ILIKE ${term}
-      OR ${awsRawEvents.sourceIpAddress} ILIKE ${term}
-      OR ${awsRawEvents.errorCode} ILIKE ${term}
+      ${events.payload}->>'eventName' ILIKE ${term}
+      OR ${events.payload}->>'eventSource' ILIKE ${term}
+      OR ${events.payload}->'userIdentity'->>'principalId' ILIKE ${term}
+      OR ${events.payload}->'userIdentity'->>'arn' ILIKE ${term}
+      OR ${events.payload}->>'sourceIPAddress' ILIKE ${term}
+      OR ${events.payload}->>'errorCode' ILIKE ${term}
     )`);
   }
 
@@ -500,39 +518,47 @@ awsRouter.get('/events', async (c) => {
 
   const [totalRow] = await db
     .select({ total: count() })
-    .from(awsRawEvents)
+    .from(events)
     .where(whereClause);
 
   const rows = await db
     .select({
-      id: awsRawEvents.id,
-      integrationId: awsRawEvents.integrationId,
-      cloudTrailEventId: awsRawEvents.cloudTrailEventId,
-      eventName: awsRawEvents.eventName,
-      eventSource: awsRawEvents.eventSource,
-      awsRegion: awsRawEvents.awsRegion,
-      principalId: awsRawEvents.principalId,
-      userArn: awsRawEvents.userArn,
-      userType: awsRawEvents.userType,
-      sourceIpAddress: awsRawEvents.sourceIpAddress,
-      errorCode: awsRawEvents.errorCode,
-      userAgent: awsRawEvents.userAgent,
-      eventVersion: awsRawEvents.eventVersion,
-      resources: awsRawEvents.resources,
-      eventTime: awsRawEvents.eventTime,
-      receivedAt: awsRawEvents.receivedAt,
-      promoted: awsRawEvents.promoted,
-      platformEventId: awsRawEvents.platformEventId,
+      id: events.id,
+      integrationId: sql<string | null>`${events.payload}->>'_integrationId'`,
+      cloudTrailEventId: events.externalId,
+      eventName: sql<string | null>`COALESCE(${events.payload}->>'eventName', ${events.payload}->>'detail-type')`,
+      eventSource: sql<string | null>`COALESCE(${events.payload}->>'eventSource', ${events.payload}->>'source')`,
+      awsRegion: sql<string | null>`COALESCE(${events.payload}->>'awsRegion', ${events.payload}->>'region')`,
+      principalId: sql<string | null>`${events.payload}->'userIdentity'->>'principalId'`,
+      userArn: sql<string | null>`${events.payload}->'userIdentity'->>'arn'`,
+      userType: sql<string | null>`${events.payload}->'userIdentity'->>'type'`,
+      sourceIpAddress: sql<string | null>`${events.payload}->>'sourceIPAddress'`,
+      errorCode: sql<string | null>`${events.payload}->>'errorCode'`,
+      userAgent: sql<string | null>`${events.payload}->>'userAgent'`,
+      eventVersion: sql<string | null>`${events.payload}->>'eventVersion'`,
+      resources: sql<unknown>`${events.payload}->'resources'`,
+      eventTime: events.occurredAt,
+      receivedAt: events.receivedAt,
     })
-    .from(awsRawEvents)
+    .from(events)
     .where(whereClause)
-    .orderBy(desc(awsRawEvents.receivedAt))
+    .orderBy(desc(events.receivedAt))
     .limit(limit)
     .offset((page - 1) * limit);
 
+  // `promoted` and `platformEventId` are vestigial from the raw-events era —
+  // every row in this list is by definition a platform event. Kept in the
+  // response shape so the existing UI types still match without a parallel
+  // PR; the badge they drive is harmless when always-true.
+  const data = rows.map((r) => ({
+    ...r,
+    promoted: true,
+    platformEventId: r.id,
+  }));
+
   const total = Number(totalRow?.total ?? 0);
   return c.json({
-    data: rows,
+    data,
     meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
   });
 });
@@ -552,13 +578,17 @@ awsRouter.get('/overview', async (c) => {
 
   const [eventCount] = await db
     .select({ total: count() })
-    .from(awsRawEvents)
-    .where(eq(awsRawEvents.orgId, orgId));
+    .from(events)
+    .where(and(eq(events.orgId, orgId), eq(events.moduleId, 'aws')));
 
   const [errorCount] = await db
     .select({ total: count() })
-    .from(awsRawEvents)
-    .where(and(eq(awsRawEvents.orgId, orgId), sql`error_code IS NOT NULL`));
+    .from(events)
+    .where(and(
+      eq(events.orgId, orgId),
+      eq(events.moduleId, 'aws'),
+      sql`${events.payload}->>'errorCode' IS NOT NULL`,
+    ));
 
   const integrationStatuses = await db
     .select({
