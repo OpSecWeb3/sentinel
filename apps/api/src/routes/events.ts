@@ -282,7 +282,24 @@ router.get('/:id', requireScope('api:read'), validate('param', idParamSchema), a
     .limit(1);
 
   if (!event) return c.json({ error: 'Event not found' }, 404);
-  return c.json({ data: event });
+
+  // Alerts that reference this event — drives the "linked alerts" section on
+  // the detail page. Bounded to keep the response small.
+  const linkedAlerts = await db.select({
+    id: alerts.id,
+    severity: alerts.severity,
+    title: alerts.title,
+    triggerType: alerts.triggerType,
+    notificationStatus: alerts.notificationStatus,
+    createdAt: alerts.createdAt,
+    detectionId: alerts.detectionId,
+  })
+    .from(alerts)
+    .where(and(eq(alerts.eventId, id), eq(alerts.orgId, orgId)))
+    .orderBy(desc(alerts.createdAt))
+    .limit(50);
+
+  return c.json({ data: event, alerts: linkedAlerts });
 });
 
 export { router as eventsRouter };

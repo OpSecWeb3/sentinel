@@ -1,15 +1,13 @@
 "use client";
 
-import { Fragment, Suspense, useCallback, useEffect, useState, useRef } from "react";
+import { Suspense, useCallback, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { apiFetch } from "@/lib/api";
-import { tableRowToggleKeyDown } from "@/lib/table-row-a11y";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { SearchInput } from "@/components/ui/search-input";
-import { PayloadTree } from "@/components/event-payload-tree";
 import {
   Table,
   TableBody,
@@ -123,7 +121,6 @@ function EventsPageInner() {
   const [loading, setLoading] = useState(true);
   const showLoading = useDelayedLoading(loading);
   const [error, setError] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Dynamic event type options (fetched once from /events/filters)
   const [eventTypes, setEventTypes] = useState<string[]>([]);
@@ -381,86 +378,59 @@ function EventsPageInner() {
               </TableHeader>
               <TableBody className="animate-stagger">
                 {data.map((event) => {
-                  const expanded = expandedId === event.id;
-                  const toggle = () =>
-                    setExpandedId(expanded ? null : event.id);
+                  const open = () => router.push(`/events/${event.id}`);
                   return (
-                    <Fragment key={event.id}>
-                      <TableRow
-                        role="button"
-                        tabIndex={0}
-                        aria-expanded={expanded}
-                        onClick={toggle}
-                        onKeyDown={(e) => tableRowToggleKeyDown(e, toggle)}
-                        className="group cursor-pointer border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    <TableRow
+                      key={event.id}
+                      role="link"
+                      tabIndex={0}
+                      onClick={open}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          open();
+                        }
+                      }}
+                      className="group cursor-pointer border border-transparent text-sm transition-colors hover:border-border hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <TableCell
+                        className={cn(
+                          "text-xs font-mono",
+                          MODULE_COLORS[event.moduleId] ?? "text-primary",
+                        )}
                       >
-                        <TableCell
-                          className={cn(
-                            "text-xs font-mono",
-                            MODULE_COLORS[event.moduleId] ?? "text-primary",
-                          )}
+                        [{event.moduleId}]
+                      </TableCell>
+                      <TableCell className="max-w-0 min-w-0">
+                        <span
+                          className="block truncate text-xs font-medium text-foreground"
+                          title={event.eventType}
                         >
-                          [{event.moduleId}]
-                        </TableCell>
-                        <TableCell className="max-w-0 min-w-0">
-                          <span
-                            className="block truncate text-xs font-medium text-foreground"
-                            title={event.eventType}
-                          >
-                            {event.eventType}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-0 min-w-0">
-                          <span
-                            className="block truncate text-xs text-muted-foreground"
-                            title={payloadSummary(event)}
-                          >
-                            {payloadSummary(event)}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          {event.alertCount > 0 ? (
-                            <span className="font-mono text-destructive">{event.alertCount}</span>
-                          ) : (
-                            <span className="text-muted-foreground/40">--</span>
-                          )}
-                        </TableCell>
-                        <TableCell
-                          className="text-xs text-muted-foreground"
-                          title={new Date(event.receivedAt).toLocaleString()}
+                          {event.eventType}
+                        </span>
+                      </TableCell>
+                      <TableCell className="max-w-0 min-w-0">
+                        <span
+                          className="block truncate text-xs text-muted-foreground"
+                          title={payloadSummary(event)}
                         >
-                          {timeAgo(event.receivedAt)}
-                        </TableCell>
-                      </TableRow>
-                      {expanded && (
-                        <TableRow className="border-0 hover:bg-transparent">
-                          <TableCell colSpan={5} className="border-l-2 border-primary/30 bg-muted/10 py-3 pl-4">
-                            <div className="flex items-center justify-between mb-2">
-                              <p className="text-xs text-muted-foreground">
-                                $ cat event/{event.id.slice(0, 8)}/payload.json
-                              </p>
-                              <button
-                                type="button"
-                                className="text-xs text-muted-foreground hover:text-primary transition-colors"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(
-                                    JSON.stringify(event.payload, null, 2),
-                                  );
-                                }}
-                              >
-                                [copy]
-                              </button>
-                            </div>
-                            <div className="max-h-64 overflow-y-auto overflow-x-auto">
-                              <PayloadTree
-                                payload={event.payload}
-                                rootLabel={`event/${event.id.slice(0, 8)}/`}
-                              />
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </Fragment>
+                          {payloadSummary(event)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {event.alertCount > 0 ? (
+                          <span className="font-mono text-destructive">{event.alertCount}</span>
+                        ) : (
+                          <span className="text-muted-foreground/40">--</span>
+                        )}
+                      </TableCell>
+                      <TableCell
+                        className="text-xs text-muted-foreground"
+                        title={new Date(event.receivedAt).toLocaleString()}
+                      >
+                        {timeAgo(event.receivedAt)}
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
               </TableBody>
